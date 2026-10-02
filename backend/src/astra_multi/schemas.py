@@ -61,6 +61,8 @@ class ModelResult:
     """Result from a model adapter call."""
 
     content: Any
-    usage: dict[str, int] | None = None
+    usage: dict[str, int | None] | None = None
     model_id: str = "fake-model"
-    attempts: int = 1
+    attempts: int | None = 1
+    provider: str = "fake"
+    latency_seconds: float | None = None

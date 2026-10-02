@@ -13,9 +13,15 @@ Môi trường cho các LLM coding phân tích độc lập, thảo luận có b
 
 ## Trạng thái
 
-P0 spike và P1 domain/persistence đã triển khai. P1 có canonical SQLite store, operation ledger, fenced leases và subprocess crash/recovery tests; xem [trạng thái kiểm chứng](IMPLEMENTATION_STATUS.md). P0.4 live provider vẫn thiếu API keys. UI và production orchestration/quality gate thuộc các phase sau.
+P0 spike và P1 domain/persistence đã triển khai. P1 có canonical SQLite store, operation ledger, fenced leases và subprocess crash/recovery tests; xem [trạng thái kiểm chứng](IMPLEMENTATION_STATUS.md). P0.4 đang được kiểm chứng qua profile xKiro và Windows native; direct OpenAI/Google live chưa chạy. UI và production orchestration/quality gate thuộc các phase sau.
 
 Để tiếp tục coding: đọc `IMPLEMENTATION_PLAN.md`, dùng public contracts P1 để triển khai **P2.1 / P3.1**.
+
+## API keys và provider tùy chỉnh
+
+Hỗ trợ profile OpenAI, Google và endpoint OpenAI-compatible với model/base URL riêng. API key lưu trong OS credential store (Windows Credential Manager, macOS Keychain, Linux Secret Service/KWallet); environment-only hỗ trợ key tạm thời. Không ghi key vào JSON cấu hình.
+
+Xem [hướng dẫn provider](docs/PROVIDER_CONFIGURATION.md) để cấu hình, rotate/xóa key và chạy live smoke bằng `python -m astra_multi.provider_smoke PROFILE`.
 
 Hướng đề xuất: **LangGraph + shared blackboard có cấu trúc + phản biện theo issue + quality gate bằng code**. Tái sử dụng framework ở những thành phần phù hợp; nghiệp vụ đảm bảo chất lượng kế hoạch được xây riêng.
 
