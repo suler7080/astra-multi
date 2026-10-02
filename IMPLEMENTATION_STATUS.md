@@ -6,9 +6,9 @@ Ngày khởi tạo: 01/10/2026.
 
 - Đã hoàn thành P0 spike — chứng minh runtime khả thi.
 - ADR-001 đã chốt: LangGraph 0.6.11.
-- 25 tests passed, 4 skipped (live provider — BLOCKED).
-- Phase đang triển khai: **P0 DONE** (trừ P0.4 live tests — BLOCKED).
-- Task tiếp theo: **P1.1**, theo [plan P1](plans/P1_DOMAIN_AND_PERSISTENCE.md).
+- P1 contracts, canonical SQLite store và recovery đã triển khai; 229 tests passed, 4 skipped (live provider — BLOCKED), lint/typecheck/build đạt trên Linux Python 3.11.
+- Phase hoàn thành: **P1 DONE**; P0.4 vẫn BLOCKED do thiếu API keys, không coi mock là bằng chứng provider thật.
+- Task tiếp theo: **P2.1 / P3.1**, dùng [public contracts](docs/P1_CONTRACTS.md); native Windows chưa được kiểm chứng trong phiên này.
 
 ## Task board
 
@@ -19,7 +19,11 @@ Ngày khởi tạo: 01/10/2026.
 | P0 | P0.3 | DONE | Checkpoint, interrupt/resume, recovery, 10 tests passed |
 | P0 | P0.4 | BLOCKED | Adapter code ready; live tests need API keys |
 | P0 | P0.5 | DONE | ADR-001, spike report, lockfile, handoff docs |
-| P1 | P1.1, P1.2, P1.3, P1.4, P1.5 | Tất cả TODO | |
+| P1 | P1.1 | DONE | Typed schemas v1, repo/greenfield fixtures, required fields/enums, refs/DAG, UTC, JSON samples |
+| P1 | P1.2 | DONE | Revision conflicts, transition tables, issue history/resolution/provenance, pending questions; FINAL dành P4 |
+| P1 | P1.3 | DONE | SQLite migration v1, atomic state/event/ledger, idempotency, hash artifacts và rollback |
+| P1 | P1.4 | DONE | Lease token/epoch fencing, heartbeat/takeover, subprocess kill/restart và contention; ADR-002 |
+| P1 | P1.5 | DONE | Repository protocols, checkpoint refs, sample client restart, schemas/samples, contracts docs; spike dùng domain models |
 | P2 | P2.1, P2.2, P2.3, P2.4, P2.5 | Tất cả TODO | |
 | P3 | P3.1, P3.2, P3.3, P3.4, P3.5 | Tất cả TODO | |
 | P4 | P4.1, P4.2, P4.3, P4.4 | Tất cả TODO | |
@@ -37,11 +41,27 @@ $env:PYTHONIOENCODING='utf-8'
 
 # Run workflow demo
 .venv\Scripts\python.exe -m astra_multi.demo
+
+# P1 public client (workspace mới) và schema exporter
+.venv\Scripts\python.exe -m astra_multi.persistence_demo .local\p1-client
+.venv\Scripts\python.exe -m astra_multi.domain.export_contracts .local\contracts
+```
+
+Lệnh đã kiểm chứng trong phiên P1 trên Linux, từ `backend`:
+
+```sh
+.venv/bin/ruff check src/astra_multi/domain src/astra_multi/persistence src/astra_multi/persistence_demo.py src/astra_multi/schemas.py src/astra_multi/fake_model.py src/astra_multi/workflow.py tests/unit tests/integration tests/recovery
+.venv/bin/mypy
+.venv/bin/python -m pytest tests/ -q
+.venv/bin/python -m astra_multi.persistence_demo .local/p1-client
+.venv/bin/python -m astra_multi.domain.export_contracts .local/contracts
+uv build --python .venv/bin/python
 ```
 
 ## Quyết định đã chốt
 
 - **ADR-001:** LangGraph 0.6.11 là orchestration runtime — [docs/adr/ADR-001-runtime.md](docs/adr/ADR-001-runtime.md)
+- **ADR-002:** Domain store canonical, ledger idempotency và fenced lease — [docs/adr/ADR-002-domain-persistence.md](docs/adr/ADR-002-domain-persistence.md)
 - **Package manager:** uv 0.12.4
 - **Checkpoint:** SQLite với WAL mode, `SqliteSaver(conn)` trực tiếp
 - **Pilot thresholds:** Chốt theo PLAN.md §12.2 (xem spike report)
@@ -106,3 +126,15 @@ $env:PYTHONIOENCODING='utf-8'
   - ADR chọn LangGraph ✓
   - Version locked ✓ (`requirements.lock`)
 - Task tiếp theo: P1.1
+
+### 2026-10-02 — P1.1–P1.5 — DONE
+
+- Contracts: `backend/src/astra_multi/domain/`; public schema version 1, stable IDs, UTC, explicit snapshot null cho greenfield, references và requirement/step/evidence validation; JSON Schema và samples tại `docs/contracts/`.
+- Policies: expected **run** revision trên commands; **plan** revision trên issue/proposal; issue history, independent review trên current newer plan hoặc requirement-change provenance; duplicate giữ blocker; terminal không resume; FINAL chỉ dành quality service P4.
+- Storage: `backend/src/astra_multi/persistence/`; migration v1, WAL/FULL, mutation + event + OperationRecord cùng transaction, unique `(run_id, node, logical_operation_id)`, event sequence riêng per run, filesystem artifact SHA-256/fsync/atomic replace.
+- Recovery: CheckpointBridge chỉ giữ refs; lease có token/epoch/expiry; heartbeat và takeover fence worker cũ. Subprocess bị kill sau mutation/event/ledger chưa commit rollback đủ; kill sau domain commit trước checkpoint rồi restart không tạo plan/event thứ hai. Hai subprocess tranh run chỉ một bên acquire thành công.
+- Handoff: `domain/repositories.py` protocols, `domain/fixtures.py`, `persistence_demo.py` tạo task/run, ghi issue/plan, đóng và reopen DB qua public ports; [contract document](docs/P1_CONTRACTS.md), [ADR-002](docs/adr/ADR-002-domain-persistence.md).
+- Verification: full suite **229 passed, 4 skipped**, một LangChain pending-deprecation warning; Ruff đạt trên toàn bộ source/test P1 và source P0 được sửa; strict mypy **13 source files**; P0 demo chạy thành công; sample client reopen thành công; exporter sinh JSON; wheel/sdist build thành công.
+- Bằng chứng: `tests/unit/test_domain.py` (schema/round-trip, transitions, invalid resolutions, refs, SDK independence), `tests/integration/test_storage.py` (real SQLite/fault injection/artifacts/migrations/lease/public client), `tests/recovery/test_crash.py` (process kill/restart/contention, real LangGraph SQLite checkpoint).
+- Giới hạn: Linux Python 3.11 đã kiểm chứng, Windows native chưa chạy; không tuyên bố exactly-once cho provider/tool ngoài DB. P0 spike vẫn dùng execution state/demo gate riêng, P3/P4 sẽ nối production orchestration/quality service vào canonical ports. P0.4 vẫn thiếu OPENAI_API_KEY và GOOGLE_API_KEY.
+- Task tiếp theo: P2.1 / P3.1. Blueprint setup đã được người dùng duyệt và lưu cho các phiên sau; snapshot build mới được kích hoạt.

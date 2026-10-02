@@ -1,0 +1,4234 @@
+{
+  "TaskSpec": {
+    "$defs": {
+      "Requirement": {
+        "additionalProperties": false,
+        "properties": {
+          "schema_version": {
+            "const": 1,
+            "default": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "id": {
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "title": "Id",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "text": {
+            "minLength": 1,
+            "title": "Text",
+            "type": "string"
+          },
+          "acceptance": {
+            "minLength": 1,
+            "title": "Acceptance",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "text",
+          "acceptance"
+        ],
+        "title": "Requirement",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "schema_version": {
+        "const": 1,
+        "default": 1,
+        "title": "Schema Version",
+        "type": "integer"
+      },
+      "id": {
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+        "title": "Id",
+        "type": "string"
+      },
+      "created_at": {
+        "format": "date-time",
+        "title": "Created At",
+        "type": "string"
+      },
+      "revision": {
+        "default": 1,
+        "minimum": 1,
+        "title": "Revision",
+        "type": "integer"
+      },
+      "goal": {
+        "minLength": 1,
+        "title": "Goal",
+        "type": "string"
+      },
+      "requirements": {
+        "items": {
+          "$ref": "#/$defs/Requirement"
+        },
+        "minItems": 1,
+        "title": "Requirements",
+        "type": "array"
+      },
+      "constraints": {
+        "items": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "title": "Constraints",
+        "type": "array"
+      },
+      "non_goals": {
+        "items": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "title": "Non Goals",
+        "type": "array"
+      },
+      "acceptance_criteria": {
+        "items": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "title": "Acceptance Criteria",
+        "type": "array"
+      },
+      "unknowns": {
+        "items": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "title": "Unknowns",
+        "type": "array"
+      }
+    },
+    "required": [
+      "id",
+      "goal",
+      "requirements"
+    ],
+    "title": "TaskSpec",
+    "type": "object"
+  },
+  "Run": {
+    "$defs": {
+      "Budget": {
+        "additionalProperties": false,
+        "properties": {
+          "schema_version": {
+            "const": 1,
+            "default": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "token_limit": {
+            "default": 0,
+            "minimum": 0,
+            "title": "Token Limit",
+            "type": "integer"
+          },
+          "cost_limit": {
+            "default": 0,
+            "minimum": 0,
+            "title": "Cost Limit",
+            "type": "number"
+          }
+        },
+        "title": "Budget",
+        "type": "object"
+      },
+      "RunPhase": {
+        "enum": [
+          "INTAKE",
+          "SNAPSHOT",
+          "INVESTIGATE",
+          "INDEPENDENT_ANALYSIS",
+          "PROPOSE",
+          "REVIEW",
+          "VERIFY",
+          "REVISE",
+          "QUALITY_GATE",
+          "EXPORT"
+        ],
+        "title": "RunPhase",
+        "type": "string"
+      },
+      "RunStatus": {
+        "enum": [
+          "RUNNING",
+          "WAITING_FOR_INPUT",
+          "FINAL",
+          "PARTIAL",
+          "FAILED",
+          "CANCELLED"
+        ],
+        "title": "RunStatus",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "schema_version": {
+        "const": 1,
+        "default": 1,
+        "title": "Schema Version",
+        "type": "integer"
+      },
+      "id": {
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+        "title": "Id",
+        "type": "string"
+      },
+      "created_at": {
+        "format": "date-time",
+        "title": "Created At",
+        "type": "string"
+      },
+      "task_id": {
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+        "title": "Task Id",
+        "type": "string"
+      },
+      "task_revision": {
+        "minimum": 1,
+        "title": "Task Revision",
+        "type": "integer"
+      },
+      "snapshot_id": {
+        "anyOf": [
+          {
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "title": "Snapshot Id"
+      },
+      "mode": {
+        "enum": [
+          "repo",
+          "greenfield"
+        ],
+        "title": "Mode",
+        "type": "string"
+      },
+      "revision": {
+        "default": 1,
+        "minimum": 1,
+        "title": "Revision",
+        "type": "integer"
+      },
+      "phase": {
+        "$ref": "#/$defs/RunPhase",
+        "default": "INTAKE"
+      },
+      "status": {
+        "$ref": "#/$defs/RunStatus",
+        "default": "RUNNING"
+      },
+      "stop_reason": {
+        "anyOf": [
+          {
+            "minLength": 1,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Stop Reason"
+      },
+      "config_hash": {
+        "pattern": "^[0-9a-f]{64}$",
+        "title": "Config Hash",
+        "type": "string"
+      },
+      "budget": {
+        "$ref": "#/$defs/Budget"
+      },
+      "updated_at": {
+        "format": "date-time",
+        "title": "Updated At",
+        "type": "string"
+      },
+      "parent_run_id": {
+        "anyOf": [
+          {
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Parent Run Id"
+      }
+    },
+    "required": [
+      "id",
+      "task_id",
+      "task_revision",
+      "snapshot_id",
+      "mode",
+      "config_hash"
+    ],
+    "title": "Run",
+    "type": "object"
+  },
+  "Snapshot": {
+    "additionalProperties": false,
+    "properties": {
+      "schema_version": {
+        "const": 1,
+        "default": 1,
+        "title": "Schema Version",
+        "type": "integer"
+      },
+      "id": {
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+        "title": "Id",
+        "type": "string"
+      },
+      "created_at": {
+        "format": "date-time",
+        "title": "Created At",
+        "type": "string"
+      },
+      "source_path": {
+        "minLength": 1,
+        "title": "Source Path",
+        "type": "string"
+      },
+      "commit_if_any": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Commit If Any"
+      },
+      "dirty": {
+        "default": false,
+        "title": "Dirty",
+        "type": "boolean"
+      },
+      "manifest_hash": {
+        "pattern": "^[0-9a-f]{64}$",
+        "title": "Manifest Hash",
+        "type": "string"
+      },
+      "file_hashes": {
+        "additionalProperties": {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "title": "File Hashes",
+        "type": "object"
+      },
+      "excluded_patterns": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Excluded Patterns",
+        "type": "array"
+      }
+    },
+    "required": [
+      "id",
+      "source_path",
+      "manifest_hash",
+      "file_hashes"
+    ],
+    "title": "Snapshot",
+    "type": "object"
+  },
+  "Claim": {
+    "additionalProperties": false,
+    "properties": {
+      "schema_version": {
+        "const": 1,
+        "default": 1,
+        "title": "Schema Version",
+        "type": "integer"
+      },
+      "id": {
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+        "title": "Id",
+        "type": "string"
+      },
+      "created_at": {
+        "format": "date-time",
+        "title": "Created At",
+        "type": "string"
+      },
+      "run_id": {
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+        "title": "Run Id",
+        "type": "string"
+      },
+      "text": {
+        "minLength": 1,
+        "title": "Text",
+        "type": "string"
+      },
+      "kind": {
+        "enum": [
+          "fact",
+          "assumption",
+          "proposal",
+          "unknown"
+        ],
+        "title": "Kind",
+        "type": "string"
+      },
+      "evidence_ids": {
+        "items": {
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+          "type": "string"
+        },
+        "title": "Evidence Ids",
+        "type": "array"
+      },
+      "snapshot_id": {
+        "anyOf": [
+          {
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "title": "Snapshot Id"
+      }
+    },
+    "required": [
+      "id",
+      "run_id",
+      "text",
+      "kind",
+      "snapshot_id"
+    ],
+    "title": "Claim",
+    "type": "object"
+  },
+  "Evidence": {
+    "$defs": {
+      "ArtifactRef": {
+        "additionalProperties": false,
+        "properties": {
+          "schema_version": {
+            "const": 1,
+            "default": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "content_hash": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Content Hash",
+            "type": "string"
+          },
+          "size": {
+            "minimum": 0,
+            "title": "Size",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "content_hash",
+          "size"
+        ],
+        "title": "ArtifactRef",
+        "type": "object"
+      },
+      "ValidationStatus": {
+        "enum": [
+          "NOT_RUN",
+          "PASS",
+          "FAIL"
+        ],
+        "title": "ValidationStatus",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "schema_version": {
+        "const": 1,
+        "default": 1,
+        "title": "Schema Version",
+        "type": "integer"
+      },
+      "id": {
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+        "title": "Id",
+        "type": "string"
+      },
+      "created_at": {
+        "format": "date-time",
+        "title": "Created At",
+        "type": "string"
+      },
+      "run_id": {
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+        "title": "Run Id",
+        "type": "string"
+      },
+      "source_type": {
+        "enum": [
+          "repo",
+          "tool",
+          "document",
+          "user"
+        ],
+        "title": "Source Type",
+        "type": "string"
+      },
+      "locator": {
+        "minLength": 1,
+        "title": "Locator",
+        "type": "string"
+      },
+      "content_hash": {
+        "pattern": "^[0-9a-f]{64}$",
+        "title": "Content Hash",
+        "type": "string"
+      },
+      "captured_at": {
+        "format": "date-time",
+        "title": "Captured At",
+        "type": "string"
+      },
+      "snapshot_id": {
+        "anyOf": [
+          {
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "title": "Snapshot Id"
+      },
+      "tool_call_id": {
+        "anyOf": [
+          {
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Tool Call Id"
+      },
+      "status": {
+        "$ref": "#/$defs/ValidationStatus",
+        "default": "NOT_RUN"
+      },
+      "artifact": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/ArtifactRef"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      }
+    },
+    "required": [
+      "id",
+      "run_id",
+      "source_type",
+      "locator",
+      "content_hash",
+      "captured_at",
+      "snapshot_id"
+    ],
+    "title": "Evidence",
+    "type": "object"
+  },
+  "Proposal": {
+    "additionalProperties": false,
+    "properties": {
+      "schema_version": {
+        "const": 1,
+        "default": 1,
+        "title": "Schema Version",
+        "type": "integer"
+      },
+      "id": {
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+        "title": "Id",
+        "type": "string"
+      },
+      "created_at": {
+        "format": "date-time",
+        "title": "Created At",
+        "type": "string"
+      },
+      "run_id": {
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+        "title": "Run Id",
+        "type": "string"
+      },
+      "author_role": {
+        "minLength": 1,
+        "title": "Author Role",
+        "type": "string"
+      },
+      "base_revision": {
+        "minimum": 0,
+        "title": "Base Revision",
+        "type": "integer"
+      },
+      "approach": {
+        "minLength": 1,
+        "title": "Approach",
+        "type": "string"
+      },
+      "alternatives": {
+        "items": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "title": "Alternatives",
+        "type": "array"
+      },
+      "tradeoffs": {
+        "items": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "title": "Tradeoffs",
+        "type": "array"
+      },
+      "claim_ids": {
+        "items": {
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+          "type": "string"
+        },
+        "title": "Claim Ids",
+        "type": "array"
+      },
+      "requirement_coverage": {
+        "patternProperties": {
+          "^[A-Za-z0-9][A-Za-z0-9_.:-]*$": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "propertyNames": {
+          "minLength": 1
+        },
+        "title": "Requirement Coverage",
+        "type": "object"
+      }
+    },
+    "required": [
+      "id",
+      "run_id",
+      "author_role",
+      "base_revision",
+      "approach"
+    ],
+    "title": "Proposal",
+    "type": "object"
+  },
+  "Issue": {
+    "$defs": {
+      "IssueHistory": {
+        "additionalProperties": false,
+        "properties": {
+          "schema_version": {
+            "const": 1,
+            "default": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "status": {
+            "$ref": "#/$defs/IssueStatus"
+          },
+          "actor": {
+            "minLength": 1,
+            "title": "Actor",
+            "type": "string"
+          },
+          "timestamp": {
+            "format": "date-time",
+            "title": "Timestamp",
+            "type": "string"
+          },
+          "reason": {
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          },
+          "resolution": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/IssueResolution"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "duplicate_of": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Duplicate Of"
+          }
+        },
+        "required": [
+          "status",
+          "actor",
+          "timestamp",
+          "reason"
+        ],
+        "title": "IssueHistory",
+        "type": "object"
+      },
+      "IssueResolution": {
+        "additionalProperties": false,
+        "properties": {
+          "schema_version": {
+            "const": 1,
+            "default": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "text": {
+            "minLength": 1,
+            "title": "Text",
+            "type": "string"
+          },
+          "evidence_ids": {
+            "items": {
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+              "type": "string"
+            },
+            "title": "Evidence Ids",
+            "type": "array"
+          },
+          "reviewed_revision": {
+            "anyOf": [
+              {
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Reviewed Revision"
+          },
+          "reviewer": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Reviewer"
+          },
+          "review_result": {
+            "anyOf": [
+              {
+                "enum": [
+                  "PASS",
+                  "FAIL"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Review Result"
+          },
+          "review_note": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Review Note"
+          },
+          "requirement_change": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/RequirementChange"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "title": "IssueResolution",
+        "type": "object"
+      },
+      "IssueSeverity": {
+        "enum": [
+          "blocking",
+          "warning",
+          "info"
+        ],
+        "title": "IssueSeverity",
+        "type": "string"
+      },
+      "IssueStatus": {
+        "enum": [
+          "open",
+          "investigating",
+          "proposed_resolution",
+          "resolved",
+          "rejected",
+          "duplicate"
+        ],
+        "title": "IssueStatus",
+        "type": "string"
+      },
+      "RequirementChange": {
+        "additionalProperties": false,
+        "properties": {
+          "schema_version": {
+            "const": 1,
+            "default": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "task_revision": {
+            "minimum": 1,
+            "title": "Task Revision",
+            "type": "integer"
+          },
+          "actor": {
+            "minLength": 1,
+            "title": "Actor",
+            "type": "string"
+          },
+          "reason": {
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_revision",
+          "actor",
+          "reason"
+        ],
+        "title": "RequirementChange",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "schema_version": {
+        "const": 1,
+        "default": 1,
+        "title": "Schema Version",
+        "type": "integer"
+      },
+      "id": {
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+        "title": "Id",
+        "type": "string"
+      },
+      "created_at": {
+        "format": "date-time",
+        "title": "Created At",
+        "type": "string"
+      },
+      "run_id": {
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+        "title": "Run Id",
+        "type": "string"
+      },
+      "severity": {
+        "$ref": "#/$defs/IssueSeverity"
+      },
+      "status": {
+        "$ref": "#/$defs/IssueStatus",
+        "default": "open"
+      },
+      "based_on_revision": {
+        "minimum": 0,
+        "title": "Based On Revision",
+        "type": "integer"
+      },
+      "claim": {
+        "minLength": 1,
+        "title": "Claim",
+        "type": "string"
+      },
+      "impact": {
+        "minLength": 1,
+        "title": "Impact",
+        "type": "string"
+      },
+      "verification_request": {
+        "anyOf": [
+          {
+            "minLength": 1,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Verification Request"
+      },
+      "suggested_resolution": {
+        "minLength": 1,
+        "title": "Suggested Resolution",
+        "type": "string"
+      },
+      "requirement_ids": {
+        "items": {
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+          "type": "string"
+        },
+        "title": "Requirement Ids",
+        "type": "array"
+      },
+      "evidence_ids": {
+        "items": {
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+          "type": "string"
+        },
+        "title": "Evidence Ids",
+        "type": "array"
+      },
+      "resolution": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/IssueResolution"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "duplicate_of": {
+        "anyOf": [
+          {
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Duplicate Of"
+      },
+      "history": {
+        "items": {
+          "$ref": "#/$defs/IssueHistory"
+        },
+        "title": "History",
+        "type": "array"
+      }
+    },
+    "required": [
+      "id",
+      "run_id",
+      "severity",
+      "based_on_revision",
+      "claim",
+      "impact",
+      "suggested_resolution"
+    ],
+    "title": "Issue",
+    "type": "object"
+  },
+  "Decision": {
+    "additionalProperties": false,
+    "properties": {
+      "schema_version": {
+        "const": 1,
+        "default": 1,
+        "title": "Schema Version",
+        "type": "integer"
+      },
+      "id": {
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+        "title": "Id",
+        "type": "string"
+      },
+      "created_at": {
+        "format": "date-time",
+        "title": "Created At",
+        "type": "string"
+      },
+      "run_id": {
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+        "title": "Run Id",
+        "type": "string"
+      },
+      "question": {
+        "minLength": 1,
+        "title": "Question",
+        "type": "string"
+      },
+      "chosen": {
+        "minLength": 1,
+        "title": "Chosen",
+        "type": "string"
+      },
+      "rationale": {
+        "minLength": 1,
+        "title": "Rationale",
+        "type": "string"
+      },
+      "alternatives": {
+        "items": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "title": "Alternatives",
+        "type": "array"
+      },
+      "evidence_ids": {
+        "items": {
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+          "type": "string"
+        },
+        "title": "Evidence Ids",
+        "type": "array"
+      },
+      "related_issues": {
+        "items": {
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+          "type": "string"
+        },
+        "title": "Related Issues",
+        "type": "array"
+      }
+    },
+    "required": [
+      "id",
+      "run_id",
+      "question",
+      "chosen",
+      "rationale"
+    ],
+    "title": "Decision",
+    "type": "object"
+  },
+  "PlanRevision": {
+    "$defs": {
+      "Decision": {
+        "additionalProperties": false,
+        "properties": {
+          "schema_version": {
+            "const": 1,
+            "default": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "id": {
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "title": "Id",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "run_id": {
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "title": "Run Id",
+            "type": "string"
+          },
+          "question": {
+            "minLength": 1,
+            "title": "Question",
+            "type": "string"
+          },
+          "chosen": {
+            "minLength": 1,
+            "title": "Chosen",
+            "type": "string"
+          },
+          "rationale": {
+            "minLength": 1,
+            "title": "Rationale",
+            "type": "string"
+          },
+          "alternatives": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "title": "Alternatives",
+            "type": "array"
+          },
+          "evidence_ids": {
+            "items": {
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+              "type": "string"
+            },
+            "title": "Evidence Ids",
+            "type": "array"
+          },
+          "related_issues": {
+            "items": {
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+              "type": "string"
+            },
+            "title": "Related Issues",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "run_id",
+          "question",
+          "chosen",
+          "rationale"
+        ],
+        "title": "Decision",
+        "type": "object"
+      },
+      "PlanStep": {
+        "additionalProperties": false,
+        "properties": {
+          "schema_version": {
+            "const": 1,
+            "default": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "id": {
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "title": "Id",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "objective": {
+            "minLength": 1,
+            "title": "Objective",
+            "type": "string"
+          },
+          "requirement_ids": {
+            "items": {
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Requirement Ids",
+            "type": "array"
+          },
+          "dependencies": {
+            "items": {
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+              "type": "string"
+            },
+            "title": "Dependencies",
+            "type": "array"
+          },
+          "targets": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "title": "Targets",
+            "type": "array"
+          },
+          "validation": {
+            "minLength": 1,
+            "title": "Validation",
+            "type": "string"
+          },
+          "deliverables": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Deliverables",
+            "type": "array"
+          },
+          "completion_criteria": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Completion Criteria",
+            "type": "array"
+          },
+          "evidence_ids": {
+            "items": {
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+              "type": "string"
+            },
+            "title": "Evidence Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "objective",
+          "requirement_ids",
+          "validation",
+          "deliverables",
+          "completion_criteria"
+        ],
+        "title": "PlanStep",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "schema_version": {
+        "const": 1,
+        "default": 1,
+        "title": "Schema Version",
+        "type": "integer"
+      },
+      "id": {
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+        "title": "Id",
+        "type": "string"
+      },
+      "created_at": {
+        "format": "date-time",
+        "title": "Created At",
+        "type": "string"
+      },
+      "run_id": {
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+        "title": "Run Id",
+        "type": "string"
+      },
+      "revision": {
+        "minimum": 1,
+        "title": "Revision",
+        "type": "integer"
+      },
+      "based_on_revision": {
+        "minimum": 0,
+        "title": "Based On Revision",
+        "type": "integer"
+      },
+      "requirements_revision": {
+        "minimum": 1,
+        "title": "Requirements Revision",
+        "type": "integer"
+      },
+      "snapshot_id": {
+        "anyOf": [
+          {
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "title": "Snapshot Id"
+      },
+      "steps": {
+        "items": {
+          "$ref": "#/$defs/PlanStep"
+        },
+        "minItems": 1,
+        "title": "Steps",
+        "type": "array"
+      },
+      "decisions": {
+        "items": {
+          "$ref": "#/$defs/Decision"
+        },
+        "title": "Decisions",
+        "type": "array"
+      },
+      "risks": {
+        "items": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "title": "Risks",
+        "type": "array"
+      },
+      "issues_addressed": {
+        "items": {
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+          "type": "string"
+        },
+        "title": "Issues Addressed",
+        "type": "array"
+      }
+    },
+    "required": [
+      "id",
+      "run_id",
+      "revision",
+      "based_on_revision",
+      "requirements_revision",
+      "snapshot_id",
+      "steps"
+    ],
+    "title": "PlanRevision",
+    "type": "object"
+  },
+  "PlanStep": {
+    "additionalProperties": false,
+    "properties": {
+      "schema_version": {
+        "const": 1,
+        "default": 1,
+        "title": "Schema Version",
+        "type": "integer"
+      },
+      "id": {
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+        "title": "Id",
+        "type": "string"
+      },
+      "created_at": {
+        "format": "date-time",
+        "title": "Created At",
+        "type": "string"
+      },
+      "objective": {
+        "minLength": 1,
+        "title": "Objective",
+        "type": "string"
+      },
+      "requirement_ids": {
+        "items": {
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+          "type": "string"
+        },
+        "minItems": 1,
+        "title": "Requirement Ids",
+        "type": "array"
+      },
+      "dependencies": {
+        "items": {
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+          "type": "string"
+        },
+        "title": "Dependencies",
+        "type": "array"
+      },
+      "targets": {
+        "items": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "title": "Targets",
+        "type": "array"
+      },
+      "validation": {
+        "minLength": 1,
+        "title": "Validation",
+        "type": "string"
+      },
+      "deliverables": {
+        "items": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "minItems": 1,
+        "title": "Deliverables",
+        "type": "array"
+      },
+      "completion_criteria": {
+        "items": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "minItems": 1,
+        "title": "Completion Criteria",
+        "type": "array"
+      },
+      "evidence_ids": {
+        "items": {
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+          "type": "string"
+        },
+        "title": "Evidence Ids",
+        "type": "array"
+      }
+    },
+    "required": [
+      "id",
+      "objective",
+      "requirement_ids",
+      "validation",
+      "deliverables",
+      "completion_criteria"
+    ],
+    "title": "PlanStep",
+    "type": "object"
+  },
+  "ToolCall": {
+    "$defs": {
+      "ArtifactRef": {
+        "additionalProperties": false,
+        "properties": {
+          "schema_version": {
+            "const": 1,
+            "default": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "content_hash": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Content Hash",
+            "type": "string"
+          },
+          "size": {
+            "minimum": 0,
+            "title": "Size",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "content_hash",
+          "size"
+        ],
+        "title": "ArtifactRef",
+        "type": "object"
+      },
+      "JsonValue": {}
+    },
+    "additionalProperties": false,
+    "properties": {
+      "schema_version": {
+        "const": 1,
+        "default": 1,
+        "title": "Schema Version",
+        "type": "integer"
+      },
+      "id": {
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+        "title": "Id",
+        "type": "string"
+      },
+      "created_at": {
+        "format": "date-time",
+        "title": "Created At",
+        "type": "string"
+      },
+      "run_id": {
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+        "title": "Run Id",
+        "type": "string"
+      },
+      "request_hash": {
+        "pattern": "^[0-9a-f]{64}$",
+        "title": "Request Hash",
+        "type": "string"
+      },
+      "arguments_redacted": {
+        "additionalProperties": {
+          "$ref": "#/$defs/JsonValue"
+        },
+        "title": "Arguments Redacted",
+        "type": "object"
+      },
+      "environment": {
+        "minLength": 1,
+        "title": "Environment",
+        "type": "string"
+      },
+      "snapshot_id": {
+        "anyOf": [
+          {
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "title": "Snapshot Id"
+      },
+      "exit_code": {
+        "anyOf": [
+          {
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "title": "Exit Code"
+      },
+      "output_artifact": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/ArtifactRef"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "started_at": {
+        "format": "date-time",
+        "title": "Started At",
+        "type": "string"
+      },
+      "finished_at": {
+        "anyOf": [
+          {
+            "format": "date-time",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "title": "Finished At"
+      }
+    },
+    "required": [
+      "id",
+      "run_id",
+      "request_hash",
+      "arguments_redacted",
+      "environment",
+      "snapshot_id",
+      "exit_code",
+      "output_artifact",
+      "started_at",
+      "finished_at"
+    ],
+    "title": "ToolCall",
+    "type": "object"
+  },
+  "ModelCall": {
+    "$defs": {
+      "ArtifactRef": {
+        "additionalProperties": false,
+        "properties": {
+          "schema_version": {
+            "const": 1,
+            "default": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "content_hash": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Content Hash",
+            "type": "string"
+          },
+          "size": {
+            "minimum": 0,
+            "title": "Size",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "content_hash",
+          "size"
+        ],
+        "title": "ArtifactRef",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "schema_version": {
+        "const": 1,
+        "default": 1,
+        "title": "Schema Version",
+        "type": "integer"
+      },
+      "id": {
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+        "title": "Id",
+        "type": "string"
+      },
+      "created_at": {
+        "format": "date-time",
+        "title": "Created At",
+        "type": "string"
+      },
+      "run_id": {
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+        "title": "Run Id",
+        "type": "string"
+      },
+      "role": {
+        "minLength": 1,
+        "title": "Role",
+        "type": "string"
+      },
+      "provider": {
+        "minLength": 1,
+        "title": "Provider",
+        "type": "string"
+      },
+      "model_id": {
+        "minLength": 1,
+        "title": "Model Id",
+        "type": "string"
+      },
+      "prompt_version": {
+        "minLength": 1,
+        "title": "Prompt Version",
+        "type": "string"
+      },
+      "input_hash": {
+        "pattern": "^[0-9a-f]{64}$",
+        "title": "Input Hash",
+        "type": "string"
+      },
+      "usage": {
+        "additionalProperties": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "title": "Usage",
+        "type": "object"
+      },
+      "estimated_cost": {
+        "default": 0,
+        "minimum": 0,
+        "title": "Estimated Cost",
+        "type": "number"
+      },
+      "attempts": {
+        "default": 1,
+        "minimum": 1,
+        "title": "Attempts",
+        "type": "integer"
+      },
+      "output_artifact": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/ArtifactRef"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      }
+    },
+    "required": [
+      "id",
+      "run_id",
+      "role",
+      "provider",
+      "model_id",
+      "prompt_version",
+      "input_hash"
+    ],
+    "title": "ModelCall",
+    "type": "object"
+  },
+  "Event": {
+    "$defs": {
+      "ArtifactRef": {
+        "additionalProperties": false,
+        "properties": {
+          "schema_version": {
+            "const": 1,
+            "default": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "content_hash": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Content Hash",
+            "type": "string"
+          },
+          "size": {
+            "minimum": 0,
+            "title": "Size",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "content_hash",
+          "size"
+        ],
+        "title": "ArtifactRef",
+        "type": "object"
+      },
+      "JsonValue": {}
+    },
+    "additionalProperties": false,
+    "properties": {
+      "schema_version": {
+        "const": 1,
+        "default": 1,
+        "title": "Schema Version",
+        "type": "integer"
+      },
+      "id": {
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+        "title": "Id",
+        "type": "string"
+      },
+      "created_at": {
+        "format": "date-time",
+        "title": "Created At",
+        "type": "string"
+      },
+      "run_id": {
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+        "title": "Run Id",
+        "type": "string"
+      },
+      "sequence": {
+        "minimum": 1,
+        "title": "Sequence",
+        "type": "integer"
+      },
+      "type": {
+        "minLength": 1,
+        "title": "Type",
+        "type": "string"
+      },
+      "actor": {
+        "minLength": 1,
+        "title": "Actor",
+        "type": "string"
+      },
+      "revision": {
+        "minimum": 1,
+        "title": "Revision",
+        "type": "integer"
+      },
+      "payload": {
+        "additionalProperties": {
+          "$ref": "#/$defs/JsonValue"
+        },
+        "title": "Payload",
+        "type": "object"
+      },
+      "payload_ref": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/ArtifactRef"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "timestamp": {
+        "format": "date-time",
+        "title": "Timestamp",
+        "type": "string"
+      }
+    },
+    "required": [
+      "id",
+      "run_id",
+      "sequence",
+      "type",
+      "actor",
+      "revision",
+      "payload",
+      "timestamp"
+    ],
+    "title": "Event",
+    "type": "object"
+  },
+  "Question": {
+    "additionalProperties": false,
+    "properties": {
+      "schema_version": {
+        "const": 1,
+        "default": 1,
+        "title": "Schema Version",
+        "type": "integer"
+      },
+      "id": {
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+        "title": "Id",
+        "type": "string"
+      },
+      "created_at": {
+        "format": "date-time",
+        "title": "Created At",
+        "type": "string"
+      },
+      "run_id": {
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+        "title": "Run Id",
+        "type": "string"
+      },
+      "text": {
+        "minLength": 1,
+        "title": "Text",
+        "type": "string"
+      },
+      "blocking": {
+        "default": true,
+        "title": "Blocking",
+        "type": "boolean"
+      },
+      "requirement_ids": {
+        "items": {
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+          "type": "string"
+        },
+        "title": "Requirement Ids",
+        "type": "array"
+      },
+      "answer": {
+        "anyOf": [
+          {
+            "minLength": 1,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Answer"
+      },
+      "answered_by": {
+        "anyOf": [
+          {
+            "minLength": 1,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Answered By"
+      },
+      "answered_at": {
+        "anyOf": [
+          {
+            "format": "date-time",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Answered At"
+      }
+    },
+    "required": [
+      "id",
+      "run_id",
+      "text"
+    ],
+    "title": "Question",
+    "type": "object"
+  },
+  "ValidationResult": {
+    "$defs": {
+      "ValidationStatus": {
+        "enum": [
+          "NOT_RUN",
+          "PASS",
+          "FAIL"
+        ],
+        "title": "ValidationStatus",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "schema_version": {
+        "const": 1,
+        "default": 1,
+        "title": "Schema Version",
+        "type": "integer"
+      },
+      "id": {
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+        "title": "Id",
+        "type": "string"
+      },
+      "created_at": {
+        "format": "date-time",
+        "title": "Created At",
+        "type": "string"
+      },
+      "run_id": {
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+        "title": "Run Id",
+        "type": "string"
+      },
+      "status": {
+        "$ref": "#/$defs/ValidationStatus",
+        "default": "NOT_RUN"
+      },
+      "expected": {
+        "minLength": 1,
+        "title": "Expected",
+        "type": "string"
+      },
+      "actual": {
+        "anyOf": [
+          {
+            "minLength": 1,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Actual"
+      },
+      "exit_code": {
+        "anyOf": [
+          {
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Exit Code"
+      },
+      "tool_call_id": {
+        "anyOf": [
+          {
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Tool Call Id"
+      },
+      "executed_at": {
+        "anyOf": [
+          {
+            "format": "date-time",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Executed At"
+      },
+      "requirement_ids": {
+        "items": {
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+          "type": "string"
+        },
+        "title": "Requirement Ids",
+        "type": "array"
+      },
+      "step_ids": {
+        "items": {
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+          "type": "string"
+        },
+        "title": "Step Ids",
+        "type": "array"
+      },
+      "evidence_ids": {
+        "items": {
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+          "type": "string"
+        },
+        "title": "Evidence Ids",
+        "type": "array"
+      }
+    },
+    "required": [
+      "id",
+      "run_id",
+      "expected"
+    ],
+    "title": "ValidationResult",
+    "type": "object"
+  },
+  "BudgetReservation": {
+    "additionalProperties": false,
+    "properties": {
+      "schema_version": {
+        "const": 1,
+        "default": 1,
+        "title": "Schema Version",
+        "type": "integer"
+      },
+      "id": {
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+        "title": "Id",
+        "type": "string"
+      },
+      "created_at": {
+        "format": "date-time",
+        "title": "Created At",
+        "type": "string"
+      },
+      "run_id": {
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+        "title": "Run Id",
+        "type": "string"
+      },
+      "operation_id": {
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+        "title": "Operation Id",
+        "type": "string"
+      },
+      "tokens": {
+        "minimum": 0,
+        "title": "Tokens",
+        "type": "integer"
+      },
+      "cost": {
+        "minimum": 0,
+        "title": "Cost",
+        "type": "number"
+      },
+      "status": {
+        "default": "reserved",
+        "enum": [
+          "reserved",
+          "settled",
+          "released"
+        ],
+        "title": "Status",
+        "type": "string"
+      }
+    },
+    "required": [
+      "id",
+      "run_id",
+      "operation_id",
+      "tokens",
+      "cost"
+    ],
+    "title": "BudgetReservation",
+    "type": "object"
+  },
+  "OperationRecord": {
+    "$defs": {
+      "JsonValue": {}
+    },
+    "additionalProperties": false,
+    "properties": {
+      "schema_version": {
+        "const": 1,
+        "default": 1,
+        "title": "Schema Version",
+        "type": "integer"
+      },
+      "id": {
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+        "title": "Id",
+        "type": "string"
+      },
+      "created_at": {
+        "format": "date-time",
+        "title": "Created At",
+        "type": "string"
+      },
+      "run_id": {
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+        "title": "Run Id",
+        "type": "string"
+      },
+      "node": {
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+        "title": "Node",
+        "type": "string"
+      },
+      "logical_operation_id": {
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+        "title": "Logical Operation Id",
+        "type": "string"
+      },
+      "request_hash": {
+        "pattern": "^[0-9a-f]{64}$",
+        "title": "Request Hash",
+        "type": "string"
+      },
+      "revision": {
+        "minimum": 1,
+        "title": "Revision",
+        "type": "integer"
+      },
+      "event_sequence": {
+        "minimum": 1,
+        "title": "Event Sequence",
+        "type": "integer"
+      },
+      "result": {
+        "additionalProperties": {
+          "$ref": "#/$defs/JsonValue"
+        },
+        "title": "Result",
+        "type": "object"
+      }
+    },
+    "required": [
+      "id",
+      "run_id",
+      "node",
+      "logical_operation_id",
+      "request_hash",
+      "revision",
+      "event_sequence",
+      "result"
+    ],
+    "title": "OperationRecord",
+    "type": "object"
+  },
+  "ArtifactRef": {
+    "additionalProperties": false,
+    "properties": {
+      "schema_version": {
+        "const": 1,
+        "default": 1,
+        "title": "Schema Version",
+        "type": "integer"
+      },
+      "content_hash": {
+        "pattern": "^[0-9a-f]{64}$",
+        "title": "Content Hash",
+        "type": "string"
+      },
+      "size": {
+        "minimum": 0,
+        "title": "Size",
+        "type": "integer"
+      }
+    },
+    "required": [
+      "content_hash",
+      "size"
+    ],
+    "title": "ArtifactRef",
+    "type": "object"
+  },
+  "CheckpointRef": {
+    "additionalProperties": false,
+    "properties": {
+      "schema_version": {
+        "const": 1,
+        "default": 1,
+        "title": "Schema Version",
+        "type": "integer"
+      },
+      "run_id": {
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+        "title": "Run Id",
+        "type": "string"
+      },
+      "revision": {
+        "minimum": 1,
+        "title": "Revision",
+        "type": "integer"
+      },
+      "task_id": {
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+        "title": "Task Id",
+        "type": "string"
+      },
+      "task_revision": {
+        "minimum": 1,
+        "title": "Task Revision",
+        "type": "integer"
+      },
+      "plan_id": {
+        "anyOf": [
+          {
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "title": "Plan Id"
+      }
+    },
+    "required": [
+      "run_id",
+      "revision",
+      "task_id",
+      "task_revision",
+      "plan_id"
+    ],
+    "title": "CheckpointRef",
+    "type": "object"
+  },
+  "Lease": {
+    "additionalProperties": false,
+    "properties": {
+      "schema_version": {
+        "const": 1,
+        "default": 1,
+        "title": "Schema Version",
+        "type": "integer"
+      },
+      "run_id": {
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+        "title": "Run Id",
+        "type": "string"
+      },
+      "owner": {
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+        "title": "Owner",
+        "type": "string"
+      },
+      "token": {
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+        "title": "Token",
+        "type": "string"
+      },
+      "epoch": {
+        "minimum": 1,
+        "title": "Epoch",
+        "type": "integer"
+      },
+      "expires_at": {
+        "format": "date-time",
+        "title": "Expires At",
+        "type": "string"
+      }
+    },
+    "required": [
+      "run_id",
+      "owner",
+      "token",
+      "epoch",
+      "expires_at"
+    ],
+    "title": "Lease",
+    "type": "object"
+  },
+  "RunState": {
+    "$defs": {
+      "ArtifactRef": {
+        "additionalProperties": false,
+        "properties": {
+          "schema_version": {
+            "const": 1,
+            "default": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "content_hash": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Content Hash",
+            "type": "string"
+          },
+          "size": {
+            "minimum": 0,
+            "title": "Size",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "content_hash",
+          "size"
+        ],
+        "title": "ArtifactRef",
+        "type": "object"
+      },
+      "Budget": {
+        "additionalProperties": false,
+        "properties": {
+          "schema_version": {
+            "const": 1,
+            "default": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "token_limit": {
+            "default": 0,
+            "minimum": 0,
+            "title": "Token Limit",
+            "type": "integer"
+          },
+          "cost_limit": {
+            "default": 0,
+            "minimum": 0,
+            "title": "Cost Limit",
+            "type": "number"
+          }
+        },
+        "title": "Budget",
+        "type": "object"
+      },
+      "BudgetReservation": {
+        "additionalProperties": false,
+        "properties": {
+          "schema_version": {
+            "const": 1,
+            "default": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "id": {
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "title": "Id",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "run_id": {
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "title": "Run Id",
+            "type": "string"
+          },
+          "operation_id": {
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "title": "Operation Id",
+            "type": "string"
+          },
+          "tokens": {
+            "minimum": 0,
+            "title": "Tokens",
+            "type": "integer"
+          },
+          "cost": {
+            "minimum": 0,
+            "title": "Cost",
+            "type": "number"
+          },
+          "status": {
+            "default": "reserved",
+            "enum": [
+              "reserved",
+              "settled",
+              "released"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "run_id",
+          "operation_id",
+          "tokens",
+          "cost"
+        ],
+        "title": "BudgetReservation",
+        "type": "object"
+      },
+      "Claim": {
+        "additionalProperties": false,
+        "properties": {
+          "schema_version": {
+            "const": 1,
+            "default": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "id": {
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "title": "Id",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "run_id": {
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "title": "Run Id",
+            "type": "string"
+          },
+          "text": {
+            "minLength": 1,
+            "title": "Text",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "fact",
+              "assumption",
+              "proposal",
+              "unknown"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "evidence_ids": {
+            "items": {
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+              "type": "string"
+            },
+            "title": "Evidence Ids",
+            "type": "array"
+          },
+          "snapshot_id": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Snapshot Id"
+          }
+        },
+        "required": [
+          "id",
+          "run_id",
+          "text",
+          "kind",
+          "snapshot_id"
+        ],
+        "title": "Claim",
+        "type": "object"
+      },
+      "Decision": {
+        "additionalProperties": false,
+        "properties": {
+          "schema_version": {
+            "const": 1,
+            "default": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "id": {
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "title": "Id",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "run_id": {
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "title": "Run Id",
+            "type": "string"
+          },
+          "question": {
+            "minLength": 1,
+            "title": "Question",
+            "type": "string"
+          },
+          "chosen": {
+            "minLength": 1,
+            "title": "Chosen",
+            "type": "string"
+          },
+          "rationale": {
+            "minLength": 1,
+            "title": "Rationale",
+            "type": "string"
+          },
+          "alternatives": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "title": "Alternatives",
+            "type": "array"
+          },
+          "evidence_ids": {
+            "items": {
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+              "type": "string"
+            },
+            "title": "Evidence Ids",
+            "type": "array"
+          },
+          "related_issues": {
+            "items": {
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+              "type": "string"
+            },
+            "title": "Related Issues",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "run_id",
+          "question",
+          "chosen",
+          "rationale"
+        ],
+        "title": "Decision",
+        "type": "object"
+      },
+      "Evidence": {
+        "additionalProperties": false,
+        "properties": {
+          "schema_version": {
+            "const": 1,
+            "default": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "id": {
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "title": "Id",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "run_id": {
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "title": "Run Id",
+            "type": "string"
+          },
+          "source_type": {
+            "enum": [
+              "repo",
+              "tool",
+              "document",
+              "user"
+            ],
+            "title": "Source Type",
+            "type": "string"
+          },
+          "locator": {
+            "minLength": 1,
+            "title": "Locator",
+            "type": "string"
+          },
+          "content_hash": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Content Hash",
+            "type": "string"
+          },
+          "captured_at": {
+            "format": "date-time",
+            "title": "Captured At",
+            "type": "string"
+          },
+          "snapshot_id": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Snapshot Id"
+          },
+          "tool_call_id": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Tool Call Id"
+          },
+          "status": {
+            "$ref": "#/$defs/ValidationStatus",
+            "default": "NOT_RUN"
+          },
+          "artifact": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/ArtifactRef"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "required": [
+          "id",
+          "run_id",
+          "source_type",
+          "locator",
+          "content_hash",
+          "captured_at",
+          "snapshot_id"
+        ],
+        "title": "Evidence",
+        "type": "object"
+      },
+      "Issue": {
+        "additionalProperties": false,
+        "properties": {
+          "schema_version": {
+            "const": 1,
+            "default": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "id": {
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "title": "Id",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "run_id": {
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "title": "Run Id",
+            "type": "string"
+          },
+          "severity": {
+            "$ref": "#/$defs/IssueSeverity"
+          },
+          "status": {
+            "$ref": "#/$defs/IssueStatus",
+            "default": "open"
+          },
+          "based_on_revision": {
+            "minimum": 0,
+            "title": "Based On Revision",
+            "type": "integer"
+          },
+          "claim": {
+            "minLength": 1,
+            "title": "Claim",
+            "type": "string"
+          },
+          "impact": {
+            "minLength": 1,
+            "title": "Impact",
+            "type": "string"
+          },
+          "verification_request": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Verification Request"
+          },
+          "suggested_resolution": {
+            "minLength": 1,
+            "title": "Suggested Resolution",
+            "type": "string"
+          },
+          "requirement_ids": {
+            "items": {
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+              "type": "string"
+            },
+            "title": "Requirement Ids",
+            "type": "array"
+          },
+          "evidence_ids": {
+            "items": {
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+              "type": "string"
+            },
+            "title": "Evidence Ids",
+            "type": "array"
+          },
+          "resolution": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/IssueResolution"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "duplicate_of": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Duplicate Of"
+          },
+          "history": {
+            "items": {
+              "$ref": "#/$defs/IssueHistory"
+            },
+            "title": "History",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "run_id",
+          "severity",
+          "based_on_revision",
+          "claim",
+          "impact",
+          "suggested_resolution"
+        ],
+        "title": "Issue",
+        "type": "object"
+      },
+      "IssueHistory": {
+        "additionalProperties": false,
+        "properties": {
+          "schema_version": {
+            "const": 1,
+            "default": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "status": {
+            "$ref": "#/$defs/IssueStatus"
+          },
+          "actor": {
+            "minLength": 1,
+            "title": "Actor",
+            "type": "string"
+          },
+          "timestamp": {
+            "format": "date-time",
+            "title": "Timestamp",
+            "type": "string"
+          },
+          "reason": {
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          },
+          "resolution": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/IssueResolution"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "duplicate_of": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Duplicate Of"
+          }
+        },
+        "required": [
+          "status",
+          "actor",
+          "timestamp",
+          "reason"
+        ],
+        "title": "IssueHistory",
+        "type": "object"
+      },
+      "IssueResolution": {
+        "additionalProperties": false,
+        "properties": {
+          "schema_version": {
+            "const": 1,
+            "default": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "text": {
+            "minLength": 1,
+            "title": "Text",
+            "type": "string"
+          },
+          "evidence_ids": {
+            "items": {
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+              "type": "string"
+            },
+            "title": "Evidence Ids",
+            "type": "array"
+          },
+          "reviewed_revision": {
+            "anyOf": [
+              {
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Reviewed Revision"
+          },
+          "reviewer": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Reviewer"
+          },
+          "review_result": {
+            "anyOf": [
+              {
+                "enum": [
+                  "PASS",
+                  "FAIL"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Review Result"
+          },
+          "review_note": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Review Note"
+          },
+          "requirement_change": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/RequirementChange"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "title": "IssueResolution",
+        "type": "object"
+      },
+      "IssueSeverity": {
+        "enum": [
+          "blocking",
+          "warning",
+          "info"
+        ],
+        "title": "IssueSeverity",
+        "type": "string"
+      },
+      "IssueStatus": {
+        "enum": [
+          "open",
+          "investigating",
+          "proposed_resolution",
+          "resolved",
+          "rejected",
+          "duplicate"
+        ],
+        "title": "IssueStatus",
+        "type": "string"
+      },
+      "JsonValue": {},
+      "ModelCall": {
+        "additionalProperties": false,
+        "properties": {
+          "schema_version": {
+            "const": 1,
+            "default": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "id": {
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "title": "Id",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "run_id": {
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "title": "Run Id",
+            "type": "string"
+          },
+          "role": {
+            "minLength": 1,
+            "title": "Role",
+            "type": "string"
+          },
+          "provider": {
+            "minLength": 1,
+            "title": "Provider",
+            "type": "string"
+          },
+          "model_id": {
+            "minLength": 1,
+            "title": "Model Id",
+            "type": "string"
+          },
+          "prompt_version": {
+            "minLength": 1,
+            "title": "Prompt Version",
+            "type": "string"
+          },
+          "input_hash": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Input Hash",
+            "type": "string"
+          },
+          "usage": {
+            "additionalProperties": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "title": "Usage",
+            "type": "object"
+          },
+          "estimated_cost": {
+            "default": 0,
+            "minimum": 0,
+            "title": "Estimated Cost",
+            "type": "number"
+          },
+          "attempts": {
+            "default": 1,
+            "minimum": 1,
+            "title": "Attempts",
+            "type": "integer"
+          },
+          "output_artifact": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/ArtifactRef"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "required": [
+          "id",
+          "run_id",
+          "role",
+          "provider",
+          "model_id",
+          "prompt_version",
+          "input_hash"
+        ],
+        "title": "ModelCall",
+        "type": "object"
+      },
+      "PlanRevision": {
+        "additionalProperties": false,
+        "properties": {
+          "schema_version": {
+            "const": 1,
+            "default": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "id": {
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "title": "Id",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "run_id": {
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "title": "Run Id",
+            "type": "string"
+          },
+          "revision": {
+            "minimum": 1,
+            "title": "Revision",
+            "type": "integer"
+          },
+          "based_on_revision": {
+            "minimum": 0,
+            "title": "Based On Revision",
+            "type": "integer"
+          },
+          "requirements_revision": {
+            "minimum": 1,
+            "title": "Requirements Revision",
+            "type": "integer"
+          },
+          "snapshot_id": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Snapshot Id"
+          },
+          "steps": {
+            "items": {
+              "$ref": "#/$defs/PlanStep"
+            },
+            "minItems": 1,
+            "title": "Steps",
+            "type": "array"
+          },
+          "decisions": {
+            "items": {
+              "$ref": "#/$defs/Decision"
+            },
+            "title": "Decisions",
+            "type": "array"
+          },
+          "risks": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "title": "Risks",
+            "type": "array"
+          },
+          "issues_addressed": {
+            "items": {
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+              "type": "string"
+            },
+            "title": "Issues Addressed",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "run_id",
+          "revision",
+          "based_on_revision",
+          "requirements_revision",
+          "snapshot_id",
+          "steps"
+        ],
+        "title": "PlanRevision",
+        "type": "object"
+      },
+      "PlanStep": {
+        "additionalProperties": false,
+        "properties": {
+          "schema_version": {
+            "const": 1,
+            "default": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "id": {
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "title": "Id",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "objective": {
+            "minLength": 1,
+            "title": "Objective",
+            "type": "string"
+          },
+          "requirement_ids": {
+            "items": {
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Requirement Ids",
+            "type": "array"
+          },
+          "dependencies": {
+            "items": {
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+              "type": "string"
+            },
+            "title": "Dependencies",
+            "type": "array"
+          },
+          "targets": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "title": "Targets",
+            "type": "array"
+          },
+          "validation": {
+            "minLength": 1,
+            "title": "Validation",
+            "type": "string"
+          },
+          "deliverables": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Deliverables",
+            "type": "array"
+          },
+          "completion_criteria": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Completion Criteria",
+            "type": "array"
+          },
+          "evidence_ids": {
+            "items": {
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+              "type": "string"
+            },
+            "title": "Evidence Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "objective",
+          "requirement_ids",
+          "validation",
+          "deliverables",
+          "completion_criteria"
+        ],
+        "title": "PlanStep",
+        "type": "object"
+      },
+      "Proposal": {
+        "additionalProperties": false,
+        "properties": {
+          "schema_version": {
+            "const": 1,
+            "default": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "id": {
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "title": "Id",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "run_id": {
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "title": "Run Id",
+            "type": "string"
+          },
+          "author_role": {
+            "minLength": 1,
+            "title": "Author Role",
+            "type": "string"
+          },
+          "base_revision": {
+            "minimum": 0,
+            "title": "Base Revision",
+            "type": "integer"
+          },
+          "approach": {
+            "minLength": 1,
+            "title": "Approach",
+            "type": "string"
+          },
+          "alternatives": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "title": "Alternatives",
+            "type": "array"
+          },
+          "tradeoffs": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "title": "Tradeoffs",
+            "type": "array"
+          },
+          "claim_ids": {
+            "items": {
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+              "type": "string"
+            },
+            "title": "Claim Ids",
+            "type": "array"
+          },
+          "requirement_coverage": {
+            "patternProperties": {
+              "^[A-Za-z0-9][A-Za-z0-9_.:-]*$": {
+                "minLength": 1,
+                "type": "string"
+              }
+            },
+            "propertyNames": {
+              "minLength": 1
+            },
+            "title": "Requirement Coverage",
+            "type": "object"
+          }
+        },
+        "required": [
+          "id",
+          "run_id",
+          "author_role",
+          "base_revision",
+          "approach"
+        ],
+        "title": "Proposal",
+        "type": "object"
+      },
+      "Question": {
+        "additionalProperties": false,
+        "properties": {
+          "schema_version": {
+            "const": 1,
+            "default": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "id": {
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "title": "Id",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "run_id": {
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "title": "Run Id",
+            "type": "string"
+          },
+          "text": {
+            "minLength": 1,
+            "title": "Text",
+            "type": "string"
+          },
+          "blocking": {
+            "default": true,
+            "title": "Blocking",
+            "type": "boolean"
+          },
+          "requirement_ids": {
+            "items": {
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+              "type": "string"
+            },
+            "title": "Requirement Ids",
+            "type": "array"
+          },
+          "answer": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Answer"
+          },
+          "answered_by": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Answered By"
+          },
+          "answered_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Answered At"
+          }
+        },
+        "required": [
+          "id",
+          "run_id",
+          "text"
+        ],
+        "title": "Question",
+        "type": "object"
+      },
+      "Requirement": {
+        "additionalProperties": false,
+        "properties": {
+          "schema_version": {
+            "const": 1,
+            "default": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "id": {
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "title": "Id",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "text": {
+            "minLength": 1,
+            "title": "Text",
+            "type": "string"
+          },
+          "acceptance": {
+            "minLength": 1,
+            "title": "Acceptance",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "text",
+          "acceptance"
+        ],
+        "title": "Requirement",
+        "type": "object"
+      },
+      "RequirementChange": {
+        "additionalProperties": false,
+        "properties": {
+          "schema_version": {
+            "const": 1,
+            "default": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "task_revision": {
+            "minimum": 1,
+            "title": "Task Revision",
+            "type": "integer"
+          },
+          "actor": {
+            "minLength": 1,
+            "title": "Actor",
+            "type": "string"
+          },
+          "reason": {
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_revision",
+          "actor",
+          "reason"
+        ],
+        "title": "RequirementChange",
+        "type": "object"
+      },
+      "Run": {
+        "additionalProperties": false,
+        "properties": {
+          "schema_version": {
+            "const": 1,
+            "default": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "id": {
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "title": "Id",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "task_id": {
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "title": "Task Id",
+            "type": "string"
+          },
+          "task_revision": {
+            "minimum": 1,
+            "title": "Task Revision",
+            "type": "integer"
+          },
+          "snapshot_id": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Snapshot Id"
+          },
+          "mode": {
+            "enum": [
+              "repo",
+              "greenfield"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "revision": {
+            "default": 1,
+            "minimum": 1,
+            "title": "Revision",
+            "type": "integer"
+          },
+          "phase": {
+            "$ref": "#/$defs/RunPhase",
+            "default": "INTAKE"
+          },
+          "status": {
+            "$ref": "#/$defs/RunStatus",
+            "default": "RUNNING"
+          },
+          "stop_reason": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Stop Reason"
+          },
+          "config_hash": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Config Hash",
+            "type": "string"
+          },
+          "budget": {
+            "$ref": "#/$defs/Budget"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "parent_run_id": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Parent Run Id"
+          }
+        },
+        "required": [
+          "id",
+          "task_id",
+          "task_revision",
+          "snapshot_id",
+          "mode",
+          "config_hash"
+        ],
+        "title": "Run",
+        "type": "object"
+      },
+      "RunPhase": {
+        "enum": [
+          "INTAKE",
+          "SNAPSHOT",
+          "INVESTIGATE",
+          "INDEPENDENT_ANALYSIS",
+          "PROPOSE",
+          "REVIEW",
+          "VERIFY",
+          "REVISE",
+          "QUALITY_GATE",
+          "EXPORT"
+        ],
+        "title": "RunPhase",
+        "type": "string"
+      },
+      "RunStatus": {
+        "enum": [
+          "RUNNING",
+          "WAITING_FOR_INPUT",
+          "FINAL",
+          "PARTIAL",
+          "FAILED",
+          "CANCELLED"
+        ],
+        "title": "RunStatus",
+        "type": "string"
+      },
+      "Snapshot": {
+        "additionalProperties": false,
+        "properties": {
+          "schema_version": {
+            "const": 1,
+            "default": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "id": {
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "title": "Id",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "source_path": {
+            "minLength": 1,
+            "title": "Source Path",
+            "type": "string"
+          },
+          "commit_if_any": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Commit If Any"
+          },
+          "dirty": {
+            "default": false,
+            "title": "Dirty",
+            "type": "boolean"
+          },
+          "manifest_hash": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Manifest Hash",
+            "type": "string"
+          },
+          "file_hashes": {
+            "additionalProperties": {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "title": "File Hashes",
+            "type": "object"
+          },
+          "excluded_patterns": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Excluded Patterns",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "source_path",
+          "manifest_hash",
+          "file_hashes"
+        ],
+        "title": "Snapshot",
+        "type": "object"
+      },
+      "TaskSpec": {
+        "additionalProperties": false,
+        "properties": {
+          "schema_version": {
+            "const": 1,
+            "default": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "id": {
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "title": "Id",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "revision": {
+            "default": 1,
+            "minimum": 1,
+            "title": "Revision",
+            "type": "integer"
+          },
+          "goal": {
+            "minLength": 1,
+            "title": "Goal",
+            "type": "string"
+          },
+          "requirements": {
+            "items": {
+              "$ref": "#/$defs/Requirement"
+            },
+            "minItems": 1,
+            "title": "Requirements",
+            "type": "array"
+          },
+          "constraints": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "title": "Constraints",
+            "type": "array"
+          },
+          "non_goals": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "title": "Non Goals",
+            "type": "array"
+          },
+          "acceptance_criteria": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "title": "Acceptance Criteria",
+            "type": "array"
+          },
+          "unknowns": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "title": "Unknowns",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "goal",
+          "requirements"
+        ],
+        "title": "TaskSpec",
+        "type": "object"
+      },
+      "ToolCall": {
+        "additionalProperties": false,
+        "properties": {
+          "schema_version": {
+            "const": 1,
+            "default": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "id": {
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "title": "Id",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "run_id": {
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "title": "Run Id",
+            "type": "string"
+          },
+          "request_hash": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Request Hash",
+            "type": "string"
+          },
+          "arguments_redacted": {
+            "additionalProperties": {
+              "$ref": "#/$defs/JsonValue"
+            },
+            "title": "Arguments Redacted",
+            "type": "object"
+          },
+          "environment": {
+            "minLength": 1,
+            "title": "Environment",
+            "type": "string"
+          },
+          "snapshot_id": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Snapshot Id"
+          },
+          "exit_code": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exit Code"
+          },
+          "output_artifact": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/ArtifactRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "started_at": {
+            "format": "date-time",
+            "title": "Started At",
+            "type": "string"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          }
+        },
+        "required": [
+          "id",
+          "run_id",
+          "request_hash",
+          "arguments_redacted",
+          "environment",
+          "snapshot_id",
+          "exit_code",
+          "output_artifact",
+          "started_at",
+          "finished_at"
+        ],
+        "title": "ToolCall",
+        "type": "object"
+      },
+      "ValidationResult": {
+        "additionalProperties": false,
+        "properties": {
+          "schema_version": {
+            "const": 1,
+            "default": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "id": {
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "title": "Id",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "run_id": {
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "title": "Run Id",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/$defs/ValidationStatus",
+            "default": "NOT_RUN"
+          },
+          "expected": {
+            "minLength": 1,
+            "title": "Expected",
+            "type": "string"
+          },
+          "actual": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Actual"
+          },
+          "exit_code": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Exit Code"
+          },
+          "tool_call_id": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Tool Call Id"
+          },
+          "executed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Executed At"
+          },
+          "requirement_ids": {
+            "items": {
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+              "type": "string"
+            },
+            "title": "Requirement Ids",
+            "type": "array"
+          },
+          "step_ids": {
+            "items": {
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+              "type": "string"
+            },
+            "title": "Step Ids",
+            "type": "array"
+          },
+          "evidence_ids": {
+            "items": {
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+              "type": "string"
+            },
+            "title": "Evidence Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "run_id",
+          "expected"
+        ],
+        "title": "ValidationResult",
+        "type": "object"
+      },
+      "ValidationStatus": {
+        "enum": [
+          "NOT_RUN",
+          "PASS",
+          "FAIL"
+        ],
+        "title": "ValidationStatus",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "schema_version": {
+        "const": 1,
+        "default": 1,
+        "title": "Schema Version",
+        "type": "integer"
+      },
+      "run": {
+        "$ref": "#/$defs/Run"
+      },
+      "tasks": {
+        "items": {
+          "$ref": "#/$defs/TaskSpec"
+        },
+        "minItems": 1,
+        "title": "Tasks",
+        "type": "array"
+      },
+      "snapshot": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/Snapshot"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "task_changes": {
+        "items": {
+          "$ref": "#/$defs/RequirementChange"
+        },
+        "title": "Task Changes",
+        "type": "array"
+      },
+      "plans": {
+        "items": {
+          "$ref": "#/$defs/PlanRevision"
+        },
+        "title": "Plans",
+        "type": "array"
+      },
+      "claims": {
+        "items": {
+          "$ref": "#/$defs/Claim"
+        },
+        "title": "Claims",
+        "type": "array"
+      },
+      "evidence": {
+        "items": {
+          "$ref": "#/$defs/Evidence"
+        },
+        "title": "Evidence",
+        "type": "array"
+      },
+      "proposals": {
+        "items": {
+          "$ref": "#/$defs/Proposal"
+        },
+        "title": "Proposals",
+        "type": "array"
+      },
+      "issues": {
+        "items": {
+          "$ref": "#/$defs/Issue"
+        },
+        "title": "Issues",
+        "type": "array"
+      },
+      "decisions": {
+        "items": {
+          "$ref": "#/$defs/Decision"
+        },
+        "title": "Decisions",
+        "type": "array"
+      },
+      "tool_calls": {
+        "items": {
+          "$ref": "#/$defs/ToolCall"
+        },
+        "title": "Tool Calls",
+        "type": "array"
+      },
+      "model_calls": {
+        "items": {
+          "$ref": "#/$defs/ModelCall"
+        },
+        "title": "Model Calls",
+        "type": "array"
+      },
+      "questions": {
+        "items": {
+          "$ref": "#/$defs/Question"
+        },
+        "title": "Questions",
+        "type": "array"
+      },
+      "validations": {
+        "items": {
+          "$ref": "#/$defs/ValidationResult"
+        },
+        "title": "Validations",
+        "type": "array"
+      },
+      "reservations": {
+        "items": {
+          "$ref": "#/$defs/BudgetReservation"
+        },
+        "title": "Reservations",
+        "type": "array"
+      }
+    },
+    "required": [
+      "run",
+      "tasks",
+      "snapshot"
+    ],
+    "title": "RunState",
+    "type": "object"
+  }
+}
