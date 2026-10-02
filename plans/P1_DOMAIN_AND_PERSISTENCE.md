@@ -1,6 +1,6 @@
 # P1 — Domain contracts và persistence
 
-Trạng thái: DONE — xem [bản ghi kiểm chứng P1](../IMPLEMENTATION_STATUS.md). Prerequisite: P0 đạt exit gate; riêng P0.4 provider live tests vẫn BLOCKED do thiếu API keys, P1 storage/recovery được kiểm chứng độc lập trên SQLite thật.
+Trạng thái: DONE — xem [bản ghi kiểm chứng P1 và Windows native](../IMPLEMENTATION_STATUS.md). P0.4 cũng DONE theo phạm vi người dùng cập nhật: lưu key an toàn, profile tùy chỉnh, xKiro live và native Windows. Direct OpenAI/Google live còn NOT_RUN do thiếu key riêng.
 
 ## 1. Mục tiêu
 

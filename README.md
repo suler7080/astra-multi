@@ -13,7 +13,7 @@ Môi trường cho các LLM coding phân tích độc lập, thảo luận có b
 
 ## Trạng thái
 
-P0 spike và P1 domain/persistence đã triển khai. P1 có canonical SQLite store, operation ledger, fenced leases và subprocess crash/recovery tests; xem [trạng thái kiểm chứng](IMPLEMENTATION_STATUS.md). P0.4 đang được kiểm chứng qua profile xKiro và Windows native; direct OpenAI/Google live chưa chạy. UI và production orchestration/quality gate thuộc các phase sau.
+P0 spike và P1 domain/persistence đã triển khai. P1 có canonical SQLite store, operation ledger, fenced leases và subprocess crash/recovery tests; xem [trạng thái kiểm chứng](IMPLEMENTATION_STATUS.md). P0.4 DONE theo phạm vi cập nhật: lưu key an toàn, provider tùy chỉnh, xKiro live và Windows Server 2022 native (254 passed, 4 skipped); direct OpenAI/Google live chưa chạy. UI và production orchestration/quality gate thuộc các phase sau.
 
 Để tiếp tục coding: đọc `IMPLEMENTATION_PLAN.md`, dùng public contracts P1 để triển khai **P2.1 / P3.1**.
 

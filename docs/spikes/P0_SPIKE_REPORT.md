@@ -1,11 +1,13 @@
 # P0 Spike Report — Astra Multi
 
 **Date:** 2026-10-02  
-**Environment:** Windows NT 10.0.26200.0, Python 3.11.7, LangGraph 0.6.11
+**Environment (spike ban đầu):** Windows NT 10.0.26200.0, Python 3.11.7, LangGraph 0.6.11
 
 ## Summary
 
-P0 spike xác nhận LangGraph phù hợp làm orchestration runtime cho Astra Multi. Tất cả khả năng cần thiết đã được chứng minh bằng code chạy được trên Windows với 25 tests passed.
+P0 spike xác nhận LangGraph phù hợp làm orchestration runtime cho Astra Multi; bản spike ban đầu có 25 tests passed. P0.4 hiện DONE theo phạm vi người dùng cập nhật: key storage an toàn, OpenAI/Google và custom profiles, hai model xKiro live, Windows native.
+
+Kiểm chứng bổ sung trên Windows Server 2022/Python 3.11.15: hai lần chạy đúng lệnh venv đều **254 passed, 4 skipped**, gồm OS credential lifecycle và real crash/restart. Direct OpenAI/Google live còn NOT_RUN do thiếu key riêng. [Bản ghi hiện tại và bằng chứng](../../IMPLEMENTATION_STATUS.md).
 
 ## Task Completion
 
@@ -14,7 +16,7 @@ P0 spike xác nhận LangGraph phù hợp làm orchestration runtime cho Astra M
 | P0.1 — Xác nhận assumptions và workspace | DONE | Python project, venv, dependencies installed, smoke import OK |
 | P0.2 — Workflow giả lập chạy xuyên suốt | DONE | 10 tests passed; CLI demo chạy end-to-end |
 | P0.3 — Checkpoint, interrupt, crash recovery | DONE | 10 tests passed; SQLite persistence, interrupt/resume, restart |
-| P0.4 — Smoke test hai provider | BLOCKED | Adapter code ready; 5 fake tests passed; 4 live tests SKIPPED (no API keys) |
+| P0.4 — Credentials, custom provider và native Windows | DONE theo phạm vi cập nhật | Bốn xKiro live PASS; key/profile lifecycle và Windows native đạt; direct OpenAI/Google live NOT_RUN |
 | P0.5 — Chốt runtime và bàn giao | DONE | ADR-001 written; lockfile created; spike report completed |
 
 ## Environment & Tools
@@ -36,8 +38,8 @@ P0 spike xác nhận LangGraph phù hợp làm orchestration runtime cho Astra M
 | D-004 | Use `SqliteSaver(conn)` not `from_conn_string` | Confirmed — context manager API |
 | A-001 | API-based LLM access (not CLI/harness) | Assumption — per PLAN.md §14 |
 | A-002 | Local-first, single user | Assumption — per PLAN.md §14 |
-| A-003 | Two providers: OpenAI + Google Gemini | Assumption — adapter code ready |
-| Q-001 | Which provider/model + budget for live test? | OPEN — blocks P0.4 live tests |
+| A-003 | OpenAI + Google Gemini và custom OpenAI-compatible profiles | SDK protocol tests đạt; hai Qwen model xKiro được kiểm tra live |
+| Q-001 | Which provider/model + budget for live test? | Smoke đã chọn hai Qwen3.8 model qua xKiro, một text + một JSON/model, retry 0; production budget còn cần chốt |
 | Q-002 | Code data policy — can code be sent to cloud LLM? | OPEN — affects provider selection |
 
 ## Pilot Thresholds (per PLAN.md §12.2)
@@ -75,9 +77,9 @@ uv pip install -e ".[dev,providers]"
 
 1. **LangChainPendingDeprecationWarning** — `allowed_objects` warning. Cosmetic, no impact.
 2. **Windows console encoding** — Use `$env:PYTHONIOENCODING='utf-8'` for proper output.
-3. **Spike schemas are dataclasses** — Need migration to Pydantic models in P1 for validation.
+3. **Spike và canonical state** — P1 đã bổ sung Pydantic domain contracts; production orchestration integration tiếp tục ở P3.
 4. **Fan-out is static (2 branches)** — PLAN.md supports this for MVP. Dynamic fan-out via `Send` API available if needed.
-5. **No real crash-kill test** — `test_restart_same_thread_no_duplicate_plan` tests checkpoint recovery through new connections but not actual process kill. Real kill test deferred to P6 integration testing.
+5. **Crash scope** — P1 đã có real subprocess forced-kill tại bốn durability boundaries, đạt trên Linux và Windows native; external provider execution chưa có exactly-once guarantee.
 
 ## Files Created
 

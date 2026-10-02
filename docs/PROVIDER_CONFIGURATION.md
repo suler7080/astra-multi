@@ -78,3 +78,5 @@ Report chứa response đúng smoke, model, usage, latency và error code; khôn
 ```
 
 `test_windows_native_credential_store_restart_rotation_removal` chỉ chạy trên Windows thật: set key tổng hợp, đọc ở process mới, rotate, remove và kiểm tra cleanup. Các contract tests dùng HTTPX MockTransport với SDK OpenAI/Google thật để xác nhận endpoint, header, schema, timeout và lỗi; không tiêu API budget. Crash/recovery dùng subprocess kill thực, không thay bằng mock.
+
+Live smoke đã chọn hai model Qwen3.8 qua xKiro; direct OpenAI/Google live còn NOT_RUN nếu thiếu key riêng. Trạng thái P0.4 theo phạm vi người dùng cập nhật và bằng chứng Windows native được ghi trong [bản bàn giao](../IMPLEMENTATION_STATUS.md).
