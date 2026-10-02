@@ -23,13 +23,28 @@ def start_worker(workspace, mode, *args):
     )
 
 
+def kill_worker(process):
+    """Terminate the worker and any interpreter it launched.
+
+    A Windows venv interpreter path can be a launcher whose real interpreter
+    runs as a child and keeps writing after the launcher is killed.
+    """
+    if sys.platform == "win32":
+        subprocess.run(
+            ["taskkill", "/F", "/T", "/PID", str(process.pid)],
+            capture_output=True,
+            check=False,
+        )
+    process.kill()
+
+
 def wait_line(process):
     with ThreadPoolExecutor(max_workers=1) as executor:
         reading = executor.submit(process.stdout.readline)
         try:
             line = reading.result(timeout=20).strip()
         except TimeoutError:
-            process.kill()
+            kill_worker(process)
             output, errors = process.communicate(timeout=10)
             pytest.fail(f"worker did not reach boundary: {output} {errors}")
     if not line:
@@ -62,11 +77,11 @@ def test_kill_restart_atomicity_and_domain_ahead_of_checkpoint(tmp_path, boundar
         assert wait_line(worker) == (
             "committed" if boundary == "after_domain_commit" else "uncommitted"
         )
-        worker.kill()
+        kill_worker(worker)
         worker.communicate(timeout=10)
     finally:
         if worker.poll() is None:
-            worker.kill()
+            kill_worker(worker)
             worker.communicate(timeout=10)
     with SQLiteStore(tmp_path / "domain.sqlite") as store:
         committed = boundary == "after_domain_commit"
@@ -106,7 +121,7 @@ def test_subprocess_lease_contention_and_takeover_fences_old_writer(tmp_path):
     finally:
         for worker in workers:
             if worker.poll() is None:
-                worker.kill()
+                kill_worker(worker)
                 worker.communicate(timeout=10)
     with SQLiteStore(tmp_path / "domain.sqlite") as store:
         lease_row = store.connection.execute(
