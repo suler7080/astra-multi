@@ -79,11 +79,15 @@ class SnapshotStore:
                 for part in path.relative_to(root).parts[:-1]:
                     directory = os.open(part, flags, dir_fd=directory)
                     stack.callback(os.close, directory)
-                descriptor = os.open(path.name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=directory)
+                descriptor = os.open(
+                    path.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory,
+                )
                 stream = stack.enter_context(os.fdopen(descriptor, "rb"))
             else:
                 stream = stack.enter_context(path.open("rb"))
             opened = os.fstat(stream.fileno())
+            if not stat.S_ISREG(opened.st_mode):
+                raise SnapshotError("source changed to a non-regular file")
             content = stream.read(maximum + 1)
             return content, opened, os.fstat(stream.fileno())
 

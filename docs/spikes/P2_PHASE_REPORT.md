@@ -5,10 +5,10 @@
 P2.1–P2.5 DONE for Linux Docker. Native Windows P2 runner is unavailable;
 Windows-specific capture/junction/container checks remain NOT_RUN.
 
-Full suite: **280 passed, 5 skipped** with ASTRA_P2_LIVE_SANDBOX=1.
+Full suite: **281 passed, 5 skipped** with ASTRA_P2_LIVE_SANDBOX=1.
 The five skips are direct OpenAI/Google credentialed live tests (four) and
 Windows Credential Manager on Linux (one).
-All 27 new P2/fixture tests passed, including eight sandbox scenarios.
+All 28 new P2/fixture tests passed, including eight sandbox scenarios and a file-to-FIFO capture race.
 Ruff using the documented P1 production/unit/integration/recovery scope plus P2
 passed; strict mypy covers 29 source files; uv source/wheel build passed.
 The repository-wide spike lint command also exposes existing spike-only lint

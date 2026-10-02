@@ -9,7 +9,7 @@ Ngày khởi tạo: 01/10/2026.
 - P1 contracts, canonical SQLite store và recovery đã triển khai; bộ kiểm tra mới nhất đạt **253 passed, 5 skipped** trên Linux Python 3.11, Ruff/strict mypy (18 source files)/build đạt.
 - **P1 DONE**; **P0.4 DONE** theo phạm vi cập nhật: lưu key an toàn, giữ OpenAI/Google, provider base URL tùy chỉnh và Windows native. Bốn live smoke xKiro qua profile môi trường đã PASS; direct OpenAI/Google live vẫn NOT_RUN do chưa có key riêng.
 - Windows Server 2022 native, Python 3.11.15: hai lần chạy tuần tự đúng lệnh venv đều **254 passed, 4 skipped**; toàn bộ crash/recovery, Windows Credential Manager và CLI lifecycle đạt, credential tổng hợp được dọn và không còn worker tồn tại.
-- **P2.1–P2.5 DONE với Linux Docker**: immutable snapshots, broker, persisted evidence/context và sandbox; **280 passed, 5 skipped**, Ruff/mypy (29 source files)/uv build đạt. Native Windows P2 vẫn NOT_RUN, profile Windows trả unavailable.
+- **P2.1–P2.5 DONE với Linux Docker**: immutable snapshots, broker, persisted evidence/context và sandbox; **281 passed, 5 skipped**, Ruff/mypy (29 source files)/uv build đạt. Native Windows P2 vẫn NOT_RUN, profile Windows trả unavailable.
 - Task tiếp theo: **P3.1**, dùng [P1](docs/P1_CONTRACTS.md) và [P2 contracts](docs/P2_CONTRACTS.md).
 
 ## Task board

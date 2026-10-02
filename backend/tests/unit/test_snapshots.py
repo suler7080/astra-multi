@@ -1,3 +1,4 @@
+import os
 import subprocess
 
 import pytest
@@ -8,6 +9,25 @@ from astra_multi.context.snapshots import (
     SnapshotStore,
 )
 from astra_multi.persistence.artifacts import FileArtifactStore
+
+
+@pytest.mark.skipif(os.name != "posix", reason="NOT_RUN: POSIX FIFO capture race")
+def test_regular_file_replaced_by_fifo_does_not_block_capture(tmp_path, monkeypatch):
+    root = tmp_path / "source"
+    root.mkdir()
+    path = root / "app.py"
+    path.write_text("original")
+    store = SnapshotStore(FileArtifactStore(tmp_path / "artifacts"))
+    read = store._read
+
+    def replace_before_open(root, path, maximum):
+        path.unlink()
+        os.mkfifo(path)
+        return read(root, path, maximum)
+
+    monkeypatch.setattr(store, "_read", replace_before_open)
+    with pytest.raises(SnapshotError, match="non-regular"):
+        store.capture(root, attempts=1)
 
 
 @pytest.fixture
