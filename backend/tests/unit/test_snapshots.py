@@ -140,6 +140,33 @@ def test_links_are_excluded_and_artifact_tampering_fails(tmp_path, snapshot_stor
         snapshot_store.read(ref, "file")
 
 
+@pytest.mark.skipif(os.name != "nt", reason="NOT_RUN: native Windows junction")
+def test_windows_junction_cannot_enter_snapshot(tmp_path, snapshot_store):
+    root = tmp_path / "repo"
+    outside = tmp_path / "outside"
+    root.mkdir()
+    outside.mkdir()
+    (root / "inside.txt").write_bytes(b"inside")
+    (outside / "secret.txt").write_bytes(b"outside-only-fixture")
+    link = root / "escape"
+    result = subprocess.run(
+        ["cmd", "/c", "mklink", "/J", str(link), str(outside)],
+        capture_output=True,
+    )
+    if result.returncode:
+        pytest.skip(f"NOT_RUN: cannot create junction: {result.stderr!r}")
+    ref = snapshot_store.capture(root)
+    assert snapshot_store.manifest(ref).excluded["escape"] == "link/reparse-point"
+    assert set(ref.snapshot.file_hashes) == {"inside.txt"}
+    with pytest.raises(SnapshotError, match="absent"):
+        snapshot_store.read(ref, "escape/secret.txt")
+    destination = tmp_path / "materialized"
+    snapshot_store.materialize(ref, destination)
+    assert not (destination / "escape").exists()
+    assert (destination / "inside.txt").read_bytes() == b"inside"
+    assert (outside / "secret.txt").read_bytes() == b"outside-only-fixture"
+
+
 def test_capture_quotas_and_case_collision(tmp_path, snapshot_store):
     root = tmp_path / "source"
     root.mkdir()
