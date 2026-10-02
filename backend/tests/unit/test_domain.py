@@ -15,6 +15,7 @@ from astra_multi.domain.commands import (
     ReviseTask,
     TransitionRun,
 )
+from astra_multi.domain.export_contracts import CONTRACTS, invalid_samples, samples
 from astra_multi.domain.fixtures import sample_issue, sample_plan, sample_state
 from astra_multi.domain.models import (
     BudgetReservation,
@@ -527,3 +528,42 @@ def test_domain_import_does_not_load_framework_or_sdks():
         ],
         check=True,
     )
+
+
+def test_exported_samples_validate_and_cover_all_contracts():
+    fixtures = samples()
+    assert {contract.__name__ for contract in CONTRACTS} <= fixtures.keys()
+    for fixture in fixtures.values():
+        assert type(fixture).model_validate_json(fixture.model_dump_json()) == fixture
+    for payload in invalid_samples().values():
+        with pytest.raises(ValidationError):
+            Run.model_validate(payload)
+
+
+def test_validation_cannot_reference_an_unfinished_tool():
+    state = sample_state()
+    tool = ToolCall(
+        id="TOOL",
+        run_id=state.run.id,
+        request_hash="a" * 64,
+        arguments_redacted={},
+        environment="sandbox",
+        snapshot_id=None,
+        exit_code=None,
+        output_artifact=None,
+        started_at=utc_now(),
+        finished_at=None,
+    )
+    state = mutate(state, AddRecord(**command_args(state), record=tool))
+    validation = ValidationResult(
+        id="VALID",
+        run_id=state.run.id,
+        status=ValidationStatus.PASS,
+        expected="200",
+        actual="200",
+        exit_code=0,
+        tool_call_id=tool.id,
+        executed_at=utc_now(),
+    )
+    with pytest.raises(ValidationError, match="completed tool call"):
+        mutate(state, AddRecord(**command_args(state), record=validation))

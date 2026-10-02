@@ -1,7 +1,7 @@
 import json
-import selectors
 import subprocess
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 
 import pytest
@@ -24,13 +24,14 @@ def start_worker(workspace, mode, *args):
 
 
 def wait_line(process):
-    with selectors.DefaultSelector() as selector:
-        selector.register(process.stdout, selectors.EVENT_READ)
-        if not selector.select(timeout=20):
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        reading = executor.submit(process.stdout.readline)
+        try:
+            line = reading.result(timeout=20).strip()
+        except TimeoutError:
             process.kill()
             output, errors = process.communicate(timeout=10)
             pytest.fail(f"worker did not reach boundary: {output} {errors}")
-    line = process.stdout.readline().strip()
     if not line:
         output, errors = process.communicate(timeout=10)
         pytest.fail(f"worker exited before boundary: {output} {errors}")

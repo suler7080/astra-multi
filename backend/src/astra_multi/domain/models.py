@@ -349,6 +349,14 @@ class ToolCall(RunEntity):
     started_at: UTC
     finished_at: UTC | None
 
+    @model_validator(mode="after")
+    def execution_contract(self) -> Self:
+        if (self.exit_code is None) != (self.finished_at is None):
+            raise ValueError("tool completion needs exit code and finished_at")
+        if self.finished_at is not None and self.finished_at < self.started_at:
+            raise ValueError("tool cannot finish before it starts")
+        return self
+
 
 class ModelCall(RunEntity):
     role: Text
@@ -465,6 +473,10 @@ class RunState(Contract):
             raise ValueError("task history must be consecutive")
         if any(t.id != self.task.id for t in self.tasks):
             raise ValueError("task identity is immutable")
+        if [change.task_revision for change in self.task_changes] != list(
+            range(2, len(self.tasks) + 1)
+        ):
+            raise ValueError("task revisions require consecutive change provenance")
         if self.run.snapshot_id != (self.snapshot.id if self.snapshot else None):
             raise ValueError("snapshot reference mismatch")
         if [p.revision for p in self.plans] != list(range(1, len(self.plans) + 1)):
@@ -492,6 +504,7 @@ class RunState(Contract):
         current_requirements = {r.id for r in self.task.requirements}
         evidence = {e.id for e in self.evidence}
         tools = {t.id for t in self.tool_calls}
+        tool_by_id = {t.id: t for t in self.tool_calls}
         claims = {c.id for c in self.claims}
         issues = {i.id for i in self.issues}
         steps = {s.id for p in self.plans for s in p.steps}
@@ -528,6 +541,15 @@ class RunState(Contract):
         for item in self.evidence:
             snapshot_ref(item.snapshot_id)
             refs([item.tool_call_id] if item.tool_call_id else [], tools)
+            if item.status != ValidationStatus.NOT_RUN:
+                assert item.tool_call_id is not None
+                tool = tool_by_id[item.tool_call_id]
+                if tool.finished_at is None or (
+                    item.status == ValidationStatus.PASS and tool.exit_code != 0
+                ):
+                    raise ValueError(
+                        "evidence status requires a completed matching tool result"
+                    )
         for tool in self.tool_calls:
             snapshot_ref(tool.snapshot_id)
         for proposal in self.proposals:
@@ -560,4 +582,9 @@ class RunState(Contract):
             refs(validation.step_ids, steps)
             refs(validation.evidence_ids, evidence)
             refs([validation.tool_call_id] if validation.tool_call_id else [], tools)
+            if validation.status != ValidationStatus.NOT_RUN:
+                assert validation.tool_call_id is not None
+                tool = tool_by_id[validation.tool_call_id]
+                if tool.finished_at is None or validation.exit_code != tool.exit_code:
+                    raise ValueError("validation must match a completed tool call")
         return self

@@ -60,6 +60,7 @@ class WorkflowState(TypedDict, total=False):
 def intake_node(state: WorkflowState) -> dict:
     """Validate task spec and initialize run."""
     task = state["task"]
+    TaskSpec.model_validate(task)
     return {
         "phase": Phase.INTAKE.value,
         "round": 0,

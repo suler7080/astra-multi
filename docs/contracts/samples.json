@@ -1,0 +1,486 @@
+{
+  "valid": {
+    "TaskSpec": {
+      "schema_version": 1,
+      "id": "TASK-001",
+      "created_at": "2026-10-02T09:45:06.383782Z",
+      "revision": 1,
+      "goal": "Add health endpoint",
+      "requirements": [
+        {
+          "schema_version": 1,
+          "id": "REQ-001",
+          "created_at": "2026-10-02T09:45:06.383757Z",
+          "text": "Report service health",
+          "acceptance": "GET /health returns 200"
+        }
+      ],
+      "constraints": [],
+      "non_goals": [],
+      "acceptance_criteria": [],
+      "unknowns": []
+    },
+    "Run": {
+      "schema_version": 1,
+      "id": "RUN-001",
+      "created_at": "2026-10-02T09:45:06.383835Z",
+      "task_id": "TASK-001",
+      "task_revision": 1,
+      "snapshot_id": "SNAP-001",
+      "mode": "repo",
+      "revision": 1,
+      "phase": "INTAKE",
+      "status": "RUNNING",
+      "stop_reason": null,
+      "config_hash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "budget": {
+        "schema_version": 1,
+        "token_limit": 0,
+        "cost_limit": 0.0
+      },
+      "updated_at": "2026-10-02T09:45:06.383859Z",
+      "parent_run_id": null
+    },
+    "GreenfieldRun": {
+      "schema_version": 1,
+      "id": "RUN-001",
+      "created_at": "2026-10-02T09:45:06.383946Z",
+      "task_id": "TASK-001",
+      "task_revision": 1,
+      "snapshot_id": null,
+      "mode": "greenfield",
+      "revision": 1,
+      "phase": "INTAKE",
+      "status": "RUNNING",
+      "stop_reason": null,
+      "config_hash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "budget": {
+        "schema_version": 1,
+        "token_limit": 0,
+        "cost_limit": 0.0
+      },
+      "updated_at": "2026-10-02T09:45:06.383950Z",
+      "parent_run_id": null
+    },
+    "Snapshot": {
+      "schema_version": 1,
+      "id": "SNAP-001",
+      "created_at": "2026-10-02T09:45:06.383797Z",
+      "source_path": "workspace",
+      "commit_if_any": null,
+      "dirty": false,
+      "manifest_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "file_hashes": {
+        "app.py": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      },
+      "excluded_patterns": []
+    },
+    "Claim": {
+      "schema_version": 1,
+      "id": "CLAIM",
+      "created_at": "2026-10-02T09:45:06.383971Z",
+      "run_id": "RUN-001",
+      "text": "Health response unverified",
+      "kind": "unknown",
+      "evidence_ids": [],
+      "snapshot_id": "SNAP-001"
+    },
+    "Evidence": {
+      "schema_version": 1,
+      "id": "EVID",
+      "created_at": "2026-10-02T09:45:06.383988Z",
+      "run_id": "RUN-001",
+      "source_type": "document",
+      "locator": "requirement",
+      "content_hash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "captured_at": "2026-10-02T09:45:06.383889Z",
+      "snapshot_id": null,
+      "tool_call_id": null,
+      "status": "NOT_RUN",
+      "artifact": null
+    },
+    "Proposal": {
+      "schema_version": 1,
+      "id": "PROP",
+      "created_at": "2026-10-02T09:45:06.384019Z",
+      "run_id": "RUN-001",
+      "author_role": "planner",
+      "base_revision": 0,
+      "approach": "Add HTTP health route",
+      "alternatives": [],
+      "tradeoffs": [],
+      "claim_ids": [],
+      "requirement_coverage": {}
+    },
+    "Issue": {
+      "schema_version": 1,
+      "id": "ISSUE-001",
+      "created_at": "2026-10-02T09:45:06.384035Z",
+      "run_id": "RUN-001",
+      "severity": "blocking",
+      "status": "open",
+      "based_on_revision": 0,
+      "claim": "Health failure behavior unspecified",
+      "impact": "Clients may misreport outages",
+      "verification_request": "Verify unhealthy response",
+      "suggested_resolution": "Specify failure response",
+      "requirement_ids": [
+        "REQ-001"
+      ],
+      "evidence_ids": [],
+      "resolution": null,
+      "duplicate_of": null,
+      "history": []
+    },
+    "Decision": {
+      "schema_version": 1,
+      "id": "DEC",
+      "created_at": "2026-10-02T09:45:06.384054Z",
+      "run_id": "RUN-001",
+      "question": "Transport",
+      "chosen": "HTTP",
+      "rationale": "Matches client",
+      "alternatives": [],
+      "evidence_ids": [],
+      "related_issues": []
+    },
+    "PlanRevision": {
+      "schema_version": 1,
+      "id": "PLAN-1",
+      "created_at": "2026-10-02T09:45:06.383913Z",
+      "run_id": "RUN-001",
+      "revision": 1,
+      "based_on_revision": 0,
+      "requirements_revision": 1,
+      "snapshot_id": "SNAP-001",
+      "steps": [
+        {
+          "schema_version": 1,
+          "id": "STEP-001",
+          "created_at": "2026-10-02T09:45:06.383897Z",
+          "objective": "Implement health route",
+          "requirement_ids": [
+            "REQ-001"
+          ],
+          "dependencies": [],
+          "targets": [],
+          "validation": "Run HTTP integration test",
+          "deliverables": [
+            "health route"
+          ],
+          "completion_criteria": [
+            "Response status is 200"
+          ],
+          "evidence_ids": []
+        }
+      ],
+      "decisions": [],
+      "risks": [],
+      "issues_addressed": []
+    },
+    "PlanStep": {
+      "schema_version": 1,
+      "id": "STEP-001",
+      "created_at": "2026-10-02T09:45:06.383897Z",
+      "objective": "Implement health route",
+      "requirement_ids": [
+        "REQ-001"
+      ],
+      "dependencies": [],
+      "targets": [],
+      "validation": "Run HTTP integration test",
+      "deliverables": [
+        "health route"
+      ],
+      "completion_criteria": [
+        "Response status is 200"
+      ],
+      "evidence_ids": []
+    },
+    "ToolCall": {
+      "schema_version": 1,
+      "id": "TOOL",
+      "created_at": "2026-10-02T09:45:06.384067Z",
+      "run_id": "RUN-001",
+      "request_hash": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "arguments_redacted": {
+        "command": "pytest"
+      },
+      "environment": "sandbox",
+      "snapshot_id": "SNAP-001",
+      "exit_code": null,
+      "output_artifact": null,
+      "started_at": "2026-10-02T09:45:06.383889Z",
+      "finished_at": null
+    },
+    "ModelCall": {
+      "schema_version": 1,
+      "id": "MODEL",
+      "created_at": "2026-10-02T09:45:06.384103Z",
+      "run_id": "RUN-001",
+      "role": "planner",
+      "provider": "fake",
+      "model_id": "fixture",
+      "prompt_version": "1",
+      "input_hash": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "usage": {},
+      "estimated_cost": 0.0,
+      "attempts": 1,
+      "output_artifact": null
+    },
+    "Event": {
+      "schema_version": 1,
+      "id": "EVENT",
+      "created_at": "2026-10-02T09:45:06.384130Z",
+      "run_id": "RUN-001",
+      "sequence": 1,
+      "type": "run_created",
+      "actor": "controller",
+      "revision": 1,
+      "payload": {
+        "task_id": "TASK-001"
+      },
+      "payload_ref": null,
+      "timestamp": "2026-10-02T09:45:06.383889Z"
+    },
+    "Question": {
+      "schema_version": 1,
+      "id": "QUESTION",
+      "created_at": "2026-10-02T09:45:06.384145Z",
+      "run_id": "RUN-001",
+      "text": "Is authentication required?",
+      "blocking": true,
+      "requirement_ids": [],
+      "answer": null,
+      "answered_by": null,
+      "answered_at": null
+    },
+    "ValidationResult": {
+      "schema_version": 1,
+      "id": "VALIDATION",
+      "created_at": "2026-10-02T09:45:06.384158Z",
+      "run_id": "RUN-001",
+      "status": "NOT_RUN",
+      "expected": "GET /health returns 200",
+      "actual": null,
+      "exit_code": null,
+      "tool_call_id": null,
+      "executed_at": null,
+      "requirement_ids": [],
+      "step_ids": [],
+      "evidence_ids": []
+    },
+    "BudgetReservation": {
+      "schema_version": 1,
+      "id": "RESERVATION",
+      "created_at": "2026-10-02T09:45:06.384173Z",
+      "run_id": "RUN-001",
+      "operation_id": "model-1",
+      "tokens": 100,
+      "cost": 0.01,
+      "status": "reserved"
+    },
+    "OperationRecord": {
+      "schema_version": 1,
+      "id": "OPERATION",
+      "created_at": "2026-10-02T09:45:06.384189Z",
+      "run_id": "RUN-001",
+      "node": "revise",
+      "logical_operation_id": "plan-1",
+      "request_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "revision": 2,
+      "event_sequence": 2,
+      "result": {
+        "plan_id": "PLAN-1",
+        "plan_revision": 1
+      }
+    },
+    "ArtifactRef": {
+      "schema_version": 1,
+      "content_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "size": 12
+    },
+    "CheckpointRef": {
+      "schema_version": 1,
+      "run_id": "RUN-001",
+      "revision": 1,
+      "task_id": "TASK-001",
+      "task_revision": 1,
+      "plan_id": null
+    },
+    "Lease": {
+      "schema_version": 1,
+      "run_id": "RUN-001",
+      "owner": "worker",
+      "token": "sample-token",
+      "epoch": 1,
+      "expires_at": "2026-10-02T09:45:06.383889Z"
+    },
+    "RunState": {
+      "schema_version": 1,
+      "run": {
+        "schema_version": 1,
+        "id": "RUN-001",
+        "created_at": "2026-10-02T09:45:06.383835Z",
+        "task_id": "TASK-001",
+        "task_revision": 1,
+        "snapshot_id": "SNAP-001",
+        "mode": "repo",
+        "revision": 1,
+        "phase": "INTAKE",
+        "status": "RUNNING",
+        "stop_reason": null,
+        "config_hash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "budget": {
+          "schema_version": 1,
+          "token_limit": 0,
+          "cost_limit": 0.0
+        },
+        "updated_at": "2026-10-02T09:45:06.383859Z",
+        "parent_run_id": null
+      },
+      "tasks": [
+        {
+          "schema_version": 1,
+          "id": "TASK-001",
+          "created_at": "2026-10-02T09:45:06.383782Z",
+          "revision": 1,
+          "goal": "Add health endpoint",
+          "requirements": [
+            {
+              "schema_version": 1,
+              "id": "REQ-001",
+              "created_at": "2026-10-02T09:45:06.383757Z",
+              "text": "Report service health",
+              "acceptance": "GET /health returns 200"
+            }
+          ],
+          "constraints": [],
+          "non_goals": [],
+          "acceptance_criteria": [],
+          "unknowns": []
+        }
+      ],
+      "snapshot": {
+        "schema_version": 1,
+        "id": "SNAP-001",
+        "created_at": "2026-10-02T09:45:06.383797Z",
+        "source_path": "workspace",
+        "commit_if_any": null,
+        "dirty": false,
+        "manifest_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "file_hashes": {
+          "app.py": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        },
+        "excluded_patterns": []
+      },
+      "task_changes": [],
+      "plans": [],
+      "claims": [],
+      "evidence": [],
+      "proposals": [],
+      "issues": [],
+      "decisions": [],
+      "tool_calls": [],
+      "model_calls": [],
+      "questions": [],
+      "validations": [],
+      "reservations": []
+    },
+    "IssueResolution": {
+      "schema_version": 1,
+      "text": "Candidate addresses health failure",
+      "evidence_ids": [],
+      "reviewed_revision": 1,
+      "reviewer": "reviewer",
+      "review_result": "PASS",
+      "review_note": "Reviewed candidate",
+      "requirement_change": null
+    }
+  },
+  "invalid_runs": {
+    "missing_snapshot_reference": {
+      "schema_version": 1,
+      "id": "RUN-001",
+      "created_at": "2026-10-02T09:45:06.387042Z",
+      "task_id": "TASK-001",
+      "task_revision": 1,
+      "mode": "greenfield",
+      "revision": 1,
+      "phase": "INTAKE",
+      "status": "RUNNING",
+      "stop_reason": null,
+      "config_hash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "budget": {
+        "schema_version": 1,
+        "token_limit": 0,
+        "cost_limit": 0.0
+      },
+      "updated_at": "2026-10-02T09:45:06.387051Z",
+      "parent_run_id": null
+    },
+    "invalid_phase": {
+      "schema_version": 1,
+      "id": "RUN-001",
+      "created_at": "2026-10-02T09:45:06.387042Z",
+      "task_id": "TASK-001",
+      "task_revision": 1,
+      "snapshot_id": null,
+      "mode": "greenfield",
+      "revision": 1,
+      "phase": "FINAL",
+      "status": "RUNNING",
+      "stop_reason": null,
+      "config_hash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "budget": {
+        "schema_version": 1,
+        "token_limit": 0,
+        "cost_limit": 0.0
+      },
+      "updated_at": "2026-10-02T09:45:06.387051Z",
+      "parent_run_id": null
+    },
+    "greenfield_with_snapshot": {
+      "schema_version": 1,
+      "id": "RUN-001",
+      "created_at": "2026-10-02T09:45:06.387042Z",
+      "task_id": "TASK-001",
+      "task_revision": 1,
+      "snapshot_id": "SNAP-001",
+      "mode": "greenfield",
+      "revision": 1,
+      "phase": "INTAKE",
+      "status": "RUNNING",
+      "stop_reason": null,
+      "config_hash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "budget": {
+        "schema_version": 1,
+        "token_limit": 0,
+        "cost_limit": 0.0
+      },
+      "updated_at": "2026-10-02T09:45:06.387051Z",
+      "parent_run_id": null
+    },
+    "naive_timestamp": {
+      "schema_version": 1,
+      "id": "RUN-001",
+      "created_at": "2026-10-02T00:00:00",
+      "task_id": "TASK-001",
+      "task_revision": 1,
+      "snapshot_id": null,
+      "mode": "greenfield",
+      "revision": 1,
+      "phase": "INTAKE",
+      "status": "RUNNING",
+      "stop_reason": null,
+      "config_hash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "budget": {
+        "schema_version": 1,
+        "token_limit": 0,
+        "cost_limit": 0.0
+      },
+      "updated_at": "2026-10-02T09:45:06.387051Z",
+      "parent_run_id": null
+    }
+  }
+}
