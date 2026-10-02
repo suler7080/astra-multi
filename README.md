@@ -10,12 +10,13 @@ Môi trường cho các LLM coding phân tích độc lập, thảo luận có b
 - [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md): task board và mẫu bàn giao tiến độ thực tế.
 - [plans/](plans/): bảy plan giai đoạn, gồm 33 task có đầu ra và tiêu chí nghiệm thu.
 - [docs/P1_CONTRACTS.md](docs/P1_CONTRACTS.md): public domain/repository API, revision/lease rules, schema samples và commands kiểm chứng.
+- [docs/P2_CONTRACTS.md](docs/P2_CONTRACTS.md): immutable snapshot, tool/evidence/context interfaces, Docker runner và demo bàn giao P3.
 
 ## Trạng thái
 
 P0 spike và P1 domain/persistence đã triển khai. P1 có canonical SQLite store, operation ledger, fenced leases và subprocess crash/recovery tests; xem [trạng thái kiểm chứng](IMPLEMENTATION_STATUS.md). P0.4 DONE theo phạm vi cập nhật: lưu key an toàn, provider tùy chỉnh, xKiro live và Windows Server 2022 native (254 passed, 4 skipped); direct OpenAI/Google live chưa chạy. UI và production orchestration/quality gate thuộc các phase sau.
 
-Để tiếp tục coding: đọc `IMPLEMENTATION_PLAN.md`, dùng public contracts P1 để triển khai **P2.1 / P3.1**.
+P2.1–P2.5 đã triển khai và kiểm chứng với **Linux Docker**; Windows-specific P2 vẫn NOT_RUN và runner Windows trả unavailable. Xem [báo cáo P2](docs/spikes/P2_PHASE_REPORT.md). Để tiếp tục coding: đọc `IMPLEMENTATION_PLAN.md` và public contracts P1/P2 để triển khai **P3.1**.
 
 ## API keys và provider tùy chỉnh
 

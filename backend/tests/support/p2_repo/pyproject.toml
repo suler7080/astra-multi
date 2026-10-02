@@ -1,0 +1,4 @@
+[project]
+name = "astra-p2-fixture"
+version = "0.1.0"
+dependencies = []

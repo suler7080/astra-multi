@@ -9,7 +9,8 @@ Ngày khởi tạo: 01/10/2026.
 - P1 contracts, canonical SQLite store và recovery đã triển khai; bộ kiểm tra mới nhất đạt **253 passed, 5 skipped** trên Linux Python 3.11, Ruff/strict mypy (18 source files)/build đạt.
 - **P1 DONE**; **P0.4 DONE** theo phạm vi cập nhật: lưu key an toàn, giữ OpenAI/Google, provider base URL tùy chỉnh và Windows native. Bốn live smoke xKiro qua profile môi trường đã PASS; direct OpenAI/Google live vẫn NOT_RUN do chưa có key riêng.
 - Windows Server 2022 native, Python 3.11.15: hai lần chạy tuần tự đúng lệnh venv đều **254 passed, 4 skipped**; toàn bộ crash/recovery, Windows Credential Manager và CLI lifecycle đạt, credential tổng hợp được dọn và không còn worker tồn tại.
-- Task tiếp theo: **P2.1 / P3.1**, dùng [public contracts](docs/P1_CONTRACTS.md).
+- **P2.1–P2.5 DONE với Linux Docker**: immutable snapshots, broker, persisted evidence/context và sandbox; **280 passed, 5 skipped**, Ruff/mypy (29 source files)/uv build đạt. Native Windows P2 vẫn NOT_RUN, profile Windows trả unavailable.
+- Task tiếp theo: **P3.1**, dùng [P1](docs/P1_CONTRACTS.md) và [P2 contracts](docs/P2_CONTRACTS.md).
 
 ## Task board
 
@@ -25,7 +26,7 @@ Ngày khởi tạo: 01/10/2026.
 | P1 | P1.3 | DONE | SQLite migration v1, atomic state/event/ledger, idempotency, hash artifacts và rollback |
 | P1 | P1.4 | DONE | Lease token/epoch fencing, heartbeat/takeover, subprocess kill/restart và contention; ADR-002 |
 | P1 | P1.5 | DONE | Repository protocols, checkpoint refs, sample client restart, schemas/samples, contracts docs; spike dùng domain models |
-| P2 | P2.1, P2.2, P2.3, P2.4, P2.5 | Tất cả TODO | |
+| P2 | P2.1, P2.2, P2.3, P2.4, P2.5 | DONE | Linux Docker live gate đạt; Windows P2 NOT_RUN/unavailable. Xem docs/spikes/P2_PHASE_REPORT.md |
 | P3 | P3.1, P3.2, P3.3, P3.4, P3.5 | Tất cả TODO | |
 | P4 | P4.1, P4.2, P4.3, P4.4 | Tất cả TODO | |
 | P5 | P5.1, P5.2, P5.3, P5.4, P5.5 | Tất cả TODO | |

@@ -54,10 +54,12 @@ Cho tất cả vai trò dùng cùng dữ kiện và dẫn nguồn được. Tham
 
 ## 3. Exit gate
 
-- [ ] Git dirty/non-Git snapshot chính xác, immutable và có exclusion manifest.
-- [ ] Read/search có scope, provenance và output limits.
-- [ ] Evidence/context service bàn giao được cho workflow.
-- [ ] Runner có live check phù hợp target đã chọn; nếu thiếu hạ tầng ghi phase BLOCKED cho gate này. P3 có thể phát triển nhánh degraded mode bằng fake/unavailable result nhưng không tính thay live verification.
-- [ ] ADR-005 và contracts được cập nhật.
+- [x] Git dirty/non-Git snapshot chính xác, immutable và có exclusion manifest.
+- [x] Read/search có scope, provenance và output limits.
+- [x] Evidence/context service bàn giao được cho workflow.
+- [x] Runner có live check phù hợp target đã chọn: Linux Docker. Windows-specific P2 vẫn NOT_RUN; profile Windows trả unavailable.
+- [x] ADR-005 và contracts được cập nhật.
+
+Kết quả: [phase report](../docs/spikes/P2_PHASE_REPORT.md), [public contracts](../docs/P2_CONTRACTS.md) và [ADR-005](../docs/adr/ADR-005-snapshot-sandbox.md).
 
 **Bàn giao P3:** SnapshotRef, ToolRequest/Result, EvidenceRef, ContextBundle, availability/error semantics và fixtures. Xem [implementation plan](../IMPLEMENTATION_PLAN.md).
