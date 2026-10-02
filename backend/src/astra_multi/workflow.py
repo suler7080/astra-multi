@@ -8,26 +8,23 @@ from __future__ import annotations
 
 import json
 import operator
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict
 from typing import Annotated, Any, TypedDict
 
 from langgraph.graph import END, StateGraph
 
 from astra_multi import fake_model
+from astra_multi.domain.models import IssueResolution, Requirement
 from astra_multi.schemas import (
-    IndependentAnalysis,
-    Issue,
     IssueStatus,
     Phase,
-    PlanRevision,
-    Proposal,
     TaskSpec,
 )
-
 
 # ---------------------------------------------------------------------------
 # Graph state — shared blackboard
 # ---------------------------------------------------------------------------
+
 
 def _merge_analyses(
     existing: list[dict[str, Any]], new: list[dict[str, Any]]
@@ -41,6 +38,7 @@ def _merge_analyses(
 
 class WorkflowState(TypedDict, total=False):
     """Graph state. Annotations control how parallel outputs merge."""
+
     task: dict[str, Any]
     phase: str
     analyses: Annotated[list[dict[str, Any]], _merge_analyses]
@@ -58,15 +56,19 @@ class WorkflowState(TypedDict, total=False):
 # Nodes
 # ---------------------------------------------------------------------------
 
+
 def intake_node(state: WorkflowState) -> dict:
     """Validate task spec and initialize run."""
     task = state["task"]
+    TaskSpec.model_validate(task)
     return {
         "phase": Phase.INTAKE.value,
         "round": 0,
         "max_rounds": state.get("max_rounds", 2),
         "issues": [],
-        "events": [f"[INTAKE] Task {task['id']} accepted, {len(task['requirements'])} requirements"],
+        "events": [
+            f"[INTAKE] Task {task['id']} accepted, {len(task['requirements'])} requirements"
+        ],
     }
 
 
@@ -105,7 +107,7 @@ def propose_node(state: WorkflowState) -> dict:
     proposal = result.content
     return {
         "phase": Phase.PROPOSE.value,
-        "proposal": asdict(proposal),
+        "proposal": proposal.model_dump(mode="json"),
         "events": [f"[PROPOSE] Proposal {proposal.id}: {proposal.approach[:60]}"],
     }
 
@@ -117,12 +119,14 @@ def review_node(state: WorkflowState) -> dict:
         messages=[{"role": "user", "content": "Review the proposal for issues"}],
     )
     issues = result.content
-    issues_dicts = [asdict(i) for i in issues]
+    issues_dicts = [i.model_dump(mode="json") for i in issues]
     return {
         "phase": Phase.REVIEW.value,
         "issues": issues_dicts,
-        "events": [f"[REVIEW] Found {len(issues)} issues, "
-                   f"{sum(1 for i in issues if i.severity.value == 'blocking')} blocking"],
+        "events": [
+            f"[REVIEW] Found {len(issues)} issues, "
+            f"{sum(1 for i in issues if i.severity.value == 'blocking')} blocking"
+        ],
     }
 
 
@@ -139,17 +143,24 @@ def revise_node(state: WorkflowState) -> dict:
     for issue in state.get("issues", []):
         issue_copy = dict(issue)
         issue_copy["status"] = IssueStatus.RESOLVED.value
-        issue_copy["resolution"] = f"Addressed in plan revision {plan.revision}"
-        issue_copy["reviewed_revision"] = plan.revision
+        issue_copy["resolution"] = IssueResolution(
+            text=f"Addressed in plan revision {plan.revision}",
+            reviewed_revision=plan.revision,
+            reviewer="fake-reviewer",
+            review_result="PASS",
+            review_note="Deterministic spike fixture review",
+        ).model_dump(mode="json")
         resolved_issues.append(issue_copy)
 
     return {
         "phase": Phase.REVISE.value,
-        "plan": asdict(plan),
+        "plan": plan.model_dump(mode="json"),
         "issues": resolved_issues,
         "round": current_round,
-        "events": [f"[REVISE] Round {current_round}: plan revision {plan.revision}, "
-                   f"{len(resolved_issues)} issues addressed"],
+        "events": [
+            f"[REVISE] Round {current_round}: plan revision {plan.revision}, "
+            f"{len(resolved_issues)} issues addressed"
+        ],
     }
 
 
@@ -165,8 +176,10 @@ def gate_node(state: WorkflowState) -> dict:
 
     # Check all blocking issues resolved
     unresolved_blocking = [
-        i for i in issues
-        if i.get("severity") == "blocking" and i.get("status") != IssueStatus.RESOLVED.value
+        i
+        for i in issues
+        if i.get("severity") == "blocking"
+        and i.get("status") != IssueStatus.RESOLVED.value
     ]
     if unresolved_blocking:
         problems.append(f"{len(unresolved_blocking)} unresolved blocking issues")
@@ -205,7 +218,9 @@ def gate_node(state: WorkflowState) -> dict:
         "phase": Phase.QUALITY_GATE.value,
         "gate_passed": passed,
         "stop_reason": "" if passed else "; ".join(problems),
-        "events": [f"[GATE] {'PASSED' if passed else 'FAILED'}: {'; '.join(problems) if problems else 'all checks OK'}"],
+        "events": [
+            f"[GATE] {'PASSED' if passed else 'FAILED'}: {'; '.join(problems) if problems else 'all checks OK'}"
+        ],
     }
 
 
@@ -238,7 +253,9 @@ def export_node(state: WorkflowState) -> dict:
     for step in plan.get("steps", []):
         md_lines.append(f"### {step['id']}: {step['objective']}")
         md_lines.append(f"- Requirements: {', '.join(step.get('requirement_ids', []))}")
-        md_lines.append(f"- Dependencies: {', '.join(step.get('dependencies', [])) or 'none'}")
+        md_lines.append(
+            f"- Dependencies: {', '.join(step.get('dependencies', [])) or 'none'}"
+        )
         md_lines.append(f"- Validation: {step['validation']}")
         md_lines.append(f"- Deliverables: {', '.join(step.get('deliverables', []))}")
         md_lines.append("")
@@ -252,7 +269,9 @@ def export_node(state: WorkflowState) -> dict:
     export_md = "\n".join(md_lines)
 
     return {
-        "phase": Phase.EXPORT.value if state.get("gate_passed") else Phase.PARTIAL.value,
+        "phase": Phase.EXPORT.value
+        if state.get("gate_passed")
+        else Phase.PARTIAL.value,
         "events": [
             f"[EXPORT] JSON: {len(json.dumps(export_json))} bytes",
             f"[EXPORT] Markdown: {len(export_md)} chars",
@@ -263,6 +282,7 @@ def export_node(state: WorkflowState) -> dict:
 # ---------------------------------------------------------------------------
 # Graph routing
 # ---------------------------------------------------------------------------
+
 
 def should_loop_or_export(state: WorkflowState) -> str:
     """After gate: if passed → export, if failed and rounds left → review again."""
@@ -278,6 +298,7 @@ def should_loop_or_export(state: WorkflowState) -> str:
 # ---------------------------------------------------------------------------
 # Build the graph
 # ---------------------------------------------------------------------------
+
 
 def build_workflow() -> StateGraph:
     """Construct the spike workflow graph."""
@@ -308,10 +329,14 @@ def build_workflow() -> StateGraph:
     graph.add_edge("revise", "gate")
 
     # Conditional: gate → export or loop
-    graph.add_conditional_edges("gate", should_loop_or_export, {
-        "export": "export",
-        "review": "review",
-    })
+    graph.add_conditional_edges(
+        "gate",
+        should_loop_or_export,
+        {
+            "export": "export",
+            "review": "review",
+        },
+    )
 
     graph.add_edge("export", END)
 
@@ -332,8 +357,12 @@ SAMPLE_TASK = TaskSpec(
     id="TASK-001",
     goal="Migrate database schema to support multi-tenant architecture",
     requirements=[
-        type("Req", (), {"id": "REQ-001", "text": "Schema versioning", "acceptance": "Alembic configured"})(),
-        type("Req", (), {"id": "REQ-002", "text": "Backward compatibility", "acceptance": "Old API works"})(),
+        Requirement(
+            id="REQ-001", text="Schema versioning", acceptance="Alembic configured"
+        ),
+        Requirement(
+            id="REQ-002", text="Backward compatibility", acceptance="Old API works"
+        ),
     ],
 )
 
@@ -342,8 +371,16 @@ SAMPLE_INPUT = {
         "id": "TASK-001",
         "goal": "Migrate database schema to support multi-tenant architecture",
         "requirements": [
-            {"id": "REQ-001", "text": "Schema versioning", "acceptance": "Alembic configured"},
-            {"id": "REQ-002", "text": "Backward compatibility", "acceptance": "Old API works"},
+            {
+                "id": "REQ-001",
+                "text": "Schema versioning",
+                "acceptance": "Alembic configured",
+            },
+            {
+                "id": "REQ-002",
+                "text": "Backward compatibility",
+                "acceptance": "Old API works",
+            },
         ],
         "constraints": ["Zero downtime"],
         "unknowns": [],

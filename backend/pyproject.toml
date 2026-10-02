@@ -7,16 +7,19 @@ dependencies = [
     "langgraph>=0.4,<1.0",
     "langgraph-checkpoint-sqlite>=2.0,<3.0",
     "pydantic>=2.0,<3.0",
+    "keyring==25.6.0",
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.24",
+    "ruff==0.13.0",
+    "mypy==1.18.2",
 ]
 providers = [
-    "openai>=1.0,<2.0",
-    "google-genai>=1.0,<2.0",
+    "openai==1.109.1",
+    "google-genai==1.40.0",
 ]
 
 [build-system]
@@ -29,3 +32,14 @@ packages = ["src/astra_multi"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+
+[tool.ruff]
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+files = ["src/astra_multi/domain", "src/astra_multi/persistence", "src/astra_multi/persistence_demo.py", "src/astra_multi/credentials.py", "src/astra_multi/provider_config.py", "src/astra_multi/provider_cli.py", "src/astra_multi/provider_smoke.py", "src/astra_multi/providers.py"]
