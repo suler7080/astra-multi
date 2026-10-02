@@ -5,7 +5,7 @@ import json
 import math
 import sqlite3
 from collections.abc import Callable, Iterator
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
 from uuid import uuid4
@@ -59,10 +59,14 @@ class SQLiteStore:
         self.clock = clock
         self.fault = fault
         self.connection = sqlite3.connect(database, isolation_level=None, timeout=10)
-        self.connection.execute("PRAGMA foreign_keys=ON")
-        self.connection.execute("PRAGMA journal_mode=WAL")
-        self.connection.execute("PRAGMA synchronous=FULL")
         try:
+            for statement in (
+                "PRAGMA foreign_keys=ON",
+                "PRAGMA journal_mode=WAL",
+                "PRAGMA synchronous=FULL",
+            ):
+                with closing(self.connection.execute(statement)) as cursor:
+                    cursor.fetchall()
             migrate(self.connection)
         except BaseException:
             self.connection.close()
