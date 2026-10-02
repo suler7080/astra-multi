@@ -1,6 +1,6 @@
 # P1 — Domain contracts và persistence
 
-Trạng thái: TODO. Ước lượng: 3–4 ngày công. Prerequisite: P0 đạt exit gate.
+Trạng thái: DONE — xem [bản ghi kiểm chứng P1 và Windows native](../IMPLEMENTATION_STATUS.md). P0.4 cũng DONE theo phạm vi người dùng cập nhật: lưu key an toàn, profile tùy chỉnh, xKiro live và native Windows. Direct OpenAI/Google live còn NOT_RUN do thiếu key riêng.
 
 ## 1. Mục tiêu
 
@@ -54,9 +54,9 @@ Tạo nguồn dữ liệu chuẩn, có revision và recovery đáng tin cậy. T
 
 ## 3. Exit gate
 
-- [ ] Domain contracts được validate và có fixtures.
-- [ ] Revision, issue resolution, operation idempotency và atomic events đạt.
-- [ ] Recovery và single-writer lease được chứng minh trên storage thật.
-- [ ] P2/P3 có thể dùng interfaces mà không phụ thuộc implementation nội bộ.
+- [x] Domain contracts được validate và có fixtures.
+- [x] Revision, issue resolution, operation idempotency và atomic events đạt.
+- [x] Recovery và single-writer lease được chứng minh trên storage thật.
+- [x] P2/P3 có thể dùng interfaces mà không phụ thuộc implementation nội bộ.
 
 **Bàn giao:** schema version, repository APIs, event envelope, ID/revision rules, operation ledger, lease semantics và commands kiểm chứng. Theo dõi tại [IMPLEMENTATION_STATUS.md](../IMPLEMENTATION_STATUS.md).

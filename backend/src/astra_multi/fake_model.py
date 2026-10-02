@@ -20,7 +20,6 @@ from astra_multi.schemas import (
     Proposal,
 )
 
-
 # ---------------------------------------------------------------------------
 # Fixture data – deterministic per role/phase
 # ---------------------------------------------------------------------------
@@ -51,6 +50,8 @@ _REVIEWER_ANALYSIS = IndependentAnalysis(
 
 _PLANNER_PROPOSAL = Proposal(
     id="PROP-001",
+    run_id="RUN-SPIKE",
+    base_revision=0,
     author_role="planner",
     approach="Incremental migration using Alembic with expand-contract pattern",
     alternatives=["Big-bang migration", "Dual-write with shadow reads"],
@@ -63,19 +64,25 @@ _PLANNER_PROPOSAL = Proposal(
 _REVIEWER_ISSUES = [
     Issue(
         id="ISSUE-001",
+        run_id="RUN-SPIKE",
+        based_on_revision=0,
         severity=IssueSeverity.BLOCKING,
         status=IssueStatus.OPEN,
         claim="Proposal does not address data backfill for existing records",
-        evidence="REQ-002 requires all existing records to be accessible",
+        impact="Existing records could become inaccessible",
+        verification_request="Verify REQ-002 data backfill coverage",
         suggested_resolution="Add backfill step between expand and contract phases",
         requirement_ids=["REQ-002"],
     ),
     Issue(
         id="ISSUE-002",
+        run_id="RUN-SPIKE",
+        based_on_revision=0,
         severity=IssueSeverity.WARNING,
         status=IssueStatus.OPEN,
         claim="No rollback plan specified",
-        evidence="Best practice for production migrations",
+        impact="A failed migration may not be reversible",
+        verification_request="Verify rollback steps",
         suggested_resolution="Include reversible migration steps",
         requirement_ids=["REQ-001"],
     ),
@@ -83,10 +90,15 @@ _REVIEWER_ISSUES = [
 
 _REVISED_PLAN = PlanRevision(
     id="PLAN-001",
+    run_id="RUN-SPIKE",
     revision=1,
+    based_on_revision=0,
+    requirements_revision=1,
+    snapshot_id=None,
     steps=[
         PlanStep(
             id="STEP-001",
+            completion_criteria=["Alembic configuration is valid"],
             objective="Set up Alembic with expand-contract configuration",
             requirement_ids=["REQ-001"],
             dependencies=[],
@@ -95,6 +107,7 @@ _REVISED_PLAN = PlanRevision(
         ),
         PlanStep(
             id="STEP-002",
+            completion_criteria=["Both schemas are accessible"],
             objective="Create expand migration with new schema alongside old",
             requirement_ids=["REQ-001", "REQ-002"],
             dependencies=["STEP-001"],
@@ -103,6 +116,7 @@ _REVISED_PLAN = PlanRevision(
         ),
         PlanStep(
             id="STEP-003",
+            completion_criteria=["Existing records remain accessible"],
             objective="Backfill existing records to new schema",
             requirement_ids=["REQ-002"],
             dependencies=["STEP-002"],
@@ -111,6 +125,7 @@ _REVISED_PLAN = PlanRevision(
         ),
         PlanStep(
             id="STEP-004",
+            completion_criteria=["Rollback and compatibility tests pass"],
             objective="Contract: remove old schema after verification",
             requirement_ids=["REQ-001"],
             dependencies=["STEP-003"],
@@ -121,6 +136,7 @@ _REVISED_PLAN = PlanRevision(
     decisions=[
         Decision(
             id="DEC-001",
+            run_id="RUN-SPIKE",
             question="Migration strategy",
             chosen="Expand-contract with backfill",
             rationale="Ensures zero-downtime and backward compatibility",
