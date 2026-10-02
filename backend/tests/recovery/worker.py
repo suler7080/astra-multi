@@ -1,6 +1,8 @@
 """Subprocess harness; parents kill a worker at a known durability boundary."""
 
 import json
+import os
+import signal
 import sqlite3
 import sys
 from pathlib import Path
@@ -21,7 +23,8 @@ class GraphState(TypedDict):
 
 def pause(message):
     print(message, flush=True)
-    sys.stdin.readline()
+    if sys.stdin.readline().strip() == "crash":
+        os.kill(os.getpid(), signal.SIGTERM if os.name == "nt" else signal.SIGKILL)
 
 
 def main():

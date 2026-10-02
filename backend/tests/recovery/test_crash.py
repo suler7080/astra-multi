@@ -77,8 +77,10 @@ def test_kill_restart_atomicity_and_domain_ahead_of_checkpoint(tmp_path, boundar
         assert wait_line(worker) == (
             "committed" if boundary == "after_domain_commit" else "uncommitted"
         )
-        kill_worker(worker)
+        worker.stdin.write("crash\n")
+        worker.stdin.flush()
         worker.communicate(timeout=10)
+        assert worker.returncode != 0
     finally:
         if worker.poll() is None:
             kill_worker(worker)
