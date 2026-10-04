@@ -1,0 +1,242 @@
+[
+  {
+    "id": "TASK-01",
+    "category": "bug_fix",
+    "title": "Fix race condition in SQLite connection pool retry logic",
+    "goal": "Eliminate database lock timeout exceptions caused by concurrent writers during rapid burst requests",
+    "requirements": [
+      "Ensure WAL mode and busy_timeout are configured on every pooled connection",
+      "Implement exponential backoff retry mechanism on sqlite3.OperationalError with jitter",
+      "Guarantee thread-safe connection checkout and release"
+    ],
+    "constraints": [
+      "Must not introduce external connection pool dependencies",
+      "Maximum retry duration must not exceed 5.0 seconds per transaction"
+    ],
+    "acceptance_criteria": [
+      "Concurrent execution test with 20 parallel threads completes with 0 OperationalError exceptions",
+      "Average connection acquisition latency remains under 50ms under peak contention"
+    ],
+    "context": "backend/src/astra_multi/persistence/sqlite.py connection lifecycle"
+  },
+  {
+    "id": "TASK-02",
+    "category": "bug_fix",
+    "title": "Resolve memory leak in streaming SSE event worker buffer",
+    "goal": "Prevent unbounded memory growth in long-running event streams when clients drop connection without closing socket",
+    "requirements": [
+      "Detect disconnected client sockets promptly during async generator iteration",
+      "Clear buffered queue items upon connection termination",
+      "Implement bounded circular buffer for event replay"
+    ],
+    "constraints": [
+      "Memory footprint of worker process must remain stable under 100MB over 24-hour operation",
+      "Must support Last-Event-ID replay up to 1000 events without disk spill"
+    ],
+    "acceptance_criteria": [
+      "Simulated 100 abrupt client disconnects produces zero leaked queue references in garbage collection",
+      "Process resident memory returns to baseline after idle cleanup"
+    ],
+    "context": "backend/src/astra_multi/api/worker.py and SSE generator"
+  },
+  {
+    "id": "TASK-03",
+    "category": "feature",
+    "title": "Implement JWT authentication with JWKS key rotation",
+    "goal": "Support secure multi-tenant authentication via OpenID Connect JWKS public key caching and token validation",
+    "requirements": [
+      "Fetch and cache public keys from well-known JWKS endpoint with 1-hour TTL",
+      "Validate RS256 token signature, expiration (exp), and audience (aud) claims",
+      "Inject authenticated tenant and user context into FastAPI request state"
+    ],
+    "constraints": [
+      "Must use PyJWT or cryptography library with zero known CVEs",
+      "Key refresh must handle network failures gracefully using cached fallback"
+    ],
+    "acceptance_criteria": [
+      "Expired or altered tokens receive HTTP 401 Unauthorized with descriptive envelope",
+      "Key rotation test validates tokens signed by new key without service restart"
+    ],
+    "context": "backend/src/astra_multi/api/auth.py"
+  },
+  {
+    "id": "TASK-04",
+    "category": "feature",
+    "title": "Build idempotent webhook delivery system with dead-letter queue",
+    "goal": "Deliver asynchronous event notifications to external subscriber endpoints with guaranteed at-least-once delivery",
+    "requirements": [
+      "Sign webhook payloads with HMAC-SHA256 signature in X-Signature header",
+      "Implement retry schedule: 1s, 5s, 30s, 5m, 1h before marking failed",
+      "Route permanently failed messages to Dead-Letter Queue (DLQ) with audit record"
+    ],
+    "constraints": [
+      "Delivery attempts must include unique idempotency key to prevent duplicate processing",
+      "Payload size capped at 256KB"
+    ],
+    "acceptance_criteria": [
+      "Subscribers returning HTTP 500 trigger automatic retries per schedule",
+      "DLQ query endpoint allows inspecting and manually retrying failed deliveries"
+    ],
+    "context": "backend/src/astra_multi/notifications/webhooks.py"
+  },
+  {
+    "id": "TASK-05",
+    "category": "refactor",
+    "title": "Refactor monolithic order processor into hexagonal domain events",
+    "goal": "Decouple business logic from database schema by introducing domain aggregate roots and event dispatchers",
+    "requirements": [
+      "Define pure domain Order aggregate without ORM dependencies",
+      "Publish OrderCreated, PaymentReceived, and OrderFulfilled domain events",
+      "Implement repository interface for clean persistence port"
+    ],
+    "constraints": [
+      "Domain layer must have zero imports from external database frameworks",
+      "Maintain 100% backward compatibility with public REST API endpoints"
+    ],
+    "acceptance_criteria": [
+      "All domain operations can be unit tested entirely in-memory without database mocks",
+      "Event subscribers execute asynchronously without blocking order placement"
+    ],
+    "context": "services/order_service.py"
+  },
+  {
+    "id": "TASK-06",
+    "category": "refactor",
+    "title": "Migrate legacy synchronous worker threads to asyncio event loop pool",
+    "goal": "Increase task concurrency from 20 threads to 500 concurrent async coroutines without thread contention",
+    "requirements": [
+      "Replace blocking socket operations with non-blocking async counterparts",
+      "Introduce asyncio.Semaphore to bound concurrent network operations",
+      "Handle cancellation and TaskGroup structured concurrency cleanly"
+    ],
+    "constraints": [
+      "Compatible with Python 3.11+ asyncio without third-party loop runners",
+      "CPU-bound tasks must be offloaded to ThreadPoolExecutor"
+    ],
+    "acceptance_criteria": [
+      "Benchmark demonstrates 5x throughput increase under 500 simultaneous connections",
+      "Zero unhandled TaskWasDestroyedPending warnings in test suite"
+    ],
+    "context": "backend/src/astra_multi/workers/pool.py"
+  },
+  {
+    "id": "TASK-07",
+    "category": "migration",
+    "title": "Migrate relational database schema from raw SQL to Alembic migrations",
+    "goal": "Establish repeatable, versioned database schema migration pipeline with automated rollback verification",
+    "requirements": [
+      "Generate baseline Alembic migration representing current production schema",
+      "Ensure migrations run idempotently and safely within database transactions",
+      "Implement downgrade scripts for every schema revision"
+    ],
+    "constraints": [
+      "Zero downtime schema changes; no table locks exceeding 100ms",
+      "Must support SQLite (dev) and PostgreSQL (prod) dialect compatibility"
+    ],
+    "acceptance_criteria": [
+      "Running alembic upgrade head and alembic downgrade base in CI passes cleanly",
+      "Schema diff validation confirms zero unintended column or index mutations"
+    ],
+    "context": "backend/alembic/ and persistence layer"
+  },
+  {
+    "id": "TASK-08",
+    "category": "migration",
+    "title": "Upgrade FastAPI backend sync handlers to async coroutines",
+    "goal": "Modernize API route handlers to leverage asynchronous IO, reducing response latency under load",
+    "requirements": [
+      "Convert def route handlers doing IO to async def with awaitable database calls",
+      "Ensure thread pool context is used for any unavoidable legacy synchronous calls",
+      "Update test client fixtures to utilize httpx.AsyncClient"
+    ],
+    "constraints": [
+      "OpenAPI schema specifications must remain 100% identical",
+      "No regression in error envelope structure or status codes"
+    ],
+    "acceptance_criteria": [
+      "Endpoint latency P99 drops by at least 30% under simulated 100 rps load",
+      "All API integration tests pass with 0 warnings"
+    ],
+    "context": "backend/src/astra_multi/api/routes"
+  },
+  {
+    "id": "TASK-09",
+    "category": "ambiguous",
+    "title": "Design real-time metrics telemetry streaming with undefined retention policy",
+    "goal": "Clarify requirements and design high-volume system metrics streaming pipeline with rolling window storage",
+    "requirements": [
+      "Formulate explicit questions regarding retention period, resolution tiering, and downsampling",
+      "Design flexible storage adapter supporting either SQLite timeseries or Redis time series",
+      "Implement configurable retention policy with default 7-day raw / 30-day aggregated retention"
+    ],
+    "constraints": [
+      "Ingestion pipeline must sustain up to 5,000 metrics events/sec without backpressure loss",
+      "Storage footprint per day must not exceed 2GB"
+    ],
+    "acceptance_criteria": [
+      "Clarification questions submitted through Human-in-the-loop workflow",
+      "Plan specifies automated data pruning job and aggregation rollups"
+    ],
+    "context": "backend/src/astra_multi/telemetry/"
+  },
+  {
+    "id": "TASK-10",
+    "category": "ambiguous",
+    "title": "Design distributed cache layer with unclear cache invalidation semantics",
+    "goal": "Resolve ambiguities in distributed caching requirements and implement consistent write-through caching strategy",
+    "requirements": [
+      "Identify potential cache inconsistency risks across read-heavy multi-region nodes",
+      "Propose Lease-based or TTL-based invalidation with pub/sub invalidation broadcast",
+      "Provide fallback to direct database query on cache miss or partition"
+    ],
+    "constraints": [
+      "Cache hit ratio target >= 95% for hot query paths",
+      "Stale read window must not exceed 500ms under normal network conditions"
+    ],
+    "acceptance_criteria": [
+      "Planner-Reviewer discussion resolves invalidation strategy into formal ADR",
+      "Simulated cache failure triggers graceful fallback without request failure"
+    ],
+    "context": "backend/src/astra_multi/cache/"
+  },
+  {
+    "id": "TASK-11",
+    "category": "greenfield",
+    "title": "Design distributed rate limiting service with sliding window log",
+    "goal": "Architect standalone microservice to enforce token bucket or sliding window rate limits across distributed API gateways",
+    "requirements": [
+      "Support per-client and per-route rate limit configuration (e.g. 100 req/min)",
+      "Implement sliding window log algorithm using Redis sorted sets or atomic Lua script",
+      "Return standardized HTTP 429 response with Retry-After and X-RateLimit headers"
+    ],
+    "constraints": [
+      "Rate limit check latency must be strictly under 5ms (P99)",
+      "High availability: fallback to permissive mode if Redis becomes unreachable"
+    ],
+    "acceptance_criteria": [
+      "Boundary tests confirm exact rate limit enforcement at threshold + 1 requests",
+      "Circuit breaker test verifies service continues serving traffic if rate limiter times out"
+    ],
+    "context": "services/ratelimiter/"
+  },
+  {
+    "id": "TASK-12",
+    "category": "greenfield",
+    "title": "Design tamper-evident audit logging service with cryptographic hash chaining",
+    "goal": "Build enterprise-grade compliance audit log service where records are cryptographically chained to prevent alteration",
+    "requirements": [
+      "Each audit record includes timestamp, actor, action, payload hash, and previous record hash",
+      "Maintain Merkle root anchor periodically published or stored immutably",
+      "Provide verification utility to detect any record tampering or deletion"
+    ],
+    "constraints": [
+      "Append-only storage with strict permission fencing",
+      "Audit logs must be retained for at least 7 years per regulatory compliance"
+    ],
+    "acceptance_criteria": [
+      "Integrity verification algorithm correctly identifies modified byte in chained records",
+      "Audit service throughput reaches at least 1,000 recorded events/sec"
+    ],
+    "context": "services/audit_log/"
+  }
+]

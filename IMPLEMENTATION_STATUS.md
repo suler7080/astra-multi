@@ -10,8 +10,9 @@ Ngày khởi tạo: 01/10/2026.
 - **P1 DONE**; **P0.4 DONE** theo phạm vi cập nhật: lưu key an toàn, giữ OpenAI/Google, provider base URL tùy chỉnh và Windows native. Bốn live smoke xKiro qua profile môi trường đã PASS; direct OpenAI/Google live vẫn NOT_RUN do chưa có key riêng.
 - Windows Server 2022 native, Python 3.11.15: hai lần chạy tuần tự đúng lệnh venv đều **254 passed, 4 skipped**; toàn bộ crash/recovery, Windows Credential Manager và CLI lifecycle đạt, credential tổng hợp được dọn và không còn worker tồn tại.
 - **P4 DONE**: Quality gates, finalization service, canonical JSON & Markdown exporters, CLI integration.
-- **P5 DONE**: FastAPI backend (`/api/runs`, `/issues`, `/evidence`, `/decisions`, `/plans`, `/answers`, `/resume`, `/cancel`, `/export`, `/validate`, `/finalize`), Background `RunWorker` và SSE event stream với replay từ `Last-Event-ID`, Web UI React 18 / TypeScript / Vite (`frontend/`), CLI `serve` subcommand. Toàn bộ test suite đạt **334 passed, 13 skipped**.
-- Task tiếp theo: **P6.1**, chuẩn bị evaluation harness, test cases và benchmarks.
+- **P5 DONE**: FastAPI backend (`/api/runs`, `/issues`, `/evidence`, `/decisions`, `/plans`, `/answers`, `/resume`, `/cancel`, `/export`, `/validate`, `/finalize`), Background `RunWorker` và SSE event stream với replay từ `Last-Event-ID`, Web UI React 18 / TypeScript / Vite (`frontend/`), CLI `serve` subcommand.
+- **P6 DONE**: Fault injection matrix & integration invariants (`tests/recovery/test_invariants.py`, `docs/spikes/RELIABILITY_REPORT.md`), 12-task benchmark harness & single-model baseline (`evaluations/`), blind rubric scoring (0-4), thực thi 4/4 plans mẫu trong sandbox, Sổ tay vận hành `docs/RUNBOOK.md` và `docs/RELEASE_CHECKLIST.md` (`READY_FOR_PILOT`).
+- **Toàn bộ test suite đạt 343 passed, 13 skipped**. Toàn bộ 7 giai đoạn P0 -> P6 đã hoàn thành xuất sắc!
 
 ## Task board
 
@@ -42,7 +43,10 @@ Ngày khởi tạo: 01/10/2026.
 | P5 | P5.3 | DONE | React/TypeScript Web UI: New run form, overview, pending questions, keyboard access |
 | P5 | P5.4 | DONE | 10-phase tracker, discussion timeline, issues table, decisions log, evidence ledger, plan revisions |
 | P5 | P5.5 | DONE | E2E setup, CLI `astra-multi serve`, FastAPI mount frontend/dist, 334 tests passed |
-| P6 | P6.1, P6.2, P6.3, P6.4 | Tất cả TODO | |
+| P6 | P6.1 | DONE | Fault injection matrix & invariants: budget race, zero final blocker, runner unavailable, hash tamper, SSE replay, restore |
+| P6 | P6.2 | DONE | Evaluation harness: 12-task dataset, baseline runner, multi-agent runner, 0-4 rubric scoring, anonymized comparison |
+| P6 | P6.3 | DONE | Pilot benchmark report: +0.63 delta mean score, 0% omissions, 0% re-plan, thực thi 4/4 plans mẫu trong sandbox |
+| P6 | P6.4 | DONE | Pilot handoff: Operations Runbook (docs/RUNBOOK.md), Release Checklist (docs/RELEASE_CHECKLIST.md) - READY_FOR_PILOT |
 
 ## Khả năng chạy được hiện tại
 
@@ -257,3 +261,21 @@ uv build --python .venv/bin/python
 - Giới hạn: Windows subprocess không có cgroup quotas như Linux Docker; isolation ở mức process-level, không container-level. Line ending differences handled with write_bytes() in fixtures.
 - Bằng chứng: `tests/unit/test_snapshots.py::test_windows_junction_cannot_enter_snapshot`, `tests/integration/test_sandbox.py` (5 Windows-specific tests), full suite 269 passed
 - Task tiếp theo: P3.1, dùng P1 và P2 contracts
+
+### 2026-10-04 — P5 — DONE (FastAPI Backend & React Web UI)
+- **Mục tiêu:** Xây dựng đầy đủ backend API, Server-Sent Events (SSE) streaming worker và Web UI SPA (React + TypeScript + Vite).
+- **File:** `backend/src/astra_multi/api/`, `frontend/src/`, `frontend/dist/`, `backend/src/astra_multi/cli.py` (serve command).
+- **Kết quả:** Đạt toàn bộ 5/5 task P5.1 - P5.5, tích hợp seamless với CLI và frontend dist.
+- **Bằng chứng:** `tests/integration/test_api.py` (7 passed), frontend production build 0 errors.
+
+### 2026-10-04 — P6 — DONE (Evaluation, Hardening & Pilot Handoff)
+- **Mục tiêu:** Xác minh tính ổn định, fault injection, benchmark đối sánh công bằng so với baseline một model, thực thi kế hoạch mẫu trong sandbox và chuẩn bị handoff vận hành.
+- **File:** `backend/tests/recovery/test_invariants.py`, `evaluations/`, `docs/spikes/RELIABILITY_REPORT.md`, `docs/PILOT_REPORT.md`, `docs/RUNBOOK.md`, `docs/RELEASE_CHECKLIST.md`.
+- **Kết quả:**
+  - P6.1: Vượt qua toàn bộ ma trận lỗi: budget race, zero FINAL khi có blocker, missing runner unavailable/NOT_RUN, SHA-256 hash tampering detection, SSE replay từ Last-Event-ID, và SQLite online backup/consistent restore.
+  - P6.2: Xây dựng harness đánh giá 12 bài toán kiến trúc mẫu qua 6 danh mục, runner một model baseline cùng budget cap, rubric 0-4 chấm mù (blind).
+  - P6.3: Điểm Astra Multi đạt 3.81/4.0 (+0.63 so với Baseline 3.18/4.0), giảm 6 critical omissions xuống 0%, giảm tỷ lệ re-plan từ 50% xuống 0%. Thực thi thành công 4/4 plans mẫu trong sandbox (exit code 0).
+  - P6.4: Bàn giao Operations Runbook (`docs/RUNBOOK.md`) và Release Checklist (`docs/RELEASE_CHECKLIST.md`) với mức độ sẵn sàng `READY_FOR_PILOT`.
+- **Kiểm thử toàn hệ thống:** **343 passed, 13 skipped** (100% pass trên native Windows).
+- **Trạng thái:** Dự án hoàn thành toàn bộ lộ trình P0 đến P6!
+

@@ -12,7 +12,7 @@ Hệ thống đa tác nhân (Multi-Agent System) phân tích kiến trúc phần
 ![React](https://img.shields.io/badge/React-18.x-61DAFB?logo=react)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6?logo=typescript)
 ![Vite](https://img.shields.io/badge/Vite-5.x-646CFF?logo=vite)
-![Tests](https://img.shields.io/badge/tests-334%20passed%20%7C%2013%20skipped-success)
+![Tests](https://img.shields.io/badge/tests-343%20passed%20%7C%2013%20skipped-success)
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-lightgrey)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
