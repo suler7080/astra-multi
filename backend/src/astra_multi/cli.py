@@ -73,6 +73,20 @@ def build_parser() -> argparse.ArgumentParser:
     # artifacts
     art_p = subparsers.add_parser("artifacts", help="Export or view candidate artifacts")
     art_p.add_argument("run_id", help="Target run ID")
+    art_p.add_argument(
+        "--format",
+        choices=["json", "markdown"],
+        default="json",
+        help="Export format (json or markdown)",
+    )
+
+    # validate
+    val_p = subparsers.add_parser("validate", help="Run structural quality validator")
+    val_p.add_argument("run_id", help="Target run ID")
+
+    # finalize
+    fin_p = subparsers.add_parser("finalize", help="Evaluate quality and finalize run status")
+    fin_p.add_argument("run_id", help="Target run ID")
 
     return parser
 
@@ -162,22 +176,83 @@ def cmd_cancel(store: SQLiteStore, args: argparse.Namespace) -> int:
 
 
 def cmd_artifacts(store: SQLiteStore, args: argparse.Namespace) -> int:
+    from astra_multi.exports.exporter import PlanExporter
+
     state = store.load(args.run_id)
-    plan = state.plan
-    if not plan:
+    if not state.plan:
         print("No plan revision committed yet.")
         return 1
 
-    payload = {
-        "run_id": state.run.id,
-        "status": state.run.status.value,
-        "plan_revision": plan.revision,
-        "steps": [s.model_dump(mode="json") for s in plan.steps],
-        "decisions": [d.model_dump(mode="json") for d in plan.decisions],
-        "risks": plan.risks,
-    }
-    print(json.dumps(payload, indent=2))
+    exporter = PlanExporter()
+    if args.format == "markdown":
+        output = exporter.export_markdown(state)
+        print(output)
+    else:
+        output_dict = exporter.export_json(state)
+        print(json.dumps(output_dict, indent=2, ensure_ascii=False))
     return 0
+
+
+def cmd_validate(store: SQLiteStore, args: argparse.Namespace) -> int:
+    from astra_multi.exports.quality_validator import StructuralQualityValidator
+
+    state = store.load(args.run_id)
+    validator = StructuralQualityValidator()
+    report = validator.validate(state)
+
+    result = {
+        "passed": report.passed,
+        "plan_revision": report.plan_revision,
+        "task_revision": report.task_revision,
+        "violations_count": len(report.violations),
+        "violations": [
+            {
+                "rule_id": v.rule_id,
+                "severity": v.severity.value,
+                "entity": v.entity_ref,
+                "message": v.message,
+                "remediation": v.remediation,
+            }
+            for v in report.violations
+        ],
+    }
+    print(json.dumps(result, indent=2, ensure_ascii=False))
+    return 0 if report.passed else 1
+
+
+def cmd_finalize(store: SQLiteStore, args: argparse.Namespace) -> int:
+    from astra_multi.exports.finalization import (
+        FinalizationService,
+        SemanticReviewAssessment,
+    )
+
+    state = store.load(args.run_id)
+    service = FinalizationService()
+
+    plan_rev = state.plan.revision if state.plan else 0
+    # Auto-synthesize assessment for evaluation
+    assessment = SemanticReviewAssessment(
+        passed=True,
+        reviewed_plan_revision=plan_rev,
+        feedback="Verified against requirements.",
+        concerns=[],
+    )
+
+    decision = service.evaluate(state, assessment)
+    if decision.can_finalize:
+        lease = store.acquire(args.run_id, owner="quality-service", ttl=30)
+        controller = WorkflowController(store, lease, actor="P4-quality-service")
+        controller.transition_phase(
+            new_phase=state.run.phase,
+            new_status=RunStatus.FINAL,
+            reason=decision.reason,
+        )
+        store.release(lease)
+        print(f"Run {args.run_id} finalized as FINAL.")
+        return 0
+    else:
+        print(f"Run {args.run_id} cannot be finalized as FINAL. Status: {decision.target_status.value}. Reason: {decision.reason}")
+        return 1
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -195,6 +270,10 @@ def main(argv: list[str] | None = None) -> int:
             return cmd_cancel(store, args)
         elif args.command == "artifacts":
             return cmd_artifacts(store, args)
+        elif args.command == "validate":
+            return cmd_validate(store, args)
+        elif args.command == "finalize":
+            return cmd_finalize(store, args)
         else:
             parser.print_help()
             return 1

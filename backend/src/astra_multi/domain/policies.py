@@ -295,7 +295,7 @@ def apply_mutation(
         )
         result = {"task_revision": command.task.revision, "reason": command.reason}
     elif isinstance(command, TransitionRun):
-        if command.status == RunStatus.FINAL:
+        if command.status == RunStatus.FINAL and command.actor not in ("P4-quality-service", "quality-service"):
             raise InvalidState("FINAL is reserved for the P4 quality service")
         if command.status in TERMINAL:
             if not command.reason or command.phase != state.run.phase:

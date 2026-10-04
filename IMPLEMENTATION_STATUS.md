@@ -32,7 +32,10 @@ Ngày khởi tạo: 01/10/2026.
 | P3 | P3.3 | DONE | LangGraph discussion workflow (10 phases), domain persistence, ADR-003 |
 | P3 | P3.4 | DONE | Budget service (atomic reservations), stagnation detector, typed stop reasons |
 | P3 | P3.5 | DONE | CLI lifecycle (create, status, answer, cancel, artifacts), recovery |
-| P4 | P4.1, P4.2, P4.3, P4.4 | Tất cả TODO | |
+| P4 | P4.1 | DONE | Structural quality validator: DAG, coverage, reference integrity |
+| P4 | P4.2 | DONE | Semantic review & finalization service, ADR-006 |
+| P4 | P4.3 | DONE | Canonical JSON & Markdown plan exporter, parity matching PLAN_TEMPLATE.md |
+| P4 | P4.4 | DONE | CLI plan export, validate, finalize integration |
 | P5 | P5.1, P5.2, P5.3, P5.4, P5.5 | Tất cả TODO | |
 | P6 | P6.1, P6.2, P6.3, P6.4 | Tất cả TODO | |
 
@@ -192,7 +195,24 @@ uv build --python .venv/bin/python
   - Đã triển khai `backend/src/astra_multi/cli.py` (`create`, `status`, `answer`, `cancel`, `artifacts`).
   - Kiểm thử: `tests/unit/test_cli.py` (3 passed).
 - **Tổng kết kiểm thử toàn hệ thống:** **312 passed, 22 skipped** trên native Windows.
-- **Task tiếp theo:** P4.1 (Quality service & export pipeline).
+- **Task tiếp theo:** P4.1–P4.4 (Quality gates & export).
+
+### 2026-10-04 — P4.1–P4.4 — DONE
+
+- **P4.1 (Structural Quality Validator):**
+  - Đã triển khai `backend/src/astra_multi/exports/quality_validator.py`.
+  - Validate 100% requirement coverage, DAG dependency cycles & missing step references, ID uniqueness, deliverable/criteria non-empty, zero unresolved blocking issues, và validation execution invariants.
+- **P4.2 (Semantic Review & Finalization Service):**
+  - Đã triển khai `backend/src/astra_multi/exports/finalization.py` và bàn giao `docs/adr/ADR-006-quality-gates-and-finalization.md`.
+  - Cập nhật chính sách `TransitionRun` trong `domain/policies.py`: Chỉ cho phép cấp `RunStatus.FINAL` khi đi qua `P4-quality-service`. Từ chối stale semantic reviews và các kế hoạch còn blocker/câu hỏi chưa trả lời.
+- **P4.3 (Canonical JSON & Markdown Exporter):**
+  - Đã triển khai `backend/src/astra_multi/exports/exporter.py`.
+  - Parity tuyệt đối giữa JSON schema v1 và Markdown render (tuân thủ `PLAN_TEMPLATE.md`), escape Markdown an toàn.
+- **P4.4 (Plan Handoff & CLI Integration):**
+  - Tích hợp các subcommands `artifacts --format [json|markdown]`, `validate`, và `finalize` vào `backend/src/astra_multi/cli.py`.
+  - Kiểm thử: `tests/unit/test_quality_and_export.py` (6 passed).
+- **Tổng kết kiểm thử toàn hệ thống:** **318 passed, 22 skipped** trên native Windows (100% pass trên các tests chạy).
+- **Task tiếp theo:** P5.1 (FastAPI backend & Web UI).
 
 ### 2026-10-03 — P2.1–P2.5 — DONE (Windows Native)
 

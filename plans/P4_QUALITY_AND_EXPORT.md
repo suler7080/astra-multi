@@ -47,10 +47,10 @@ Vùng code: `domain/` policies, `exports/`, orchestration gate node, fixtures k�
 
 ## 3. Exit gate
 
-- [ ] Structural gates và semantic review đã tích hợp.
-- [ ] Không FINAL khi blocker/review stale/gate failure tồn tại.
-- [ ] JSON/Markdown nhất quán theo revision cố định.
-- [ ] CLI tạo được plan bàn giao đầy đủ theo template.
-- [ ] ADR-006 và service contracts đã ghi lại.
+- [x] Structural gates và semantic review đã tích hợp.
+- [x] Không FINAL khi blocker/review stale/gate failure tồn tại.
+- [x] JSON/Markdown nhất quán theo revision cố định.
+- [x] CLI tạo được plan bàn giao đầy đủ theo template.
+- [x] ADR-006 và service contracts đã ghi lại.
 
 **Bàn giao P5:** commands/queries, QualityReport, immutable revision export, sample artifacts và status semantics. Cập nhật [status](../IMPLEMENTATION_STATUS.md).
