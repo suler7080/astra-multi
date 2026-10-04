@@ -186,10 +186,17 @@ def cmd_artifacts(store: SQLiteStore, args: argparse.Namespace) -> int:
     exporter = PlanExporter()
     if args.format == "markdown":
         output = exporter.export_markdown(state)
-        print(output)
+        try:
+            print(output)
+        except UnicodeEncodeError:
+            sys.stdout.buffer.write(output.encode("utf-8") + b"\n")
     else:
         output_dict = exporter.export_json(state)
-        print(json.dumps(output_dict, indent=2, ensure_ascii=False))
+        output_str = json.dumps(output_dict, indent=2, ensure_ascii=False)
+        try:
+            print(output_str)
+        except UnicodeEncodeError:
+            sys.stdout.buffer.write(output_str.encode("utf-8") + b"\n")
     return 0
 
 
