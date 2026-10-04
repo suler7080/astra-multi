@@ -2,6 +2,8 @@
 #    uv pip compile pyproject.toml --extra dev --extra providers --python-version 3.11 --universal --output-file requirements.lock
 aiosqlite==0.22.1
     # via langgraph-checkpoint-sqlite
+annotated-doc==0.0.5
+    # via fastapi
 annotated-types==0.8.0
     # via pydantic
 anyio==4.15.1
@@ -11,6 +13,7 @@ anyio==4.15.1
     #   httpx2
     #   langsmith
     #   openai
+    #   starlette
 backports-tarfile==1.2.0 ; python_full_version < '3.12'
     # via jaraco-context
 certifi==2026.7.22
@@ -22,6 +25,8 @@ cffi==2.1.1 ; platform_python_implementation != 'PyPy'
     # via cryptography
 charset-normalizer==3.5.2
     # via requests
+click==8.5.0
+    # via uvicorn
 colorama==0.4.6 ; sys_platform == 'win32'
     # via
     #   pytest
@@ -34,6 +39,8 @@ distro==1.9.0
     # via
     #   langsmith
     #   openai
+fastapi==0.142.2
+    # via astra-multi (pyproject.toml)
 google-auth==2.59.1
     # via google-genai
 google-genai==1.40.0
@@ -42,6 +49,7 @@ h11==0.16.0
     # via
     #   httpcore
     #   httpcore2
+    #   uvicorn
 httpcore==1.0.9
     # via httpx
 httpcore2==2.13.1 ; sys_platform != 'emscripten'
@@ -116,6 +124,8 @@ mypy-extensions==1.1.0
     # via mypy
 openai==1.109.1
     # via astra-multi (pyproject.toml)
+opentelemetry-api==1.45.0
+    # via fastapi
 orjson==3.12.0
     # via
     #   langgraph-sdk
@@ -140,6 +150,7 @@ pycparser==3.0 ; implementation_name != 'PyPy' and platform_python_implementatio
 pydantic==2.13.5
     # via
     #   astra-multi (pyproject.toml)
+    #   fastapi
     #   google-genai
     #   langchain-core
     #   langgraph
@@ -176,6 +187,8 @@ sniffio==1.3.1
     #   openai
 sqlite-vec==0.1.9
     # via langgraph-checkpoint-sqlite
+starlette==1.7.0
+    # via fastapi
 tenacity==9.1.4
     # via
     #   google-genai
@@ -189,6 +202,7 @@ truststore==0.10.4 ; sys_platform != 'emscripten'
 typing-extensions==4.16.0
     # via
     #   anyio
+    #   fastapi
     #   google-genai
     #   httpx2
     #   langchain-core
@@ -196,18 +210,24 @@ typing-extensions==4.16.0
     #   langsmith
     #   mypy
     #   openai
+    #   opentelemetry-api
     #   pydantic
     #   pydantic-core
     #   pytest-asyncio
+    #   starlette
     #   typing-inspection
 typing-inspection==0.4.4
-    # via pydantic
+    # via
+    #   fastapi
+    #   pydantic
 urllib3==2.8.0
     # via requests
 uuid-utils==0.17.1
     # via
     #   langchain-core
     #   langsmith
+uvicorn==0.54.0
+    # via astra-multi (pyproject.toml)
 websockets==15.0.1
     # via
     #   google-genai

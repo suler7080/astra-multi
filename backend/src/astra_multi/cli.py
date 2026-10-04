@@ -88,6 +88,11 @@ def build_parser() -> argparse.ArgumentParser:
     fin_p = subparsers.add_parser("finalize", help="Evaluate quality and finalize run status")
     fin_p.add_argument("run_id", help="Target run ID")
 
+    # serve
+    serve_p = subparsers.add_parser("serve", help="Start FastAPI web backend and UI")
+    serve_p.add_argument("--host", default="127.0.0.1", help="Host interface to bind")
+    serve_p.add_argument("--port", type=int, default=8000, help="Port to listen on")
+
     return parser
 
 
@@ -262,9 +267,23 @@ def cmd_finalize(store: SQLiteStore, args: argparse.Namespace) -> int:
         return 1
 
 
+def cmd_serve(args: argparse.Namespace) -> int:
+    import uvicorn
+
+    from astra_multi.api.app import create_app
+
+    app = create_app(db_path=args.db, artifacts_dir=args.artifacts)
+    print(f"Starting Astra Multi Web Server on http://{args.host}:{args.port}")
+    uvicorn.run(app, host=args.host, port=args.port)
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+
+    if args.command == "serve":
+        return cmd_serve(args)
 
     with SQLiteStore(args.db) as store:
         if args.command == "create":

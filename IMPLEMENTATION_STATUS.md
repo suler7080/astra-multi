@@ -9,8 +9,9 @@ Ngày khởi tạo: 01/10/2026.
 - P1 contracts, canonical SQLite store và recovery đã triển khai; bộ kiểm tra mới nhất đạt **253 passed, 5 skipped** trên Linux Python 3.11, Ruff/strict mypy (18 source files)/build đạt.
 - **P1 DONE**; **P0.4 DONE** theo phạm vi cập nhật: lưu key an toàn, giữ OpenAI/Google, provider base URL tùy chỉnh và Windows native. Bốn live smoke xKiro qua profile môi trường đã PASS; direct OpenAI/Google live vẫn NOT_RUN do chưa có key riêng.
 - Windows Server 2022 native, Python 3.11.15: hai lần chạy tuần tự đúng lệnh venv đều **254 passed, 4 skipped**; toàn bộ crash/recovery, Windows Credential Manager và CLI lifecycle đạt, credential tổng hợp được dọn và không còn worker tồn tại.
-- **P2.1–P2.5 DONE với Linux Docker và native Windows**: immutable snapshots, broker, persisted evidence/context và sandbox; Linux Docker **281 passed, 5 skipped**, Windows native **269 passed, 22 skipped**, Ruff/mypy (29 source files + tests)/uv build đạt. Windows junction detection, subprocess sandbox, timeout/cancellation và redaction đã được kiểm chứng.
-- Task tiếp theo: **P3.1**, dùng [P1](docs/P1_CONTRACTS.md) và [P2 contracts](docs/P2_CONTRACTS.md).
+- **P4 DONE**: Quality gates, finalization service, canonical JSON & Markdown exporters, CLI integration.
+- **P5 DONE**: FastAPI backend (`/api/runs`, `/issues`, `/evidence`, `/decisions`, `/plans`, `/answers`, `/resume`, `/cancel`, `/export`, `/validate`, `/finalize`), Background `RunWorker` và SSE event stream với replay từ `Last-Event-ID`, Web UI React 18 / TypeScript / Vite (`frontend/`), CLI `serve` subcommand. Toàn bộ test suite đạt **334 passed, 13 skipped**.
+- Task tiếp theo: **P6.1**, chuẩn bị evaluation harness, test cases và benchmarks.
 
 ## Task board
 
@@ -36,7 +37,11 @@ Ngày khởi tạo: 01/10/2026.
 | P4 | P4.2 | DONE | Semantic review & finalization service, ADR-006 |
 | P4 | P4.3 | DONE | Canonical JSON & Markdown plan exporter, parity matching PLAN_TEMPLATE.md |
 | P4 | P4.4 | DONE | CLI plan export, validate, finalize integration |
-| P5 | P5.1, P5.2, P5.3, P5.4, P5.5 | Tất cả TODO | |
+| P5 | P5.1 | DONE | FastAPI commands và queries, idempotency, 409 conflict, error envelope |
+| P5 | P5.2 | DONE | RunWorker background lifecycle, SSE streaming, Last-Event-ID replay, disconnect safety |
+| P5 | P5.3 | DONE | React/TypeScript Web UI: New run form, overview, pending questions, keyboard access |
+| P5 | P5.4 | DONE | 10-phase tracker, discussion timeline, issues table, decisions log, evidence ledger, plan revisions |
+| P5 | P5.5 | DONE | E2E setup, CLI `astra-multi serve`, FastAPI mount frontend/dist, 334 tests passed |
 | P6 | P6.1, P6.2, P6.3, P6.4 | Tất cả TODO | |
 
 ## Khả năng chạy được hiện tại
@@ -196,6 +201,28 @@ uv build --python .venv/bin/python
   - Kiểm thử: `tests/unit/test_cli.py` (3 passed).
 - **Tổng kết kiểm thử toàn hệ thống:** **312 passed, 22 skipped** trên native Windows.
 - **Task tiếp theo:** P4.1–P4.4 (Quality gates & export).
+
+### 2026-10-04 — P5.1–P5.5 — DONE
+
+- **P5.1 (FastAPI Commands & Queries):**
+  - Đã triển khai `backend/src/astra_multi/api/app.py` và `schemas.py`.
+  - Hỗ trợ đầy đủ endpoints: `POST /api/runs`, `GET /api/runs`, `GET /api/runs/{id}`, `/issues`, `/evidence`, `/decisions`, `/plans/{rev}`, `/answers`, `/resume`, `/cancel`, `/export`, `/validate`, `/finalize`.
+  - Idempotency key tracking, 409 conflict khi thay đổi payload hoặc expected_revision sai, error envelope đồng nhất.
+- **P5.2 (Worker Lifecycle & SSE Streaming):**
+  - Đã triển khai `backend/src/astra_multi/api/worker.py`.
+  - Quản lý lifecycle run qua thread pool độc lập, claim lease và chạy LangGraph 10-phase graph.
+  - Endpoint `GET /api/runs/{id}/events` stream Server-Sent Events với replay từ `Last-Event-ID` / `last_event_id`, heartbeat và emit `run_completed`.
+- **P5.3–P5.4 (Local Web UI):**
+  - Xây dựng ứng dụng hoàn chỉnh React 18 + TypeScript + Vite trong `frontend/`.
+  - Typed API client (`frontend/src/api.ts`).
+  - Giao diện: New Run modal (dynamic requirements, mode, budget limits), Phase tracker 10 phases, Overview với pending questions answering và resume, Discussion live timeline với role badges, Issues table với severity filter, Decisions log, Evidence ledger, Plan viewer với revision switcher và export JSON/Markdown.
+  - Phím tắt và accessibility, URL query syncing (`?run=RUN_ID`).
+- **P5.5 (End-to-End Walkthrough & Setup):**
+  - Tích hợp CLI subcommand `astra-multi serve --host 127.0.0.1 --port 8000`.
+  - Tự động mount production static bundle `frontend/dist` tại `/`.
+  - Kiểm thử tích hợp: `tests/integration/test_api.py` (7 passed).
+- **Tổng kết kiểm thử toàn hệ thống:** **334 passed, 13 skipped** trên native Windows (100% pass trên các tests chạy).
+- **Task tiếp theo:** P6.1 (Evaluation dataset, metrics, rubric và benchmark report).
 
 ### 2026-10-04 — P4.1–P4.4 — DONE
 
