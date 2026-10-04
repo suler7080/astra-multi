@@ -1,6 +1,6 @@
 # P0 — Khóa yêu cầu và thử nghiệm kiến trúc
 
-Trạng thái: TODO. Ước lượng: 2–3 ngày công.
+Trạng thái: DONE — P0.4 đạt phạm vi người dùng cập nhật với xKiro live và Windows native; direct OpenAI/Google live còn NOT_RUN. Xem [trạng thái triển khai](../IMPLEMENTATION_STATUS.md).
 
 ## 1. Mục tiêu và đầu vào
 
@@ -39,14 +39,15 @@ Vùng code dự kiến: `backend/`, `backend/tests/`, `docs/spikes/`, `docs/adr/
 - **Nghiệm thu:** restart giữ kết quả đã commit; cùng answer không tạo hai mutation; crash sau commit không tạo duplicate plan revision; stream event có thể quan sát được.
 - **Kiểm chứng:** kill tiến trình thật ở điểm kiểm soát, khởi động lại và so sánh IDs/revisions; không chỉ giả lập gọi lại hàm trong cùng process.
 
-### P0.4 — Smoke test hai provider
+### P0.4 — API keys, provider tùy chỉnh và native Windows
 
 - **Phụ thuộc:** P0.2 và cấu hình/provider budget có sẵn.
-- **Thực hiện:** adapter mỏng cho hai provider đã chọn; yêu cầu output có schema; ghi capability, model ID, usage, latency và lỗi.
-- **Contract:** không hardcode key; domain schema không import SDK provider; model không hỗ trợ schema native dùng validation có giới hạn sửa output.
-- **Đầu ra:** báo cáo live smoke test và các khác biệt cần hỗ trợ ở P3.
-- **Nghiệm thu:** cả hai provider tạo output parse/validate được; usage thiếu được ghi unknown/estimate; timeout/error có mã rõ ràng. Chưa gọi live thì ghi BLOCKED, không thay bằng kết luận từ mock.
-- **Kiểm chứng:** một yêu cầu nhỏ mỗi provider trong budget; lỗi schema/timeout kiểm tra bằng fake để không tiêu API vô ích.
+- **Phạm vi cập nhật 2026-10-02:** theo yêu cầu người dùng, hoàn thiện cơ chế lưu key, giữ OpenAI/Google, hỗ trợ API key + base URL tùy chỉnh và kiểm chứng native Windows để chốt P0.4. Live smoke dùng Qwen3.8 Omni Flash và Qwen3.8 Max (Free) qua cùng gateway xKiro.
+- **Thực hiện:** profile có tên, loại giao thức, model ID và base URL; lưu key trong OS credential store hoặc tham chiếu biến môi trường; yêu cầu output có schema và ghi usage, latency, lỗi.
+- **Contract:** key không vào metadata/log/report/CLI arguments; domain schema không import SDK provider; local validation áp dụng cả khi endpoint không hỗ trợ JSON mode.
+- **Đầu ra:** hướng dẫn cấu hình/rotate/remove, báo cáo live smoke và bằng chứng Windows native; capability registry và production orchestration tiếp tục ở P3.
+- **Nghiệm thu:** key lifecycle và profile isolation đạt; hai model xKiro tạo text/JSON parse/validate được; usage thiếu giữ unknown; timeout/error có mã rõ ràng; full suite, credential store và crash/recovery đạt trên Windows thật.
+- **Kiểm chứng:** tối đa một text và một JSON request mỗi model, retry 0; protocol/error/schema dùng SDK thật với HTTPX MockTransport; Windows dùng credential tổng hợp và kill interpreter thật tại durability boundary. Direct OpenAI/Google live vẫn NOT_RUN nếu thiếu key riêng, không suy ra từ mock.
 
 ### P0.5 — Chốt runtime và bàn giao
 
@@ -58,10 +59,10 @@ Vùng code dự kiến: `backend/`, `backend/tests/`, `docs/spikes/`, `docs/adr/
 
 ## 3. Exit gate và bàn giao P1
 
-- [ ] Fake workflow có kết quả end-to-end.
-- [ ] Independent analysis, bounded loop, fan-in, persistence, interrupt/resume và stream đã kiểm chứng.
-- [ ] Recovery không nhân đôi artifact đã commit trong kịch bản thử nghiệm.
-- [ ] Hai provider live smoke đạt, hoặc phase vẫn BLOCKED với lý do cụ thể.
-- [ ] ADR-001, versions, commands, hạn chế và quyết định tái sử dụng được ghi lại.
+- [x] Fake workflow có kết quả end-to-end.
+- [x] Independent analysis, bounded loop, fan-in, persistence, interrupt/resume và stream đã kiểm chứng.
+- [x] Recovery không nhân đôi artifact đã commit trong kịch bản thử nghiệm.
+- [x] P0.4 theo phạm vi cập nhật: lưu key an toàn, profile tùy chỉnh, hai model xKiro live và Windows native đạt.
+- [x] ADR-001, versions, commands, hạn chế và quyết định tái sử dụng được ghi lại.
 
 P1 nhận runtime đã chốt và contracts thử nghiệm, sau đó xây domain/persistence hoàn chỉnh. Tổng quan dependency ở [implementation plan](../IMPLEMENTATION_PLAN.md).

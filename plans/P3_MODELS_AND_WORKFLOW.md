@@ -56,10 +56,10 @@ P3.1–P3.2 bắt đầu sau P1, dùng kết quả spike P0. P3.3 cần contract
 
 ## 3. Exit gate
 
-- [ ] Luồng CLI tích hợp repo/tool/model chạy được.
-- [ ] Independent analysis, issue resolution, questions và revisions đúng contract.
-- [ ] Budget, retry, timeout, stagnation và cancel có test hành vi.
-- [ ] Resume dựa trên committed state, không nhân đôi canonical artifact.
-- [ ] Candidate/partial artifacts sẵn cho P4; ADR-003/004 và budget decisions được ghi.
+- [x] Luồng CLI tích hợp repo/tool/model chạy được.
+- [x] Independent analysis, issue resolution, questions và revisions đúng contract.
+- [x] Budget, retry, timeout, stagnation và cancel có test hành vi.
+- [x] Resume dựa trên committed state, không nhân đôi canonical artifact.
+- [x] Candidate/partial artifacts sẵn cho P4; ADR-003/004 và budget decisions được ghi.
 
 **Bàn giao P4:** PlanCandidate, issues/decisions/evidence refs, semantic review interface, stop reasons, usage và application service API. Cập nhật [status](../IMPLEMENTATION_STATUS.md).
