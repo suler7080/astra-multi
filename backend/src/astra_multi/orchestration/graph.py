@@ -11,6 +11,7 @@ P3.3 Production multi-agent discussion workflow graph:
 from __future__ import annotations
 
 import operator
+import os
 import uuid
 from typing import Annotated, Any, TypedDict
 
@@ -77,6 +78,7 @@ class WorkflowContext:
         context_builder: ContextBuilder,
         evidence_ledger: EvidenceLedger | None = None,
         budget_service: BudgetService | None = None,
+        provider: str | None = None,
     ) -> None:
         self.controller = controller
         self.gateway = gateway
@@ -84,6 +86,7 @@ class WorkflowContext:
         self.evidence_ledger = evidence_ledger
         self.budget_service = budget_service
         self.stagnation_detector = StagnationDetector()
+        self.provider = provider or os.environ.get("ASTRA_MULTI_PROVIDER", "fake")
 
 
 def create_workflow_graph(wf_ctx: WorkflowContext) -> StateGraph:
@@ -121,7 +124,7 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> StateGraph:
         messages = format_independent_analysis_prompt(bundle)
 
         res = gateway.call(
-            provider="fake",
+            provider=wf_ctx.provider,
             role="planner",
             messages=messages,
             output_schema=AnalysisOutput,
@@ -152,7 +155,7 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> StateGraph:
         messages = format_independent_analysis_prompt(bundle)
 
         res = gateway.call(
-            provider="fake",
+            provider=wf_ctx.provider,
             role="reviewer",
             messages=messages,
             output_schema=AnalysisOutput,
@@ -185,7 +188,7 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> StateGraph:
         messages = format_propose_prompt(bundle, analyses)
 
         res = gateway.call(
-            provider="fake",
+            provider=wf_ctx.provider,
             role="planner",
             messages=messages,
             output_schema=ProposalOutput,
@@ -232,7 +235,7 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> StateGraph:
         messages = format_review_prompt(bundle, prop, curr_state.plan.model_dump(mode="json") if curr_state.plan else None)
 
         res = gateway.call(
-            provider="fake",
+            provider=wf_ctx.provider,
             role="reviewer",
             messages=messages,
             output_schema=ReviewOutput,
@@ -288,7 +291,7 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> StateGraph:
         messages = format_synthesize_prompt(bundle, prop, rev, curr_state.plan.model_dump(mode="json") if curr_state.plan else None)
 
         res = gateway.call(
-            provider="fake",
+            provider=wf_ctx.provider,
             role="synthesizer",
             messages=messages,
             output_schema=SynthesizerOutput,

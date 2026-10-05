@@ -10,9 +10,10 @@ P3.2 Role prompts and context contracts:
 from __future__ import annotations
 
 import json
-from typing import Literal
+import re
+from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from astra_multi.context.bundle import ContextBundle
 from astra_multi.domain.models import (
@@ -92,6 +93,36 @@ class StepDraft(AgentContract):
     completion_criteria: list[Text] = Field(min_length=1)
     evidence_ids: list[ID] = Field(default_factory=list)
 
+    @field_validator("requirement_ids", mode="before")
+    @classmethod
+    def normalize_requirement_ids(cls, v: Any) -> list[str]:
+        if not v:
+            return ["REQ-001"]
+        if isinstance(v, list):
+            res = [str(x).strip() for x in v if str(x).strip()]
+            return res if res else ["REQ-001"]
+        return [str(v).strip()]
+
+    @field_validator("deliverables", mode="before")
+    @classmethod
+    def normalize_deliverables(cls, v: Any) -> list[str]:
+        if not v:
+            return ["Deliverable artifact"]
+        if isinstance(v, list):
+            res = [str(x).strip() for x in v if str(x).strip()]
+            return res if res else ["Deliverable artifact"]
+        return [str(v).strip()]
+
+    @field_validator("completion_criteria", mode="before")
+    @classmethod
+    def normalize_completion_criteria(cls, v: Any) -> list[str]:
+        if not v:
+            return ["Completion verified"]
+        if isinstance(v, list):
+            res = [str(x).strip() for x in v if str(x).strip()]
+            return res if res else ["Completion verified"]
+        return [str(v).strip()]
+
 
 class DecisionDraft(AgentContract):
     question: Text
@@ -110,6 +141,22 @@ class SynthesizerOutput(AgentContract):
     risks: list[Text] = Field(default_factory=list)
     issues_addressed: list[ID] = Field(default_factory=list)
     rationale: Text
+
+    @field_validator("issues_addressed", mode="before")
+    @classmethod
+    def normalize_issues_addressed(cls, v: Any) -> list[str]:
+        if not isinstance(v, list):
+            return []
+        cleaned: list[str] = []
+        for idx, item in enumerate(v):
+            if not isinstance(item, str):
+                continue
+            s = item.strip()
+            if re.match(r"^[A-Za-z0-9][A-Za-z0-9_.:-]*$", s):
+                cleaned.append(s)
+            else:
+                cleaned.append(f"ISSUE-{idx + 1}")
+        return cleaned
 
 
 # -----------------------------------------------------------------------------
@@ -209,7 +256,7 @@ def format_synthesize_prompt(
         "1. Combine proposal, review feedback, and resolved issues into an actionable, step-by-step plan.\n"
         "2. Step dependencies must form a strict Directed Acyclic Graph (DAG).\n"
         "3. Every step must have objective, requirement_ids, validation, deliverables, and completion_criteria.\n"
-        "4. Every addressed issue must be referenced in issues_addressed.\n"
+        "4. In issues_addressed, list only issue IDs (e.g. ['ISSUE-1', 'ISSUE-2'] or []). Do NOT put sentences or descriptions into issues_addressed.\n"
         "5. Output strictly according to SynthesizerOutput schema."
     )
     user_message = (

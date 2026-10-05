@@ -95,6 +95,15 @@ def _classify_error(provider: str, error: Exception, secret: str = "") -> Provid
 json_adapter: TypeAdapter[JsonValue] = TypeAdapter(JsonValue)
 
 
+def _clean_json_content(content: str) -> str:
+    cleaned = content.strip()
+    if "```json" in cleaned:
+        cleaned = cleaned.split("```json", 1)[1].split("```", 1)[0].strip()
+    elif "```" in cleaned:
+        cleaned = cleaned.split("```", 1)[1].split("```", 1)[0].strip()
+    return cleaned
+
+
 def _parse_content(
     content: str | None, schema: type[BaseModel] | str | None, provider: str
 ) -> JsonValue:
@@ -102,17 +111,18 @@ def _parse_content(
         raise SchemaError("EMPTY_RESPONSE", "Provider returned no text", provider)
     if schema is None:
         return content
+    cleaned = _clean_json_content(content)
     try:
-        parsed = json_adapter.validate_python(json.loads(content))
+        parsed = json_adapter.validate_python(json.loads(cleaned))
         if isinstance(schema, type):
             return json_adapter.validate_python(
                 schema.model_validate(parsed).model_dump(mode="json")
             )
         return parsed
-    except (ValueError, ValidationError):
+    except Exception as exc:
         raise SchemaError(
             "INVALID_SCHEMA",
-            "Response does not match the requested JSON/schema",
+            f"Response does not match the requested JSON/schema: {exc}",
             provider,
         ) from None
 
