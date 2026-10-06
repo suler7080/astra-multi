@@ -180,6 +180,22 @@ export const translations = {
     settings_btn_change_password: 'Update Password',
     settings_password_updated: 'Password updated successfully!',
     header_btn_settings: 'Settings',
+
+    // Dashboard Home
+    dash_welcome_title: 'Architecture Deliberation Dashboard',
+    dash_welcome_subtitle: 'Multi-agent collaborative software architecture planning, evaluation & quality validation workbench.',
+    dash_total_runs: 'Total Runs',
+    dash_active_runs: 'Deliberating / Active',
+    dash_final_runs: 'Finalized Architecture',
+    dash_failed_runs: 'Needs Review',
+    dash_recent_runs: 'Recent Architecture Runs',
+    dash_no_runs_desc: 'No architecture deliberation runs found. Click "+ New Run" to start your first task.',
+    dash_btn_open_run: 'Open Run',
+    dash_col_goal: 'Task Objective',
+    dash_col_status: 'Lifecycle Status',
+    dash_col_revision: 'Revision',
+    dash_col_created: 'Started At',
+    header_all_runs: '⬅ All Runs (Dashboard)',
   },
   VN: {
     // Header
@@ -358,6 +374,22 @@ export const translations = {
     settings_btn_change_password: 'Đổi mật khẩu',
     settings_password_updated: 'Đã đổi mật khẩu thành công!',
     header_btn_settings: 'Cài đặt',
+
+    // Dashboard Home
+    dash_welcome_title: 'Bảng điều khiển Thiết kế Kiến trúc',
+    dash_welcome_subtitle: 'Hệ thống cộng tác đa tác tử AI thiết kế, lập kế hoạch và thẩm định kiến trúc phần mềm.',
+    dash_total_runs: 'Tổng số phiên',
+    dash_active_runs: 'Đang thảo luận',
+    dash_final_runs: 'Đã hoàn tất',
+    dash_failed_runs: 'Cần kiểm tra',
+    dash_recent_runs: 'Danh sách các phiên làm việc',
+    dash_no_runs_desc: 'Chưa có phiên làm việc nào. Bấm nút "+ Tạo phiên mới" để bắt đầu bài toán thiết kế.',
+    dash_btn_open_run: 'Vào phiên làm việc',
+    dash_col_goal: 'Mục tiêu bài toán',
+    dash_col_status: 'Trạng thái quy trình',
+    dash_col_revision: 'Phiên bản',
+    dash_col_created: 'Khởi tạo lúc',
+    header_all_runs: '⬅ Tất cả phiên (Trang chủ)',
   },
 } as const;
 

@@ -25,6 +25,7 @@ import { QualityGateModal } from './components/QualityGateModal';
 import { ExecutionLogs } from './components/ExecutionLogs';
 import { AuthModal } from './components/AuthModal';
 import { SettingsModal } from './components/SettingsModal';
+import { DashboardHome } from './components/DashboardHome';
 import { useI18n } from './i18n';
 import {
   LayoutDashboard,
@@ -96,7 +97,11 @@ export const App: React.FC = () => {
   // Sync runParam into window URL without reload
   const updateUrlParam = (runId: string) => {
     const url = new URL(window.location.href);
-    url.searchParams.set('run', runId);
+    if (runId) {
+      url.searchParams.set('run', runId);
+    } else {
+      url.searchParams.delete('run');
+    }
     window.history.replaceState({}, '', url.toString());
   };
 
@@ -106,13 +111,14 @@ export const App: React.FC = () => {
       const list = await api.listRuns();
       setRuns(list);
 
-      if (list.length > 0) {
-        const targetId = initialRunId && list.some((r) => r.run_id === initialRunId)
-          ? initialRunId
-          : list[0].run_id;
-        setSelectedRunId(targetId);
-        updateUrlParam(targetId);
-        await loadRunDetails(targetId);
+      if (initialRunId && list.some((r) => r.run_id === initialRunId)) {
+        setSelectedRunId(initialRunId);
+        updateUrlParam(initialRunId);
+        await loadRunDetails(initialRunId);
+      } else {
+        setSelectedRunId(null);
+        setCurrentRun(null);
+        updateUrlParam('');
       }
     } catch (err: unknown) {
       handleError(err, 'Failed to load runs');
@@ -228,6 +234,12 @@ export const App: React.FC = () => {
   }, [selectedRunId]);
 
   const handleSelectRun = (runId: string) => {
+    if (!runId) {
+      setSelectedRunId(null);
+      setCurrentRun(null);
+      updateUrlParam('');
+      return;
+    }
     setSelectedRunId(runId);
     updateUrlParam(runId);
     loadRunDetails(runId);
@@ -533,9 +545,13 @@ export const App: React.FC = () => {
           </div>
         </main>
       ) : (
-        <div className="no-run-selected">
-          <p className="text-slate-400">{t('no_run_selected')}</p>
-        </div>
+        <DashboardHome
+          runs={runs}
+          onSelectRun={handleSelectRun}
+          onOpenNewRun={() => setIsNewRunOpen(true)}
+          onRefresh={() => loadRuns()}
+          isLoading={isLoading}
+        />
       )}
 
       <NewRunModal

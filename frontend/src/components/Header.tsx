@@ -29,7 +29,12 @@ export const Header: React.FC<HeaderProps> = ({
   return (
     <header className="header-container">
       <div className="header-left">
-        <div className="logo-badge">
+        <div
+          className="logo-badge"
+          onClick={() => onSelectRun('')}
+          style={{ cursor: 'pointer' }}
+          title={t('header_all_runs')}
+        >
           <Layers size={22} className="logo-icon" />
           <span className="logo-text">Astra Multi</span>
         </div>
@@ -48,10 +53,10 @@ export const Header: React.FC<HeaderProps> = ({
             onChange={(e) => onSelectRun(e.target.value)}
             className="run-select"
           >
-            <option value="" disabled>{t('header_select_placeholder')}</option>
+            <option value="">{t('header_all_runs')}</option>
             {runs.map((r) => (
               <option key={r.run_id} value={r.run_id}>
-                {r.run_id} - {r.goal.length > 32 ? r.goal.substring(0, 32) + '...' : r.goal} ({r.status})
+                {r.run_id} - {r.goal.length > 28 ? r.goal.substring(0, 28) + '...' : r.goal} ({r.status})
               </option>
             ))}
           </select>

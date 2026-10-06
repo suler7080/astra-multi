@@ -51,7 +51,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
   // Testing State
   const [testingName, setTestingName] = useState<string | null>(null);
-  const [testResult, setTestResult] = useState<{ name: string; success: boolean; latency?: number; error?: string } | null>(null);
+  const [testResult, setTestResult] = useState<{
+    name: string;
+    success: boolean;
+    latency?: number;
+    error?: string;
+  } | null>(null);
 
   // Password Form State
   const [currentPassword, setCurrentPassword] = useState('');
@@ -250,32 +255,24 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         </div>
 
         {/* Tab Header */}
-        <div className="flex border-b border-slate-800 px-6 pt-3 gap-4">
+        <div className="settings-modal-tabs">
           <button
             onClick={() => { setActiveTab('providers'); setError(null); }}
-            className={`pb-3 text-xs font-semibold flex items-center gap-2 border-b-2 transition-all ${
-              activeTab === 'providers'
-                ? 'border-sky-400 text-sky-400'
-                : 'border-transparent text-slate-400 hover:text-slate-200'
-            }`}
+            className={`settings-tab-btn ${activeTab === 'providers' ? 'settings-tab-btn-active' : ''}`}
           >
             <Cpu size={15} />
             <span>{t('settings_tab_providers')}</span>
           </button>
           <button
             onClick={() => { setActiveTab('security'); setError(null); }}
-            className={`pb-3 text-xs font-semibold flex items-center gap-2 border-b-2 transition-all ${
-              activeTab === 'security'
-                ? 'border-sky-400 text-sky-400'
-                : 'border-transparent text-slate-400 hover:text-slate-200'
-            }`}
+            className={`settings-tab-btn ${activeTab === 'security' ? 'settings-tab-btn-active' : ''}`}
           >
             <Lock size={15} />
             <span>{t('settings_tab_security')}</span>
           </button>
         </div>
 
-        <div className="p-6">
+        <div className="settings-body">
           {error && (
             <div className="error-alert mb-4">
               <AlertTriangle size={16} className="flex-shrink-0" />
@@ -284,8 +281,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           )}
 
           {successMsg && (
-            <div className="p-3 mb-4 rounded bg-emerald-950/40 border border-emerald-800 text-emerald-300 text-xs flex items-center gap-2">
-              <CheckCircle size={16} className="text-emerald-400" />
+            <div className="test-banner-success mb-4">
+              <CheckCircle size={16} />
               <span>{successMsg}</span>
             </div>
           )}
@@ -295,33 +292,29 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             <div>
               {!isEditing ? (
                 <>
-                  <div className="flex justify-between items-center mb-4">
+                  <div className="settings-section-header">
                     <span className="text-xs text-slate-400">
                       Configure LLM API keys and model profiles for autonomous multi-agent planning.
                     </span>
-                    <button onClick={handleStartAdd} className="btn-primary text-xs py-1.5 px-3 flex items-center gap-1.5">
+                    <button onClick={handleStartAdd} className="btn-primary btn-sm flex items-center gap-1.5">
                       <Plus size={14} />
                       <span>{t('settings_add_provider')}</span>
                     </button>
                   </div>
 
-                  <div className="space-y-3 max-h-96 overflow-y-auto pr-1">
+                  <div className="provider-card-list">
                     {providers.map((p) => {
                       const isCurrentTest = testResult && testResult.name === p.name;
                       return (
                         <div
                           key={p.name}
-                          className={`p-4 rounded-lg border transition-all ${
-                            p.is_active
-                              ? 'bg-slate-900/90 border-sky-500/70 shadow-lg shadow-sky-950/20'
-                              : 'bg-slate-900/40 border-slate-800 hover:border-slate-700'
-                          }`}
+                          className={`provider-card ${p.is_active ? 'provider-card-active' : ''}`}
                         >
-                          <div className="flex items-start justify-between">
-                            <div>
-                              <div className="flex items-center gap-2 mb-1">
-                                <span className="font-semibold text-sm text-slate-100 font-mono">{p.name}</span>
-                                <span className="badge-subtle text-[11px] uppercase">{p.kind}</span>
+                          <div className="provider-card-header">
+                            <div className="provider-info">
+                              <div className="provider-badges">
+                                <span className="provider-name">{p.name}</span>
+                                <span className="badge-subtle uppercase text-[10px]">{p.kind}</span>
                                 {p.is_active && (
                                   <span className="badge-emerald text-[10px] flex items-center gap-1 font-semibold">
                                     <Radio size={10} className="animate-pulse" />
@@ -329,23 +322,24 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                                   </span>
                                 )}
                               </div>
-                              <p className="text-xs text-sky-300 font-mono mb-1">{p.model}</p>
+                              <div className="provider-model-name">{p.model}</div>
                               {p.base_url && (
-                                <p className="text-[11px] text-slate-400 flex items-center gap-1 font-mono truncate max-w-md">
-                                  <Globe size={11} /> {p.base_url}
-                                </p>
+                                <div className="provider-meta-row">
+                                  <Globe size={12} />
+                                  <span>{p.base_url}</span>
+                                </div>
                               )}
-                              <p className="text-[11px] text-slate-400 mt-1 flex items-center gap-1">
-                                <Key size={11} className={p.has_api_key ? 'text-emerald-400' : 'text-slate-500'} />
+                              <div className="provider-meta-row mt-1">
+                                <Key size={12} className={p.has_api_key ? 'text-emerald-400' : 'text-slate-500'} />
                                 <span>{p.has_api_key ? 'API Key Encrypted & Stored' : 'No API Key Configured'}</span>
-                              </p>
+                              </div>
                             </div>
 
-                            <div className="flex items-center gap-2">
+                            <div className="provider-actions-row">
                               {!p.is_active && (
                                 <button
                                   onClick={() => handleActivate(p.name)}
-                                  className="btn-secondary text-xs py-1 px-2.5"
+                                  className="btn-secondary btn-sm"
                                   title="Activate"
                                 >
                                   {t('settings_btn_activate')}
@@ -354,7 +348,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                               <button
                                 onClick={() => handleTestConnection(p)}
                                 disabled={testingName === p.name}
-                                className="btn-secondary text-xs py-1 px-2.5 flex items-center gap-1"
+                                className="btn-secondary btn-sm flex items-center gap-1"
                                 title="Probe Connection"
                               >
                                 <Play size={11} className={testingName === p.name ? 'animate-spin text-sky-400' : ''} />
@@ -381,20 +375,16 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
                           {/* Test connection result banner */}
                           {isCurrentTest && (
-                            <div className={`mt-3 p-2 rounded text-xs flex items-center gap-2 ${
-                              testResult.success
-                                ? 'bg-emerald-950/30 border border-emerald-900/60 text-emerald-300'
-                                : 'bg-rose-950/30 border border-rose-900/60 text-rose-300'
-                            }`}>
+                            <div className={testResult.success ? 'test-banner-success' : 'test-banner-error'}>
                               {testResult.success ? (
                                 <>
-                                  <CheckCircle size={14} className="text-emerald-400 flex-shrink-0" />
+                                  <CheckCircle size={14} className="flex-shrink-0" />
                                   <span>{t('settings_test_success')} ({testResult.latency} ms)</span>
                                 </>
                               ) : (
                                 <>
-                                  <AlertTriangle size={14} className="text-rose-400 flex-shrink-0" />
-                                  <span className="truncate">{t('settings_test_failed')}: {testResult.error}</span>
+                                  <AlertTriangle size={14} className="flex-shrink-0" />
+                                  <span>{t('settings_test_failed')}: {testResult.error}</span>
                                 </>
                               )}
                             </div>
@@ -407,7 +397,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               ) : (
                 /* Edit / Add Provider Form */
                 <form onSubmit={handleSaveProvider} className="space-y-4">
-                  <div className="flex justify-between items-center border-b border-slate-800 pb-2">
+                  <div className="flex justify-between items-center border-b border-slate-800 pb-2 mb-3">
                     <h3 className="text-sm font-semibold text-slate-200">
                       {editingName ? t('settings_edit_provider') : t('settings_add_provider')}
                     </h3>
@@ -420,7 +410,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     </button>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="provider-form-grid mb-3">
                     <div className="form-group">
                       <label className="form-label">{t('settings_provider_name')} *</label>
                       <input
@@ -448,7 +438,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     </div>
                   </div>
 
-                  <div className="form-group">
+                  <div className="form-group mb-3">
                     <label className="form-label">{t('settings_model')} *</label>
                     <input
                       type="text"
@@ -460,7 +450,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     />
                   </div>
 
-                  <div className="form-group">
+                  <div className="form-group mb-3">
                     <label className="form-label">{t('settings_base_url')}</label>
                     <input
                       type="text"
@@ -471,7 +461,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     />
                   </div>
 
-                  <div className="form-group">
+                  <div className="form-group mb-3">
                     <label className="form-label">{t('settings_api_key')}</label>
                     <div className="relative">
                       <input
@@ -492,7 +482,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 mb-4">
                     <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer">
                       <input
                         type="checkbox"
@@ -505,19 +495,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   </div>
 
                   {testResult && (
-                    <div className={`p-2.5 rounded text-xs flex items-center gap-2 ${
-                      testResult.success
-                        ? 'bg-emerald-950/30 border border-emerald-900 text-emerald-300'
-                        : 'bg-rose-950/30 border border-rose-900 text-rose-300'
-                    }`}>
+                    <div className={testResult.success ? 'test-banner-success mb-3' : 'test-banner-error mb-3'}>
                       {testResult.success ? (
                         <>
-                          <CheckCircle size={14} className="text-emerald-400" />
+                          <CheckCircle size={14} className="flex-shrink-0" />
                           <span>{t('settings_test_success')} ({testResult.latency} ms)</span>
                         </>
                       ) : (
                         <>
-                          <AlertTriangle size={14} className="text-rose-400" />
+                          <AlertTriangle size={14} className="flex-shrink-0" />
                           <span>{t('settings_test_failed')}: {testResult.error}</span>
                         </>
                       )}
@@ -529,14 +515,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       type="button"
                       onClick={() => handleTestConnection()}
                       disabled={Boolean(testingName)}
-                      className="btn-secondary text-xs"
+                      className="btn-secondary btn-sm"
                     >
                       {testingName ? t('settings_btn_testing') : t('settings_btn_test')}
                     </button>
                     <button
                       type="submit"
                       disabled={isLoading}
-                      className="btn-primary text-xs"
+                      className="btn-primary btn-sm"
                     >
                       {isLoading ? '...' : t('settings_btn_save')}
                     </button>
@@ -549,11 +535,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           {/* TAB 2: ADMIN SECURITY */}
           {activeTab === 'security' && (
             <form onSubmit={handleChangePassword} className="space-y-4 max-w-md">
-              <p className="text-xs text-slate-400">
+              <p className="text-xs text-slate-400 mb-3">
                 Update your administrator password to maintain strong access control.
               </p>
 
-              <div className="form-group">
+              <div className="form-group mb-3">
                 <label className="form-label">{t('settings_current_password')} *</label>
                 <input
                   type="password"
@@ -564,7 +550,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 />
               </div>
 
-              <div className="form-group">
+              <div className="form-group mb-3">
                 <label className="form-label">{t('settings_new_password')} *</label>
                 <input
                   type="password"
@@ -576,7 +562,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 />
               </div>
 
-              <div className="form-group">
+              <div className="form-group mb-4">
                 <label className="form-label">{t('auth_confirm_password_label')} *</label>
                 <input
                   type="password"
@@ -587,11 +573,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 />
               </div>
 
-              <div className="pt-2">
+              <div>
                 <button
                   type="submit"
                   disabled={isChangingPass}
-                  className="btn-primary text-xs"
+                  className="btn-primary btn-sm"
                 >
                   {isChangingPass ? '...' : t('settings_btn_change_password')}
                 </button>

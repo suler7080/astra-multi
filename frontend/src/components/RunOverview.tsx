@@ -179,11 +179,23 @@ export const RunOverview: React.FC<RunOverviewProps> = ({
         </div>
         <div className="stat-card">
           <span className="stat-label">{t('overview_artifacts')}</span>
-          <div className="flex-align-center gap-3 mt-1 text-sm text-slate-300">
-            <span>{t('overview_plans_count')} <strong>{run.plans_count}</strong></span>
-            <span>{t('overview_issues_count')} <strong>{run.issues_count}</strong> ({run.blocking_issues_count} {t('overview_blocking')})</span>
-            <span>{t('overview_decisions_count')} <strong>{run.decisions_count}</strong></span>
-            <span>{t('overview_evidence_count')} <strong>{run.evidence_count}</strong></span>
+          <div className="stat-artifacts-grid">
+            <div className="stat-artifact-item">
+              <span>{t('overview_plans_count')}</span>
+              <strong>{run.plans_count}</strong>
+            </div>
+            <div className="stat-artifact-item">
+              <span>{t('overview_issues_count')}</span>
+              <strong>{run.issues_count} {run.blocking_issues_count > 0 && `(${run.blocking_issues_count})`}</strong>
+            </div>
+            <div className="stat-artifact-item">
+              <span>{t('overview_decisions_count')}</span>
+              <strong>{run.decisions_count}</strong>
+            </div>
+            <div className="stat-artifact-item">
+              <span>{t('overview_evidence_count')}</span>
+              <strong>{run.evidence_count}</strong>
+            </div>
           </div>
         </div>
       </div>

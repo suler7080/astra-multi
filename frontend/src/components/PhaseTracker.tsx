@@ -61,8 +61,11 @@ export const PhaseTracker: React.FC<PhaseTrackerProps> = ({
           {getStatusBadge()}
         </div>
         {stopReason && (
-          <div className="stop-reason-box">
-            <strong>{t('phase_stop_reason')}</strong> {stopReason}
+          <div className="stop-reason-box" title={stopReason}>
+            <strong>{t('phase_stop_reason')}</strong>
+            <span className="stop-reason-truncate">
+              {stopReason.length > 80 ? stopReason.slice(0, 80) + '...' : stopReason}
+            </span>
           </div>
         )}
       </div>
