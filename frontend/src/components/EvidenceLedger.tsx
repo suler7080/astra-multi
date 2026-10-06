@@ -1,12 +1,14 @@
 import React, { useState } from 'react';
 import type { Evidence } from '../types';
 import { FileSearch, CheckCircle, XCircle, Clock } from 'lucide-react';
+import { useI18n } from '../i18n';
 
 interface EvidenceLedgerProps {
   evidence: Evidence[];
 }
 
 export const EvidenceLedger: React.FC<EvidenceLedgerProps> = ({ evidence }) => {
+  const { t } = useI18n();
   const [sourceFilter, setSourceFilter] = useState<string>('all');
 
   const filtered = evidence.filter((e) => {
@@ -46,7 +48,7 @@ export const EvidenceLedger: React.FC<EvidenceLedgerProps> = ({ evidence }) => {
       <div className="flex-between mb-4">
         <div className="flex-align-center gap-2">
           <FileSearch size={18} className="text-sky-400" />
-          <h3 className="card-title">Evidence & Verification Ledger ({evidence.length})</h3>
+          <h3 className="card-title">{t('evidence_title')} ({evidence.length})</h3>
         </div>
 
         <select
@@ -64,7 +66,7 @@ export const EvidenceLedger: React.FC<EvidenceLedgerProps> = ({ evidence }) => {
 
       {filtered.length === 0 ? (
         <div className="empty-state">
-          <p className="text-slate-400 text-sm">No evidence records captured yet.</p>
+          <p className="text-slate-400 text-sm">{t('evidence_empty')}</p>
         </div>
       ) : (
         <div className="data-table-container">

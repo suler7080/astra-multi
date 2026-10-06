@@ -42,6 +42,14 @@ from astra_multi.gateway.model_gateway import ModelGateway
 from astra_multi.orchestration.controller import WorkflowController
 from astra_multi.persistence.artifacts import FileArtifactStore
 from astra_multi.persistence.sqlite import SQLiteStore
+from astra_multi.api.routes_auth_settings import (
+    apply_active_provider_to_environment,
+    create_auth_settings_router,
+)
+from astra_multi.security.crypto import (
+    ensure_auth_secret_key,
+    verify_access_token,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -94,6 +102,32 @@ def create_app(
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    # Auth Middleware for protecting runs and settings when admin password is set
+    @app.middleware("http")
+    async def auth_middleware(request: Request, call_next: Any) -> Response:
+        path = request.url.path
+        if path.startswith("/api/runs"):
+            admin_hash = store.settings.get_setting("admin_password_hash")
+            if admin_hash is not None:
+                auth_header = request.headers.get("Authorization")
+                if not auth_header or not auth_header.startswith("Bearer "):
+                    return JSONResponse(
+                        status_code=status.HTTP_401_UNAUTHORIZED,
+                        content={"error": {"code": "unauthorized", "message": "Authentication required"}},
+                    )
+                token = auth_header.split("Bearer ", 1)[1].strip()
+                secret = ensure_auth_secret_key(store.settings)
+                if not verify_access_token(token, secret):
+                    return JSONResponse(
+                        status_code=status.HTTP_401_UNAUTHORIZED,
+                        content={"error": {"code": "unauthorized", "message": "Invalid or expired token"}},
+                    )
+        return await call_next(request)
+
+    # Mount auth and settings router
+    app.include_router(create_auth_settings_router(store))
+    apply_active_provider_to_environment(store)
 
     # Store in app state
     app.state.store = store

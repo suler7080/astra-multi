@@ -1,6 +1,7 @@
 import React from 'react';
 import type { FinalizeResult, ValidationReport } from '../types';
 import { X, ShieldCheck, AlertTriangle, CheckCircle, Award } from 'lucide-react';
+import { useI18n } from '../i18n';
 
 interface QualityGateModalProps {
   isOpen: boolean;
@@ -17,6 +18,7 @@ export const QualityGateModal: React.FC<QualityGateModalProps> = ({
   finalizeResult,
   mode,
 }) => {
+  const { t } = useI18n();
   if (!isOpen) return null;
 
   return (
@@ -27,12 +29,12 @@ export const QualityGateModal: React.FC<QualityGateModalProps> = ({
             {mode === 'validation' ? (
               <>
                 <ShieldCheck className="text-sky-400" size={20} />
-                <h2 className="modal-title">Quality Gate Structural Verification</h2>
+                <h2 className="modal-title">{t('qg_validation_title')}</h2>
               </>
             ) : (
               <>
                 <Award className="text-emerald-400" size={20} />
-                <h2 className="modal-title">Finalization Service Assessment</h2>
+                <h2 className="modal-title">{t('qg_finalize_title')}</h2>
               </>
             )}
           </div>
@@ -70,7 +72,7 @@ export const QualityGateModal: React.FC<QualityGateModalProps> = ({
 
               {report.violations.length > 0 && (
                 <div className="violations-list mt-4">
-                  <h4 className="text-sm font-semibold text-slate-200 mb-2">Gate Violations:</h4>
+                  <h4 className="text-sm font-semibold text-slate-200 mb-2">{t('qg_violations')}:</h4>
                   {report.violations.map((v, i) => (
                     <div key={i} className="violation-card">
                       <div className="flex-align-center gap-2 mb-1">
@@ -87,7 +89,7 @@ export const QualityGateModal: React.FC<QualityGateModalProps> = ({
 
               {report.uncovered_requirements.length > 0 && (
                 <div className="uncovered-box mt-3">
-                  <span className="text-xs font-semibold text-amber-300">Uncovered Requirements:</span>
+                  <span className="text-xs font-semibold text-amber-300">{t('qg_uncovered_reqs')}:</span>
                   <div className="flex-wrap gap-1 mt-1">
                     {report.uncovered_requirements.map((r) => (
                       <span key={r} className="badge-amber text-xs">{r}</span>
@@ -126,7 +128,7 @@ export const QualityGateModal: React.FC<QualityGateModalProps> = ({
 
               {finalizeResult.blockers.length > 0 && (
                 <div className="blockers-list mt-4">
-                  <h4 className="text-sm font-semibold text-slate-200 mb-2">Unresolved Blockers:</h4>
+                  <h4 className="text-sm font-semibold text-slate-200 mb-2">{t('qg_unresolved_issues')}:</h4>
                   <ul className="list-disc pl-5 space-y-1">
                     {finalizeResult.blockers.map((b, i) => (
                       <li key={i} className="text-xs text-slate-300">{b}</li>
@@ -140,7 +142,7 @@ export const QualityGateModal: React.FC<QualityGateModalProps> = ({
 
         <div className="modal-actions">
           <button onClick={onClose} className="btn-secondary">
-            Close
+            {t('qg_close')}
           </button>
         </div>
       </div>

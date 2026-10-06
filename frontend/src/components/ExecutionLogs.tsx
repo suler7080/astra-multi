@@ -14,12 +14,14 @@ import {
   Search,
   CheckCircle2,
 } from 'lucide-react';
+import { useI18n } from '../i18n';
 
 interface ExecutionLogsProps {
   run: RunDetail;
 }
 
 export const ExecutionLogs: React.FC<ExecutionLogsProps> = ({ run }) => {
+  const { t } = useI18n();
   const [logs, setLogs] = useState<RunLogEntry[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [errorLevelFilter, setErrorLevelFilter] = useState<'ALL' | 'ERROR' | 'WARN' | 'INFO'>('ALL');
@@ -114,7 +116,7 @@ export const ExecutionLogs: React.FC<ExecutionLogsProps> = ({ run }) => {
             <div className="flex-1">
               <div className="flex items-center justify-between">
                 <h3 className="text-sm font-semibold text-rose-200">
-                  Execution Stopped: {run.status === 'FAILED' ? 'Fatal Failure' : run.status}
+                  {run.status === 'FAILED' ? t('logs_stopped_fatal') : `${run.status}: Execution Stopped`}
                 </h3>
                 <button
                   onClick={() => copyToClipboard(run.stop_reason || '', 'stop_reason')}
@@ -123,12 +125,12 @@ export const ExecutionLogs: React.FC<ExecutionLogsProps> = ({ run }) => {
                   {copiedText === 'stop_reason' ? (
                     <>
                       <Check size={13} className="text-emerald-400" />
-                      <span>Copied</span>
+                      <span>{t('logs_copied')}</span>
                     </>
                   ) : (
                     <>
                       <Copy size={13} />
-                      <span>Copy Error Details</span>
+                      <span>{t('logs_copy_error')}</span>
                     </>
                   )}
                 </button>
@@ -143,7 +145,7 @@ export const ExecutionLogs: React.FC<ExecutionLogsProps> = ({ run }) => {
       <div className="logs-toolbar">
         <div className="flex items-center gap-2">
           <Terminal size={18} className="text-sky-400" />
-          <span className="font-semibold text-sm text-slate-200">Execution Logs ({logs.length})</span>
+          <span className="font-semibold text-sm text-slate-200">{t('logs_title')} ({logs.length})</span>
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
@@ -153,25 +155,25 @@ export const ExecutionLogs: React.FC<ExecutionLogsProps> = ({ run }) => {
               onClick={() => setErrorLevelFilter('ALL')}
               className={`filter-btn ${errorLevelFilter === 'ALL' ? 'filter-btn-active' : ''}`}
             >
-              All ({logs.length})
+              {t('logs_filter_all')} ({logs.length})
             </button>
             <button
               onClick={() => setErrorLevelFilter('ERROR')}
               className={`filter-btn ${errorLevelFilter === 'ERROR' ? 'filter-btn-active text-rose-300' : ''}`}
             >
-              Errors ({errorCount})
+              {t('logs_filter_error')} ({errorCount})
             </button>
             <button
               onClick={() => setErrorLevelFilter('WARN')}
               className={`filter-btn ${errorLevelFilter === 'WARN' ? 'filter-btn-active text-amber-300' : ''}`}
             >
-              Warnings ({warnCount})
+              {t('logs_filter_warn')} ({warnCount})
             </button>
             <button
               onClick={() => setErrorLevelFilter('INFO')}
               className={`filter-btn ${errorLevelFilter === 'INFO' ? 'filter-btn-active text-sky-300' : ''}`}
             >
-              Info ({infoCount})
+              {t('logs_filter_info')} ({infoCount})
             </button>
           </div>
 
@@ -182,7 +184,7 @@ export const ExecutionLogs: React.FC<ExecutionLogsProps> = ({ run }) => {
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search logs..."
+              placeholder={t('logs_search_placeholder')}
               className="form-input text-xs pl-8 pr-3 py-1.5 w-44"
             />
           </div>
@@ -195,7 +197,7 @@ export const ExecutionLogs: React.FC<ExecutionLogsProps> = ({ run }) => {
               onChange={(e) => setAutoRefresh(e.target.checked)}
               className="rounded bg-slate-800 border-slate-700"
             />
-            <span>Live Stream</span>
+            <span>{t('logs_live_stream')}</span>
           </label>
 
           {/* Refresh button */}
@@ -203,10 +205,10 @@ export const ExecutionLogs: React.FC<ExecutionLogsProps> = ({ run }) => {
             onClick={fetchLogs}
             disabled={isLoading}
             className="btn-secondary text-xs px-2.5 py-1.5 flex items-center gap-1.5"
-            title="Refresh logs"
+            title={t('logs_refresh')}
           >
             <RefreshCw size={13} className={isLoading ? 'animate-spin text-sky-400' : ''} />
-            <span>Refresh</span>
+            <span>{t('logs_refresh')}</span>
           </button>
 
           {/* Copy all button */}
@@ -218,17 +220,17 @@ export const ExecutionLogs: React.FC<ExecutionLogsProps> = ({ run }) => {
               copyToClipboard(text, 'all_logs');
             }}
             className="btn-secondary text-xs px-2.5 py-1.5 flex items-center gap-1.5"
-            title="Copy all logs to clipboard"
+            title={t('logs_copy_logs')}
           >
             {copiedText === 'all_logs' ? (
               <>
                 <Check size={13} className="text-emerald-400" />
-                <span>Copied</span>
+                <span>{t('logs_copied')}</span>
               </>
             ) : (
               <>
                 <Copy size={13} />
-                <span>Copy Logs</span>
+                <span>{t('logs_copy_logs')}</span>
               </>
             )}
           </button>
@@ -240,8 +242,8 @@ export const ExecutionLogs: React.FC<ExecutionLogsProps> = ({ run }) => {
         {filteredLogs.length === 0 ? (
           <div className="p-8 text-center text-slate-500 text-sm">
             {searchQuery || errorLevelFilter !== 'ALL'
-              ? 'No log entries match the current filter criteria.'
-              : 'No execution logs recorded yet.'}
+              ? t('logs_no_match')
+              : t('logs_no_logs')}
           </div>
         ) : (
           <div className="divide-y divide-slate-800/60 font-mono text-xs">
@@ -304,7 +306,7 @@ export const ExecutionLogs: React.FC<ExecutionLogsProps> = ({ run }) => {
                   {isExpanded && hasDetails && (
                     <div className="px-10 py-3 bg-slate-950/80 border-t border-slate-800/80">
                       <div className="flex justify-between items-center mb-2">
-                        <span className="text-[11px] font-semibold text-slate-400">Payload & Execution Diagnostics</span>
+                        <span className="text-[11px] font-semibold text-slate-400">{t('logs_diagnostics_title')}</span>
                         <button
                           onClick={() => copyToClipboard(JSON.stringify(log.details, null, 2), `detail-${log.id}`)}
                           className="text-slate-400 hover:text-slate-200 text-[11px] flex items-center gap-1"
@@ -312,12 +314,12 @@ export const ExecutionLogs: React.FC<ExecutionLogsProps> = ({ run }) => {
                           {copiedText === `detail-${log.id}` ? (
                             <>
                               <Check size={12} className="text-emerald-400" />
-                              <span>Copied</span>
+                              <span>{t('logs_copied')}</span>
                             </>
                           ) : (
                             <>
                               <Copy size={12} />
-                              <span>Copy JSON</span>
+                              <span>{t('logs_copy_json')}</span>
                             </>
                           )}
                         </button>
@@ -326,7 +328,7 @@ export const ExecutionLogs: React.FC<ExecutionLogsProps> = ({ run }) => {
                       {/* Traceback block if available */}
                       {Boolean(log.details?.traceback) && (
                         <div className="mb-3">
-                          <span className="text-[11px] text-rose-400 font-semibold block mb-1">Stack Trace:</span>
+                          <span className="text-[11px] text-rose-400 font-semibold block mb-1">{t('logs_stack_trace')}</span>
                           <pre className="p-3 rounded bg-rose-950/30 border border-rose-900/50 text-rose-200 text-xs overflow-x-auto whitespace-pre font-mono">
                             {String(log.details?.traceback)}
                           </pre>

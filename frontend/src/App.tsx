@@ -23,6 +23,9 @@ import { EvidenceLedger } from './components/EvidenceLedger';
 import { PlanViewer } from './components/PlanViewer';
 import { QualityGateModal } from './components/QualityGateModal';
 import { ExecutionLogs } from './components/ExecutionLogs';
+import { AuthModal } from './components/AuthModal';
+import { SettingsModal } from './components/SettingsModal';
+import { useI18n } from './i18n';
 import {
   LayoutDashboard,
   MessageSquare,
@@ -34,6 +37,7 @@ import {
 } from 'lucide-react';
 
 export const App: React.FC = () => {
+  const { t } = useI18n();
   const [runs, setRuns] = useState<RunSummary[]>([]);
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [currentRun, setCurrentRun] = useState<RunDetail | null>(null);
@@ -45,6 +49,9 @@ export const App: React.FC = () => {
 
   const [activeTab, setActiveTab] = useState<'overview' | 'discussion' | 'issues' | 'decisions' | 'evidence' | 'plan' | 'logs'>('overview');
   const [isNewRunOpen, setIsNewRunOpen] = useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [authMode, setAuthMode] = useState<'setup' | 'login'>('login');
   const [isQualityModalOpen, setIsQualityModalOpen] = useState(false);
   const [qualityModalMode, setQualityModalMode] = useState<'validation' | 'finalize'>('validation');
   const [validationReport, setValidationReport] = useState<ValidationReport | null>(null);
@@ -58,12 +65,33 @@ export const App: React.FC = () => {
 
   const eventSourceRef = useRef<EventSource | null>(null);
 
-  // Initialize selected run from URL query params or list
+  // Check auth status on mount and load runs if authenticated
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const runParam = params.get('run');
-    loadRuns(runParam);
+    checkAuthAndInit();
   }, []);
+
+  const checkAuthAndInit = async () => {
+    try {
+      const status = await api.getAuthStatus();
+      if (status.setup_required) {
+        setAuthMode('setup');
+        setIsAuthModalOpen(true);
+        return;
+      }
+      if (!status.authenticated) {
+        setAuthMode('login');
+        setIsAuthModalOpen(true);
+        return;
+      }
+      const params = new URLSearchParams(window.location.search);
+      const runParam = params.get('run');
+      loadRuns(runParam);
+    } catch {
+      const params = new URLSearchParams(window.location.search);
+      const runParam = params.get('run');
+      loadRuns(runParam);
+    }
+  };
 
   // Sync runParam into window URL without reload
   const updateUrlParam = (runId: string) => {
@@ -225,7 +253,7 @@ export const App: React.FC = () => {
     try {
       setIsLoading(true);
       await api.answerQuestion(selectedRunId, questionId, answer, expectedRevision);
-      showFeedback('Answer submitted successfully.');
+      showFeedback(t('feedback_question_answered'));
       await loadRunDetails(selectedRunId);
     } catch (err: unknown) {
       handleError(err, 'Failed to submit answer');
@@ -239,7 +267,7 @@ export const App: React.FC = () => {
     try {
       setIsLoading(true);
       await api.resumeRun(selectedRunId);
-      showFeedback('Run resumed.');
+      showFeedback(t('feedback_run_resumed'));
       await loadRunDetails(selectedRunId);
     } catch (err: unknown) {
       handleError(err, 'Failed to resume run');
@@ -253,7 +281,7 @@ export const App: React.FC = () => {
     try {
       setIsLoading(true);
       await api.cancelRun(selectedRunId, reason);
-      showFeedback('Run cancelled.');
+      showFeedback(t('feedback_run_cancelled'));
       await loadRunDetails(selectedRunId);
     } catch (err: unknown) {
       handleError(err, 'Failed to cancel run');
@@ -344,6 +372,10 @@ export const App: React.FC = () => {
     let msg = defaultMsg;
     if (err instanceof ApiError) {
       msg = `${err.code}: ${err.message}`;
+      if (err.status === 401) {
+        setIsAuthModalOpen(true);
+        setAuthMode('login');
+      }
     } else if (err instanceof Error) {
       msg = err.message;
     }
@@ -359,6 +391,12 @@ export const App: React.FC = () => {
         onSelectRun={handleSelectRun}
         onOpenNewRun={() => setIsNewRunOpen(true)}
         onRefresh={() => selectedRunId && loadRunDetails(selectedRunId)}
+        onOpenSettings={() => setIsSettingsOpen(true)}
+        onLogout={() => {
+          api.logout();
+          setIsAuthModalOpen(true);
+          setAuthMode('login');
+        }}
         isLoading={isLoading}
       />
 
@@ -384,7 +422,7 @@ export const App: React.FC = () => {
               className={`nav-tab ${activeTab === 'overview' ? 'tab-active' : ''}`}
             >
               <LayoutDashboard size={15} />
-              <span>Overview</span>
+              <span>{t('tab_overview')}</span>
               {currentRun.pending_questions.length > 0 && (
                 <span className="tab-badge-amber">{currentRun.pending_questions.length}</span>
               )}
@@ -395,7 +433,7 @@ export const App: React.FC = () => {
               className={`nav-tab ${activeTab === 'discussion' ? 'tab-active' : ''}`}
             >
               <MessageSquare size={15} />
-              <span>Discussion ({events.length})</span>
+              <span>{t('tab_discussion')} ({events.length})</span>
             </button>
 
             <button
@@ -403,7 +441,7 @@ export const App: React.FC = () => {
               className={`nav-tab ${activeTab === 'issues' ? 'tab-active' : ''}`}
             >
               <AlertOctagon size={15} />
-              <span>Issues ({issues.length})</span>
+              <span>{t('tab_issues')} ({issues.length})</span>
             </button>
 
             <button
@@ -411,7 +449,7 @@ export const App: React.FC = () => {
               className={`nav-tab ${activeTab === 'decisions' ? 'tab-active' : ''}`}
             >
               <Compass size={15} />
-              <span>Decisions ({decisions.length})</span>
+              <span>{t('tab_decisions')} ({decisions.length})</span>
             </button>
 
             <button
@@ -419,7 +457,7 @@ export const App: React.FC = () => {
               className={`nav-tab ${activeTab === 'evidence' ? 'tab-active' : ''}`}
             >
               <FileSearch size={15} />
-              <span>Evidence ({evidence.length})</span>
+              <span>{t('tab_evidence')} ({evidence.length})</span>
             </button>
 
             <button
@@ -427,7 +465,7 @@ export const App: React.FC = () => {
               className={`nav-tab ${activeTab === 'plan' ? 'tab-active' : ''}`}
             >
               <GitBranch size={15} />
-              <span>Plan Revisions</span>
+              <span>{t('tab_plan')}</span>
             </button>
 
             <button
@@ -435,9 +473,9 @@ export const App: React.FC = () => {
               className={`nav-tab ${activeTab === 'logs' ? 'tab-active' : ''}`}
             >
               <Terminal size={15} />
-              <span>Execution Logs</span>
+              <span>{t('tab_logs')}</span>
               {currentRun.status === 'FAILED' && (
-                <span className="tab-badge-rose">Error</span>
+                <span className="tab-badge-rose">{t('tab_error_badge')}</span>
               )}
             </button>
           </nav>
@@ -496,7 +534,7 @@ export const App: React.FC = () => {
         </main>
       ) : (
         <div className="no-run-selected">
-          <p className="text-slate-400">No run selected. Create a new run or select an existing one.</p>
+          <p className="text-slate-400">{t('no_run_selected')}</p>
         </div>
       )}
 
@@ -515,6 +553,27 @@ export const App: React.FC = () => {
         finalizeResult={finalizeResult}
         mode={qualityModalMode}
       />
+
+      <SettingsModal
+        isOpen={isSettingsOpen}
+        onClose={() => setIsSettingsOpen(false)}
+        onProviderChanged={() => {
+          showFeedback('Active provider updated successfully.');
+          if (selectedRunId) loadRunDetails(selectedRunId);
+        }}
+      />
+
+      {isAuthModalOpen && (
+        <AuthModal
+          mode={authMode}
+          onAuthenticated={() => {
+            setIsAuthModalOpen(false);
+            const params = new URLSearchParams(window.location.search);
+            const runParam = params.get('run');
+            loadRuns(runParam);
+          }}
+        />
+      )}
     </div>
   );
 };

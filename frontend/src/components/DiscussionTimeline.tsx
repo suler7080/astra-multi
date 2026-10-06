@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import type { StreamEvent } from '../types';
 import { MessageSquare, Radio, User, Bot, Shield, CheckCircle, Code } from 'lucide-react';
+import { useI18n } from '../i18n';
 
 interface DiscussionTimelineProps {
   events: StreamEvent[];
@@ -11,6 +12,7 @@ export const DiscussionTimeline: React.FC<DiscussionTimelineProps> = ({
   events,
   isConnected,
 }) => {
+  const { t } = useI18n();
   const [filterType, setFilterType] = useState<string>('all');
   const [autoScroll, setAutoScroll] = useState<boolean>(true);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -52,11 +54,11 @@ export const DiscussionTimeline: React.FC<DiscussionTimelineProps> = ({
       <div className="timeline-header">
         <div className="flex-align-center gap-2">
           <MessageSquare size={18} className="text-sky-400" />
-          <h3 className="card-title">Live Discussion & Audit Timeline</h3>
+          <h3 className="card-title">{t('timeline_title')}</h3>
           <div className="flex-align-center gap-1 ml-2">
             <Radio size={14} className={isConnected ? 'text-emerald-400 animate-pulse' : 'text-slate-500'} />
             <span className="text-xs text-slate-400">
-              {isConnected ? 'Live SSE streaming' : 'Historical replay'}
+              {isConnected ? t('timeline_connected') : t('timeline_disconnected')}
             </span>
           </div>
         </div>
@@ -90,7 +92,7 @@ export const DiscussionTimeline: React.FC<DiscussionTimelineProps> = ({
         {filteredEvents.length === 0 ? (
           <div className="empty-state">
             <MessageSquare size={32} className="text-slate-600 mb-2" />
-            <p className="text-slate-400 text-sm">No discussion events recorded yet.</p>
+            <p className="text-slate-400 text-sm">{t('timeline_empty')}</p>
           </div>
         ) : (
           <div className="timeline-items-list">

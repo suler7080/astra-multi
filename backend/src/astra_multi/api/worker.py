@@ -73,11 +73,15 @@ class RunWorker:
                     lease=lease,
                 )
 
+            active_p = self.store.settings.get_active_provider()
+            active_provider_name = active_p["name"] if active_p else None
+
             wf_ctx = WorkflowContext(
                 controller=controller,
                 gateway=self.gateway,
                 context_builder=context_builder,
                 budget_service=budget_service,
+                provider=active_provider_name,
             )
 
             graph = create_workflow_graph(wf_ctx)

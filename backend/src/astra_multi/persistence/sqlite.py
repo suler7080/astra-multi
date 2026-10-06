@@ -38,6 +38,7 @@ from astra_multi.domain.repositories import ArtifactStore
 
 from .artifacts import FileArtifactStore
 from .migrations import migrate
+from .settings_store import SettingsStore
 
 mutation_adapter: TypeAdapter[Mutation] = TypeAdapter(Mutation)
 
@@ -77,6 +78,7 @@ class SQLiteStore:
                 with closing(self.connection.execute(statement)) as cursor:
                     cursor.fetchall()
             migrate(self.connection)
+            self.settings = SettingsStore(lambda: self.connection)
         except BaseException:
             self.connection.close()
             raise
