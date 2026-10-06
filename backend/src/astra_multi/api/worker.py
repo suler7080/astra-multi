@@ -29,6 +29,19 @@ class RunWorker:
         self.gateway = gateway or ModelGateway(config=GatewayConfig(enable_output_repair=True))
         self._active_tasks: dict[str, asyncio.Task[None]] = {}
         self._cancellation_events: dict[str, asyncio.Event] = {}
+        self._run_errors: dict[str, dict[str, Any]] = {}
+
+    def get_run_error(self, run_id: str) -> dict[str, Any] | None:
+        """Retrieves cached or persisted error information for a run."""
+        if run_id in self._run_errors:
+            return self._run_errors[run_id]
+        try:
+            err_file = self.store.artifacts.root / "errors" / f"{run_id}.log"
+            if err_file.exists():
+                return {"error": "Execution error", "traceback": err_file.read_text(encoding="utf-8")}
+        except Exception:
+            pass
+        return None
 
     def start_run(self, run_id: str, max_rounds: int = 2) -> None:
         """Schedules execution of a run in the background."""
@@ -82,7 +95,19 @@ class RunWorker:
             await loop.run_in_executor(None, app.invoke, initial_state)
 
         except Exception as exc:
+            import traceback
+            tb_str = traceback.format_exc()
             logger.exception("Error executing run %s: %s", run_id, exc)
+            self._run_errors[run_id] = {
+                "error": str(exc),
+                "traceback": tb_str,
+            }
+            try:
+                err_dir = self.store.artifacts.root / "errors"
+                err_dir.mkdir(parents=True, exist_ok=True)
+                (err_dir / f"{run_id}.log").write_text(tb_str, encoding="utf-8")
+            except Exception:
+                pass
             try:
                 # Mark run as FAILED if not already terminal
                 state = self.store.load(run_id)

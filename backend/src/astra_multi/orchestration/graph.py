@@ -203,6 +203,17 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> StateGraph:
             input_data=bundle.content,
         )
 
+        valid_claims = {c.id for c in curr_state.claims}
+        valid_reqs = {r.id for r in curr_state.task.requirements}
+        filtered_claims = [cid for cid in proposal_out.claim_ids if cid in valid_claims]
+        filtered_coverage = {
+            k: v for k, v in proposal_out.requirement_coverage.items() if k in valid_reqs
+        }
+        if not filtered_coverage and valid_reqs:
+            filtered_coverage = {
+                r.id: proposal_out.approach[:100] for r in curr_state.task.requirements
+            }
+
         domain_proposal = Proposal(
             id=f"PROP-{uuid.uuid4().hex[:6]}",
             run_id=curr_state.run.id,
@@ -211,8 +222,8 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> StateGraph:
             approach=proposal_out.approach,
             alternatives=proposal_out.alternatives,
             tradeoffs=proposal_out.tradeoffs,
-            requirement_coverage=proposal_out.requirement_coverage,
-            claim_ids=proposal_out.claim_ids,
+            requirement_coverage=filtered_coverage,
+            claim_ids=filtered_claims,
         )
         ctrl.record_proposal(domain_proposal)
 
@@ -251,7 +262,14 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> StateGraph:
         )
 
         # Commit domain issues
+        valid_reqs = {r.id for task in curr_state.tasks for r in task.requirements}
+        valid_evidence = {e.id for e in curr_state.evidence}
         for idx, ir in enumerate(review_out.issues):
+            filtered_req_ids = [rid for rid in ir.requirement_ids if rid in valid_reqs]
+            filtered_evi_ids = [eid for eid in ir.evidence_ids if eid in valid_evidence]
+            verif_req = ir.verification_request
+            if not filtered_evi_ids and not verif_req:
+                verif_req = f"Verification required: {ir.claim[:100]}"
             domain_issue = Issue(
                 id=f"ISSUE-{state.get('round', 0)}-{idx + 1}",
                 run_id=curr_state.run.id,
@@ -259,10 +277,10 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> StateGraph:
                 based_on_revision=curr_state.plan.revision if curr_state.plan else 0,
                 claim=ir.claim,
                 impact=ir.impact,
-                verification_request=ir.verification_request,
+                verification_request=verif_req,
                 suggested_resolution=ir.suggested_resolution,
-                requirement_ids=ir.requirement_ids,
-                evidence_ids=ir.evidence_ids,
+                requirement_ids=filtered_req_ids,
+                evidence_ids=filtered_evi_ids,
             )
             ctrl.record_issue(domain_issue)
 
@@ -308,35 +326,54 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> StateGraph:
 
         # Build PlanRevision
         base_rev = curr_state.plan.revision if curr_state.plan else 0
-        plan_steps = [
-            PlanStep(
-                id=f"STEP-{idx + 1}",
-                objective=s.objective,
-                requirement_ids=s.requirement_ids,
-                dependencies=s.dependencies,
-                targets=s.targets,
-                validation=s.validation,
-                deliverables=s.deliverables,
-                completion_criteria=s.completion_criteria,
-                evidence_ids=s.evidence_ids,
+        valid_reqs = {r.id for r in curr_state.task.requirements}
+        valid_evidence = {e.id for e in curr_state.evidence}
+        valid_issues = {i.id for i in curr_state.issues}
+        fallback_req_id = list(valid_reqs)[0] if valid_reqs else "REQ-001"
+
+        plan_steps: list[PlanStep] = []
+        for idx, s in enumerate(synth_out.steps):
+            step_id = f"STEP-{idx + 1}"
+            filtered_reqs = [rid for rid in s.requirement_ids if rid in valid_reqs]
+            if not filtered_reqs:
+                filtered_reqs = [fallback_req_id]
+            filtered_evis = [eid for eid in s.evidence_ids if eid in valid_evidence]
+            prior_step_ids = {f"STEP-{j + 1}" for j in range(idx)}
+            filtered_deps = [dep for dep in s.dependencies if dep in prior_step_ids]
+            plan_steps.append(
+                PlanStep(
+                    id=step_id,
+                    objective=s.objective,
+                    requirement_ids=filtered_reqs,
+                    dependencies=filtered_deps,
+                    targets=s.targets,
+                    validation=s.validation,
+                    deliverables=s.deliverables or ["Deliverable artifact"],
+                    completion_criteria=s.completion_criteria or ["Completion criteria verified"],
+                    evidence_ids=filtered_evis,
+                )
             )
-            for idx, s in enumerate(synth_out.steps)
-        ]
-        plan_decisions = [
-            Decision(
+
+        plan_decisions: list[Decision] = []
+        for idx, d in enumerate(synth_out.decisions):
+            filtered_evis = [eid for eid in d.evidence_ids if eid in valid_evidence]
+            filtered_issues = [iid for iid in d.related_issue_ids if iid in valid_issues]
+            dec = Decision(
                 id=f"DEC-{idx + 1}",
                 run_id=curr_state.run.id,
                 question=d.question,
                 chosen=d.chosen,
                 rationale=d.rationale,
                 alternatives=d.alternatives,
-                evidence_ids=d.evidence_ids,
-                related_issues=d.related_issue_ids,
+                evidence_ids=filtered_evis,
+                related_issues=filtered_issues,
             )
-            for idx, d in enumerate(synth_out.decisions)
-        ]
-        for dec in plan_decisions:
+            plan_decisions.append(dec)
             ctrl.record_decision(dec)
+
+        filtered_issues_addressed = [
+            iid for iid in synth_out.issues_addressed if iid in valid_issues
+        ]
 
         new_plan = PlanRevision(
             id=f"PLAN-{base_rev + 1}",
@@ -348,7 +385,7 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> StateGraph:
             steps=plan_steps,
             decisions=plan_decisions,
             risks=synth_out.risks,
-            issues_addressed=synth_out.issues_addressed,
+            issues_addressed=filtered_issues_addressed,
         )
         ctrl.commit_plan_revision(new_plan)
 

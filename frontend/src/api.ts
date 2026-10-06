@@ -6,6 +6,7 @@ import type {
   Issue,
   PlanRevision,
   RunDetail,
+  RunLogEntry,
   RunSummary,
   ValidationReport,
 } from './types';
@@ -93,6 +94,11 @@ export const api = {
   async getPlan(runId: string, revision: number): Promise<PlanRevision> {
     const res = await fetch(`${BASE_URL}/runs/${runId}/plans/${revision}`);
     return handleResponse<PlanRevision>(res);
+  },
+
+  async getRunLogs(runId: string): Promise<RunLogEntry[]> {
+    const res = await fetch(`${BASE_URL}/runs/${runId}/logs`);
+    return handleResponse<RunLogEntry[]>(res);
   },
 
   async answerQuestion(runId: string, questionId: string, answer: string, expectedRevision: number): Promise<{ message: string; question_id: string; status: string }> {

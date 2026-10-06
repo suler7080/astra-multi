@@ -22,6 +22,7 @@ import { DecisionsLog } from './components/DecisionsLog';
 import { EvidenceLedger } from './components/EvidenceLedger';
 import { PlanViewer } from './components/PlanViewer';
 import { QualityGateModal } from './components/QualityGateModal';
+import { ExecutionLogs } from './components/ExecutionLogs';
 import {
   LayoutDashboard,
   MessageSquare,
@@ -29,6 +30,7 @@ import {
   Compass,
   FileSearch,
   GitBranch,
+  Terminal,
 } from 'lucide-react';
 
 export const App: React.FC = () => {
@@ -41,7 +43,7 @@ export const App: React.FC = () => {
   const [currentPlan, setCurrentPlan] = useState<PlanRevision | null>(null);
   const [events, setEvents] = useState<StreamEvent[]>([]);
 
-  const [activeTab, setActiveTab] = useState<'overview' | 'discussion' | 'issues' | 'decisions' | 'evidence' | 'plan'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'discussion' | 'issues' | 'decisions' | 'evidence' | 'plan' | 'logs'>('overview');
   const [isNewRunOpen, setIsNewRunOpen] = useState(false);
   const [isQualityModalOpen, setIsQualityModalOpen] = useState(false);
   const [qualityModalMode, setQualityModalMode] = useState<'validation' | 'finalize'>('validation');
@@ -427,6 +429,17 @@ export const App: React.FC = () => {
               <GitBranch size={15} />
               <span>Plan Revisions</span>
             </button>
+
+            <button
+              onClick={() => setActiveTab('logs')}
+              className={`nav-tab ${activeTab === 'logs' ? 'tab-active' : ''}`}
+            >
+              <Terminal size={15} />
+              <span>Execution Logs</span>
+              {currentRun.status === 'FAILED' && (
+                <span className="tab-badge-rose">Error</span>
+              )}
+            </button>
           </nav>
 
           {/* Tab Views */}
@@ -443,6 +456,7 @@ export const App: React.FC = () => {
                 onExportJson={() => handleExportJson()}
                 isProcessing={isLoading}
                 actionMessage={actionMessage}
+                onViewLogs={() => setActiveTab('logs')}
               />
             )}
 
@@ -473,6 +487,10 @@ export const App: React.FC = () => {
                 onExportMarkdown={handleExportMarkdown}
                 onExportJson={handleExportJson}
               />
+            )}
+
+            {activeTab === 'logs' && (
+              <ExecutionLogs run={currentRun} />
             )}
           </div>
         </main>

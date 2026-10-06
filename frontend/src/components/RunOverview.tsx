@@ -24,6 +24,7 @@ interface RunOverviewProps {
   onExportJson: () => void;
   isProcessing: boolean;
   actionMessage?: string | null;
+  onViewLogs?: () => void;
 }
 
 export const RunOverview: React.FC<RunOverviewProps> = ({
@@ -37,6 +38,7 @@ export const RunOverview: React.FC<RunOverviewProps> = ({
   onExportJson,
   isProcessing,
   actionMessage,
+  onViewLogs,
 }) => {
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [cancelReason, setCancelReason] = useState('Stopped by operator');
@@ -58,6 +60,40 @@ export const RunOverview: React.FC<RunOverviewProps> = ({
         <div className="action-feedback-banner">
           <CheckCircle2 size={16} className="text-emerald-400" />
           <span>{actionMessage}</span>
+        </div>
+      )}
+
+      {/* Prominent Failure Banner if run failed */}
+      {(run.status === 'FAILED' || (isTerminal && run.stop_reason && run.status !== 'FINAL')) && (
+        <div className="run-failure-banner">
+          <div className="flex items-start justify-between gap-4">
+            <div className="flex items-start gap-3 flex-1">
+              <span className="p-2 rounded-lg bg-rose-950/60 border border-rose-800/60 text-rose-400">
+                ⚠️
+              </span>
+              <div className="flex-1">
+                <div className="flex items-center gap-2">
+                  <h3 className="text-sm font-semibold text-rose-200">
+                    Execution Stopped: {run.status === 'FAILED' ? 'Execution Failure' : run.status}
+                  </h3>
+                  <span className="badge-danger text-[11px]">Phase: {run.phase}</span>
+                </div>
+                <p className="text-xs text-rose-300/90 mt-1 font-mono break-words bg-rose-950/40 p-2.5 rounded border border-rose-900/40">
+                  {run.stop_reason || 'Unknown error occurred during workflow execution.'}
+                </p>
+              </div>
+            </div>
+
+            {onViewLogs && (
+              <button
+                onClick={onViewLogs}
+                className="btn-danger-sm flex items-center gap-1.5 whitespace-nowrap self-center"
+              >
+                <span>View Error Logs</span>
+                <span>➔</span>
+              </button>
+            )}
+          </div>
         </div>
       )}
 

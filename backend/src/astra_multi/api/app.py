@@ -20,6 +20,7 @@ from astra_multi.api.schemas import (
     CancelRunRequest,
     CreateRunRequest,
     RunDetailResponse,
+    RunLogEntry,
     RunSummaryResponse,
 )
 from astra_multi.api.worker import RunWorker
@@ -53,8 +54,19 @@ def create_app(
     auto_start_worker: bool = True,
 ) -> FastAPI:
     """Factory to create and configure the FastAPI application."""
-    db_file = db_path or Path(".local/domain.sqlite")
-    art_dir = artifacts_dir or Path(".local/artifacts")
+    if db_path is not None:
+        db_file = db_path
+    elif Path("backend/.local/domain.sqlite").exists():
+        db_file = Path("backend/.local/domain.sqlite")
+    else:
+        db_file = Path(".local/domain.sqlite")
+
+    if artifacts_dir is not None:
+        art_dir = artifacts_dir
+    elif Path("backend/.local/artifacts").exists():
+        art_dir = Path("backend/.local/artifacts")
+    else:
+        art_dir = Path(".local/artifacts")
     db_file.parent.mkdir(parents=True, exist_ok=True)
     art_dir.mkdir(parents=True, exist_ok=True)
 
@@ -315,6 +327,172 @@ def create_app(
     async def get_run_evidence(run_id: str) -> list[dict[str, Any]]:
         state = store.load(run_id)
         return [e.model_dump(mode="json") for e in state.evidence]
+
+    @app.get(
+        "/api/runs/{run_id}/logs",
+        summary="Get comprehensive execution logs and error diagnostics for a run",
+        response_model=list[RunLogEntry],
+    )
+    async def get_run_logs(run_id: str) -> list[RunLogEntry]:
+        try:
+            state = store.load(run_id)
+        except Exception:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Run {run_id} not found.",
+            )
+
+        events = store.events(run_id)
+        logs: list[RunLogEntry] = []
+
+        # Map domain events to structured logs
+        for ev in events:
+            payload = ev.payload or {}
+            node = payload.get("node", "system")
+            ev_type = ev.type
+            ts = ev.timestamp.isoformat()
+            seq = ev.sequence
+
+            if ev_type == "run_created":
+                logs.append(
+                    RunLogEntry(
+                        id=f"LOG-{seq}",
+                        timestamp=ts,
+                        level="INFO",
+                        node="intake",
+                        message=f"Initialized run {run_id} (revision {ev.revision})",
+                        details=payload,
+                    )
+                )
+            elif ev_type == "transition_run":
+                res = payload.get("result", {})
+                phase = res.get("phase", "UNKNOWN")
+                run_status = res.get("status", "UNKNOWN")
+                reason = res.get("reason")
+                if run_status == "FAILED":
+                    level = "ERROR"
+                    msg = f"Run execution failed in phase {phase}: {reason or state.run.stop_reason or 'Internal error'}"
+                elif run_status in ("PARTIAL", "CANCELLED"):
+                    level = "WARN"
+                    msg = f"Run stopped in phase {phase} ({run_status}): {reason or state.run.stop_reason or ''}".strip()
+                else:
+                    level = "INFO"
+                    msg = f"Transitioned phase to {phase} (Status: {run_status})"
+                logs.append(
+                    RunLogEntry(
+                        id=f"LOG-{seq}",
+                        timestamp=ts,
+                        level=level,
+                        node=node,
+                        message=msg,
+                        details=payload,
+                    )
+                )
+            elif ev_type == "add_record":
+                res = payload.get("result", {})
+                rec_id = str(res.get("record_id", ""))
+                if "model-call" in str(payload.get("logical_operation_id", "")):
+                    logs.append(
+                        RunLogEntry(
+                            id=f"LOG-{seq}",
+                            timestamp=ts,
+                            level="INFO",
+                            node="model-gateway",
+                            message=f"Model invocation recorded: {rec_id}",
+                            details=payload,
+                        )
+                    )
+                elif rec_id.startswith("ISSUE"):
+                    logs.append(
+                        RunLogEntry(
+                            id=f"LOG-{seq}",
+                            timestamp=ts,
+                            level="WARN",
+                            node="review",
+                            message=f"Reviewer recorded issue {rec_id}",
+                            details=payload,
+                        )
+                    )
+                elif rec_id.startswith("DEC"):
+                    logs.append(
+                        RunLogEntry(
+                            id=f"LOG-{seq}",
+                            timestamp=ts,
+                            level="INFO",
+                            node="revise",
+                            message=f"Architectural decision recorded {rec_id}",
+                            details=payload,
+                        )
+                    )
+                elif rec_id.startswith("PROP"):
+                    logs.append(
+                        RunLogEntry(
+                            id=f"LOG-{seq}",
+                            timestamp=ts,
+                            level="INFO",
+                            node="propose",
+                            message=f"Planner proposal recorded {rec_id}",
+                            details=payload,
+                        )
+                    )
+                else:
+                    logs.append(
+                        RunLogEntry(
+                            id=f"LOG-{seq}",
+                            timestamp=ts,
+                            level="INFO",
+                            node=node,
+                            message=f"Record added: {rec_id}",
+                            details=payload,
+                        )
+                    )
+            elif ev_type == "commit_plan":
+                res = payload.get("result", {})
+                plan_rev = res.get("revision", 1)
+                logs.append(
+                    RunLogEntry(
+                        id=f"LOG-{seq}",
+                        timestamp=ts,
+                        level="INFO",
+                        node="revise",
+                        message=f"Synthesizer committed PlanRevision {plan_rev}",
+                        details=payload,
+                    )
+                )
+            else:
+                logs.append(
+                    RunLogEntry(
+                        id=f"LOG-{seq}",
+                        timestamp=ts,
+                        level="INFO",
+                        node=node,
+                        message=f"Event {ev_type} recorded (seq {seq})",
+                        details=payload,
+                    )
+                )
+
+        # If run has failed or has a stop_reason, ensure a dedicated ERROR log entry with stack trace
+        err_info = worker.get_run_error(run_id)
+        if state.run.status == RunStatus.FAILED or state.run.stop_reason or err_info:
+            last_ts = events[-1].timestamp.isoformat() if events else state.run.created_at.isoformat()
+            stop_reason_msg = state.run.stop_reason or (err_info.get("error") if err_info else "Execution error")
+            logs.append(
+                RunLogEntry(
+                    id=f"LOG-ERR-{run_id}",
+                    timestamp=last_ts,
+                    level="ERROR",
+                    node="worker",
+                    message=f"Stop reason: {stop_reason_msg}",
+                    details={
+                        "stop_reason": stop_reason_msg,
+                        "status": state.run.status.value,
+                        "phase": state.run.phase.value,
+                        "traceback": err_info.get("traceback") if err_info else None,
+                    },
+                )
+            )
+
+        return logs
 
     @app.get("/api/runs/{run_id}/decisions", summary="Get all architectural decisions for a run")
     async def get_run_decisions(run_id: str) -> list[dict[str, Any]]:

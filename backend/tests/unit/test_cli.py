@@ -101,3 +101,34 @@ def test_cli_answer_question(capsys):
         captured = capsys.readouterr()
         status_info = json.loads(captured.out)
         assert len(status_info["pending_questions"]) == 0
+
+
+def test_cli_logs(capsys):
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = str(Path(tmpdir) / "cli_test.db")
+
+        # Create
+        main([
+            "--db", db_path,
+            "create",
+            "--goal", "Test logging",
+            "--requirements", "Req 1",
+            "--run-id", "RUN-LOG-1",
+        ])
+        capsys.readouterr()
+
+        # View logs plain text
+        ret = main(["--db", db_path, "logs", "RUN-LOG-1"])
+        assert ret == 0
+        captured = capsys.readouterr()
+        assert "EXECUTION LOGS: RUN-LOG-1" in captured.out
+        assert "Run created for goal: Test logging" in captured.out
+
+        # View logs json
+        ret_json = main(["--db", db_path, "logs", "RUN-LOG-1", "--json"])
+        assert ret_json == 0
+        captured_json = capsys.readouterr()
+        data = json.loads(captured_json.out)
+        assert isinstance(data, list)
+        assert len(data) >= 1
+

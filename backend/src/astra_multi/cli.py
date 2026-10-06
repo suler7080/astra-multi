@@ -22,16 +22,26 @@ def build_parser() -> argparse.ArgumentParser:
         prog="astra-multi",
         description="Astra Multi — Multi-agent software architecture design CLI",
     )
+    default_db = (
+        Path("backend/.local/domain.sqlite")
+        if Path("backend/.local/domain.sqlite").exists()
+        else Path(".local/domain.sqlite")
+    )
+    default_artifacts = (
+        Path("backend/.local/artifacts")
+        if Path("backend/.local/artifacts").exists()
+        else Path(".local/artifacts")
+    )
     parser.add_argument(
         "--db",
         type=Path,
-        default=Path(".local/domain.sqlite"),
+        default=default_db,
         help="Path to SQLite persistence database",
     )
     parser.add_argument(
         "--artifacts",
         type=Path,
-        default=Path(".local/artifacts"),
+        default=default_artifacts,
         help="Path to artifact storage root",
     )
 
@@ -87,6 +97,21 @@ def build_parser() -> argparse.ArgumentParser:
     # finalize
     fin_p = subparsers.add_parser("finalize", help="Evaluate quality and finalize run status")
     fin_p.add_argument("run_id", help="Target run ID")
+
+    # logs
+    logs_p = subparsers.add_parser("logs", help="View execution logs and errors for a run")
+    logs_p.add_argument("run_id", help="Target run ID")
+    logs_p.add_argument(
+        "--level",
+        choices=["ALL", "INFO", "WARN", "ERROR"],
+        default="ALL",
+        help="Filter by minimum log level (default: ALL)",
+    )
+    logs_p.add_argument(
+        "--json",
+        action="store_true",
+        help="Output raw JSON logs",
+    )
 
     # serve
     serve_p = subparsers.add_parser("serve", help="Start FastAPI web backend and UI")
@@ -267,6 +292,73 @@ def cmd_finalize(store: SQLiteStore, args: argparse.Namespace) -> int:
         return 1
 
 
+def cmd_logs(store: SQLiteStore, args: argparse.Namespace) -> int:
+    try:
+        state = store.load(args.run_id)
+    except Exception:
+        print(f"Error: Run {args.run_id} not found.", file=sys.stderr)
+        return 1
+
+    events = store.events(args.run_id)
+    if args.json:
+        entries = [ev.model_dump(mode="json") for ev in events]
+        if state.run.stop_reason:
+            entries.append({"type": "stop_reason", "error": state.run.stop_reason})
+        print(json.dumps(entries, indent=2))
+        return 0
+
+    print("=" * 70)
+    print(f"EXECUTION LOGS: {args.run_id} | Status: {state.run.status.value} | Phase: {state.run.phase.value}")
+    print("=" * 70)
+
+    for ev in events:
+        ts = ev.timestamp.strftime("%H:%M:%S")
+        payload = ev.payload or {}
+        res = payload.get("result", {})
+        node = payload.get("node", "system")
+        ev_type = ev.type
+
+        level = "INFO"
+        msg = ""
+        if ev_type == "transition_run":
+            status_val = res.get("status", "")
+            phase_val = res.get("phase", "")
+            if status_val == "FAILED":
+                level = "ERROR"
+                msg = f"Phase {phase_val} FAILED: {res.get('reason') or state.run.stop_reason or ''}"
+            elif status_val in ("PARTIAL", "CANCELLED"):
+                level = "WARN"
+                msg = f"Phase {phase_val} {status_val}: {res.get('reason') or ''}"
+            else:
+                msg = f"Transition -> {phase_val} ({status_val})"
+        elif ev_type == "add_record":
+            rec_id = str(res.get("record_id", ""))
+            if "model-call" in str(payload.get("logical_operation_id", "")):
+                msg = f"Model call completed: {rec_id}"
+            else:
+                msg = f"Record committed: {rec_id}"
+        elif ev_type == "commit_plan":
+            msg = f"PlanRevision committed: rev {res.get('revision')}"
+        elif ev_type == "run_created":
+            msg = f"Run created for goal: {state.task.goal[:60]}"
+        else:
+            msg = f"{ev_type}: {payload}"
+
+        if args.level != "ALL" and level != args.level:
+            continue
+
+        prefix = f"[{ts}] [{level:5s}] [{node}]"
+        print(f"{prefix} {msg}")
+
+    if state.run.status.value == "FAILED" or state.run.stop_reason:
+        print("\n" + "!" * 70)
+        print("CRITICAL FAILURE / STOP REASON:")
+        print(f"  {state.run.stop_reason}")
+        print("!" * 70)
+
+    return 0
+
+
 def cmd_serve(args: argparse.Namespace) -> int:
     import uvicorn
 
@@ -279,6 +371,17 @@ def cmd_serve(args: argparse.Namespace) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    if hasattr(sys.stdout, "reconfigure"):
+        try:
+            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+    if hasattr(sys.stderr, "reconfigure"):
+        try:
+            sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
     parser = build_parser()
     args = parser.parse_args(argv)
 
@@ -300,6 +403,8 @@ def main(argv: list[str] | None = None) -> int:
             return cmd_validate(store, args)
         elif args.command == "finalize":
             return cmd_finalize(store, args)
+        elif args.command == "logs":
+            return cmd_logs(store, args)
         else:
             parser.print_help()
             return 1

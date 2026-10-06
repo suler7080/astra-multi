@@ -156,3 +156,13 @@ export interface StreamEvent {
     stop_reason?: string;
   };
 }
+
+export interface RunLogEntry {
+  id: string;
+  timestamp: string;
+  level: 'INFO' | 'WARN' | 'ERROR' | 'DEBUG';
+  node: string;
+  message: string;
+  details?: Record<string, unknown> | null;
+}
+

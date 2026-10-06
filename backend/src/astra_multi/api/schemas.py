@@ -73,3 +73,13 @@ class ErrorDetail(BaseModel):
 
 class ErrorEnvelope(BaseModel):
     error: ErrorDetail
+
+
+class RunLogEntry(BaseModel):
+    id: str
+    timestamp: str
+    level: Literal["INFO", "WARN", "ERROR", "DEBUG"]
+    node: str
+    message: str
+    details: dict[str, Any] | None = None
+

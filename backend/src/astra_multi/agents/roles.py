@@ -60,7 +60,10 @@ class ProposalOutput(AgentContract):
         default_factory=dict,
         description="Map from requirement ID to description of how it is addressed",
     )
-    claim_ids: list[ID] = Field(default_factory=list)
+    claim_ids: list[ID] = Field(
+        default_factory=list,
+        description="IDs of established domain claims (CLAIM-...) if any. Leave empty if none.",
+    )
 
 
 class IssueReport(AgentContract):
