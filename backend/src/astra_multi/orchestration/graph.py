@@ -377,11 +377,18 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> StateGraph:
             )
 
         existing_dec_ids = {dec.id for dec in curr_state.decisions}
+        existing_dec_by_q = {dec.question: dec for dec in curr_state.decisions}
         dec_counter = len(curr_state.decisions) + 1
-        plan_decisions: list[Decision] = []
+        plan_decisions_by_q: dict[str, Decision] = {}
         for d in synth_out.decisions:
             filtered_evis = [eid for eid in d.evidence_ids if eid in valid_evidence]
             filtered_issues = [iid for iid in d.related_issue_ids if iid in valid_issues]
+
+            existing_dec = existing_dec_by_q.get(d.question)
+            if existing_dec is not None and existing_dec.chosen == d.chosen:
+                plan_decisions_by_q[d.question] = existing_dec
+                continue
+
             while f"DEC-{dec_counter}" in existing_dec_ids:
                 dec_counter += 1
             dec_id = f"DEC-{dec_counter}"
@@ -398,8 +405,11 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> StateGraph:
                 evidence_ids=filtered_evis,
                 related_issues=filtered_issues,
             )
-            plan_decisions.append(dec)
             ctrl.record_decision(dec)
+            existing_dec_by_q[d.question] = dec
+            plan_decisions_by_q[d.question] = dec
+
+        plan_decisions = list(plan_decisions_by_q.values())
 
         filtered_issues_addressed = [
             iid for iid in synth_out.issues_addressed if iid in valid_issues

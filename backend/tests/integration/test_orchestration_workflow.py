@@ -1132,6 +1132,314 @@ def test_f002_minesweeper_fixture_resolves_blocker_and_finalizes_by_p4():
             assert certified_state.run.phase == RunPhase.EXPORT
 
 
+def test_f007_active_decisions_do_not_balloon_across_n_rounds():
+    """F-007: Decisions across N rounds must supersede or reuse valid decisions without ballooning."""
+    round_count = {"synth": 0}
+    review_calls = {"review": 0}
+
+    def fixed_decision_adapter(
+        provider: str,
+        role: str,
+        messages: list[dict[str, str]],
+        output_schema: Any = None,
+        **kwargs: Any,
+    ) -> ModelResult:
+        if output_schema == AnalysisOutput:
+            content = AnalysisOutput(
+                role=role, findings=["Ok"], risks=[], assumptions=[]
+            )
+        elif output_schema == ProposalOutput:
+            content = ProposalOutput(
+                approach="Standard proposal",
+                alternatives=[],
+                tradeoffs=[],
+                requirement_coverage={"REQ-001": "Coverage"},
+                claim_ids=[],
+            )
+        elif output_schema == ReviewOutput:
+            is_semantic = any("SEMANTIC_REVIEW" in m.get("content", "") for m in messages)
+            if is_semantic:
+                curr_issues = store.load(state.run.id).issues
+                target_issue = curr_issues[0].id if curr_issues else "ISSUE-1"
+                content = ReviewOutput(
+                    summary="Semantic review: verified resolution",
+                    reviewed_evidence_ids=[],
+                    issues=[],
+                    resolutions=[
+                        IssueResolutionReport(
+                            issue_id=target_issue,
+                            resolution_text="Resolution verified in revision",
+                            review_result="PASS",
+                            review_note="Verified fix",
+                        )
+                    ] if (curr_issues and round_count["synth"] >= 2) else [],
+                )
+            else:
+                review_calls["review"] += 1
+                if review_calls["review"] == 1:
+                    content = ReviewOutput(
+                        summary="Initial review with blocking issue",
+                        reviewed_evidence_ids=[],
+                        issues=[
+                            IssueReport(
+                                claim="Needs database pooling",
+                                impact="Connection exhaustion",
+                                severity=IssueSeverity.BLOCKING,
+                                verification_request="Check connection config",
+                                suggested_resolution="Configure pool size",
+                                requirement_ids=["REQ-001"],
+                            )
+                        ],
+                    )
+                else:
+                    content = ReviewOutput(
+                        summary="Review pass",
+                        reviewed_evidence_ids=[],
+                        issues=[],
+                    )
+        elif output_schema == SynthesizerOutput:
+            round_count["synth"] += 1
+            call_num = round_count["synth"]
+            curr_issues = store.load(state.run.id).issues
+            target_issue = [curr_issues[0].id] if (curr_issues and call_num >= 2) else []
+            content = SynthesizerOutput(
+                steps=[
+                    StepDraft(
+                        objective="Step 1",
+                        requirement_ids=["REQ-001"],
+                        dependencies=[],
+                        targets=["main.py"],
+                        validation="pytest",
+                        deliverables=["main.py"],
+                        completion_criteria=["tests pass"],
+                        evidence_ids=[],
+                    )
+                ],
+                # Same decision question across all rounds
+                decisions=[
+                    DecisionDraft(
+                        question="Which database engine to use?",
+                        chosen="PostgreSQL",
+                        rationale="Standard relational DB",
+                        alternatives=["MySQL"],
+                        evidence_ids=[],
+                        related_issue_ids=[],
+                    )
+                ],
+                risks=[],
+                issues_addressed=target_issue,
+                rationale="Synthesis",
+            )
+        else:
+            content = "ok"
+
+        return ModelResult(
+            content=content.model_dump(mode="json") if hasattr(content, "model_dump") else content,
+            model_id=f"fake-{role}",
+            provider="fake",
+            usage={"prompt_tokens": 100, "completion_tokens": 50, "total_tokens": 150},
+            cost_actual_usd=0.001,
+        )
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = Path(tmpdir) / "decisions_f007.db"
+        art_path = Path(tmpdir) / "artifacts"
+        with SQLiteStore(db_path) as store:
+            art_store = FileArtifactStore(art_path)
+            state = sample_state(repo=False)
+            store.create(state.task, state.run, state.snapshot)
+            lease = store.acquire(state.run.id, owner="test-worker", ttl=60)
+
+            controller = WorkflowController(store, lease)
+            gateway = ModelGateway(
+                config=GatewayConfig(enable_output_repair=False),
+                provider_adapter=fixed_decision_adapter,
+            )
+            context_builder = ContextBuilder(art_store)
+            wf_ctx = WorkflowContext(
+                controller=controller,
+                gateway=gateway,
+                context_builder=context_builder,
+            )
+            graph = create_workflow_graph(wf_ctx)
+            app = graph.compile()
+
+            initial_state = {
+                "run_id": state.run.id,
+                "round": 0,
+                "max_rounds": 2,
+                "events": [],
+            }
+            final_output = app.invoke(initial_state)
+            assert final_output["gate_passed"] is True
+            assert round_count["synth"] == 2
+
+            final_state = store.load(state.run.id)
+            # After 2 rounds with identical decision questions:
+            # The active decisions in the plan revision must NOT balloon!
+            assert len(final_state.plan.decisions) == 1
+            # In the domain state, duplicate decisions must NOT be created repeatedly!
+            assert len(final_state.decisions) == 1
+            assert final_state.decisions[0].id == "DEC-1"
+            assert final_state.plan.decisions[0].id == "DEC-1"
+
+
+def test_f007_superseded_decision_replaces_old_in_active_plan():
+    """F-007: When a decision is changed in a subsequent round, it supersedes the previous decision in active plan."""
+    round_count = {"synth": 0}
+    review_calls = {"review": 0}
+
+    def changing_decision_adapter(
+        provider: str,
+        role: str,
+        messages: list[dict[str, str]],
+        output_schema: Any = None,
+        **kwargs: Any,
+    ) -> ModelResult:
+        if output_schema == AnalysisOutput:
+            content = AnalysisOutput(
+                role=role, findings=["Ok"], risks=[], assumptions=[]
+            )
+        elif output_schema == ProposalOutput:
+            content = ProposalOutput(
+                approach="Standard proposal",
+                alternatives=[],
+                tradeoffs=[],
+                requirement_coverage={"REQ-001": "Coverage"},
+                claim_ids=[],
+            )
+        elif output_schema == ReviewOutput:
+            is_semantic = any("SEMANTIC_REVIEW" in m.get("content", "") for m in messages)
+            if is_semantic:
+                curr_issues = store.load(state.run.id).issues
+                target_issue = curr_issues[0].id if curr_issues else "ISSUE-1"
+                content = ReviewOutput(
+                    summary="Semantic review: verified resolution",
+                    reviewed_evidence_ids=[],
+                    issues=[],
+                    resolutions=[
+                        IssueResolutionReport(
+                            issue_id=target_issue,
+                            resolution_text="Resolution verified in revision",
+                            review_result="PASS",
+                            review_note="Verified fix",
+                        )
+                    ] if (curr_issues and round_count["synth"] >= 2) else [],
+                )
+            else:
+                review_calls["review"] += 1
+                if review_calls["review"] == 1:
+                    content = ReviewOutput(
+                        summary="Initial review with blocking issue",
+                        reviewed_evidence_ids=[],
+                        issues=[
+                            IssueReport(
+                                claim="Database engine concern",
+                                impact="Scale issue",
+                                severity=IssueSeverity.BLOCKING,
+                                verification_request="Check DB engine choice",
+                                suggested_resolution="Switch to MySQL",
+                                requirement_ids=["REQ-001"],
+                            )
+                        ],
+                    )
+                else:
+                    content = ReviewOutput(
+                        summary="Review pass",
+                        reviewed_evidence_ids=[],
+                        issues=[],
+                    )
+        elif output_schema == SynthesizerOutput:
+            round_count["synth"] += 1
+            call_num = round_count["synth"]
+            curr_issues = store.load(state.run.id).issues
+            target_issue = [curr_issues[0].id] if (curr_issues and call_num >= 2) else []
+            # In round 1: choose PostgreSQL; in round 2: switch to MySQL
+            chosen_engine = "PostgreSQL" if call_num == 1 else "MySQL"
+            content = SynthesizerOutput(
+                steps=[
+                    StepDraft(
+                        objective="Step 1",
+                        requirement_ids=["REQ-001"],
+                        dependencies=[],
+                        targets=["main.py"],
+                        validation="pytest",
+                        deliverables=["main.py"],
+                        completion_criteria=["tests pass"],
+                        evidence_ids=[],
+                    )
+                ],
+                decisions=[
+                    DecisionDraft(
+                        question="Which database engine to use?",
+                        chosen=chosen_engine,
+                        rationale=f"Selected {chosen_engine}",
+                        alternatives=["PostgreSQL" if chosen_engine == "MySQL" else "MySQL"],
+                        evidence_ids=[],
+                        related_issue_ids=[],
+                    )
+                ],
+                risks=[],
+                issues_addressed=target_issue,
+                rationale="Synthesis",
+            )
+        else:
+            content = "ok"
+
+        return ModelResult(
+            content=content.model_dump(mode="json") if hasattr(content, "model_dump") else content,
+            model_id=f"fake-{role}",
+            provider="fake",
+            usage={"prompt_tokens": 100, "completion_tokens": 50, "total_tokens": 150},
+            cost_actual_usd=0.001,
+        )
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = Path(tmpdir) / "decisions_supersede_f007.db"
+        art_path = Path(tmpdir) / "artifacts"
+        with SQLiteStore(db_path) as store:
+            art_store = FileArtifactStore(art_path)
+            state = sample_state(repo=False)
+            store.create(state.task, state.run, state.snapshot)
+            lease = store.acquire(state.run.id, owner="test-worker", ttl=60)
+
+            controller = WorkflowController(store, lease)
+            gateway = ModelGateway(
+                config=GatewayConfig(enable_output_repair=False),
+                provider_adapter=changing_decision_adapter,
+            )
+            context_builder = ContextBuilder(art_store)
+            wf_ctx = WorkflowContext(
+                controller=controller,
+                gateway=gateway,
+                context_builder=context_builder,
+            )
+            graph = create_workflow_graph(wf_ctx)
+            app = graph.compile()
+
+            initial_state = {
+                "run_id": state.run.id,
+                "round": 0,
+                "max_rounds": 2,
+                "events": [],
+            }
+            final_output = app.invoke(initial_state)
+            assert final_output["gate_passed"] is True
+            assert round_count["synth"] == 2
+
+            final_state = store.load(state.run.id)
+            # The active decisions in the plan revision must only have the superseded decision!
+            assert len(final_state.plan.decisions) == 1
+            assert final_state.plan.decisions[0].chosen == "MySQL"
+            assert final_state.plan.decisions[0].id == "DEC-2"
+
+            # Domain state keeps audit history (both DEC-1 and DEC-2)
+            assert len(final_state.decisions) == 2
+            assert final_state.decisions[0].chosen == "PostgreSQL"
+            assert final_state.decisions[1].chosen == "MySQL"
+
+
+
 
 
 
