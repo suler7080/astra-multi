@@ -785,6 +785,60 @@ def test_f001_multi_round_calls_propose_each_round():
             assert round_calls["propose"] == 2
 
 
+def test_f005_idempotent_nodes_no_duplicate_proposals_or_issues():
+    """F-005: Nodes must use deterministic IDs so retrying/re-invoking does not duplicate proposals or issues."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = Path(tmpdir) / "workflow_f005.db"
+        art_path = Path(tmpdir) / "artifacts"
+        with SQLiteStore(db_path) as store:
+            art_store = FileArtifactStore(art_path)
+            state = sample_state(repo=False)
+            store.create(state.task, state.run, state.snapshot)
+            lease = store.acquire(state.run.id, owner="test-worker", ttl=60)
+            controller = WorkflowController(store, lease)
+            controller.transition_phase(RunPhase.INDEPENDENT_ANALYSIS)
+            gateway = ModelGateway(
+                config=GatewayConfig(enable_output_repair=False),
+                provider_adapter=fake_model_adapter,
+            )
+            context_builder = ContextBuilder(art_store)
+            wf_ctx = WorkflowContext(
+                controller=controller,
+                gateway=gateway,
+                context_builder=context_builder,
+            )
+            graph = create_workflow_graph(wf_ctx)
+
+            # Invoke propose_node twice
+            propose_fn = graph.nodes["propose"].runnable
+            res1 = propose_fn.invoke({"round": 0, "run_id": state.run.id, "analyses": []})
+            res2 = propose_fn.invoke({"round": 0, "run_id": state.run.id, "analyses": []})
+
+            curr = store.load(state.run.id)
+            assert len(curr.proposals) == 1, f"Expected 1 proposal, found {len(curr.proposals)}"
+
+            # Re-invoking propose_node for round 1 generates round 1 proposal, but invoking round 1 twice does not duplicate it
+            res3 = propose_fn.invoke({"round": 1, "run_id": state.run.id, "analyses": []})
+            propose_fn.invoke({"round": 1, "run_id": state.run.id, "analyses": []})
+            curr = store.load(state.run.id)
+            assert len(curr.proposals) == 2
+
+            # Invoke review_node twice for round 0
+            review_fn = graph.nodes["review"].runnable
+            review_fn.invoke({"round": 0, "run_id": state.run.id, "proposal": res1["proposal"]})
+            review_fn.invoke({"round": 0, "run_id": state.run.id, "proposal": res1["proposal"]})
+
+            curr = store.load(state.run.id)
+            assert len(curr.issues) == 1, f"Expected 1 issue, found {len(curr.issues)}"
+
+            # Re-invoking review_node for round 1
+            review_fn.invoke({"round": 1, "run_id": state.run.id, "proposal": res3["proposal"]})
+            review_fn.invoke({"round": 1, "run_id": state.run.id, "proposal": res3["proposal"]})
+            curr = store.load(state.run.id)
+            assert len(curr.issues) == 2
+
+
+
 
 
 

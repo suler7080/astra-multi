@@ -54,6 +54,8 @@ class WorkflowController:
 
     def transition_phase(self, new_phase: RunPhase, new_status: RunStatus = RunStatus.RUNNING, reason: str | None = None) -> RunState:
         state = self.get_state()
+        if state.run.phase == new_phase and state.run.status == new_status:
+            return state
         cmd = TransitionRun(
             expected_revision=state.run.revision,
             node=f"transition-{new_phase.value.lower()}",
@@ -68,6 +70,8 @@ class WorkflowController:
 
     def record_proposal(self, proposal: Proposal) -> RunState:
         state = self.get_state()
+        if any(p.id == proposal.id for p in state.proposals):
+            return state
         cmd = AddRecord(
             expected_revision=state.run.revision,
             node="propose",
@@ -80,6 +84,8 @@ class WorkflowController:
 
     def record_issue(self, issue: Issue) -> RunState:
         state = self.get_state()
+        if any(i.id == issue.id for i in state.issues):
+            return state
         cmd = AddRecord(
             expected_revision=state.run.revision,
             node="review",
@@ -92,6 +98,8 @@ class WorkflowController:
 
     def commit_plan_revision(self, plan: PlanRevision) -> RunState:
         state = self.get_state()
+        if any(p.revision == plan.revision for p in state.plans):
+            return state
         cmd = CommitPlan(
             expected_revision=state.run.revision,
             node="revise",
@@ -104,6 +112,8 @@ class WorkflowController:
 
     def record_decision(self, decision: Decision) -> RunState:
         state = self.get_state()
+        if any(d.id == decision.id for d in state.decisions):
+            return state
         cmd = AddRecord(
             expected_revision=state.run.revision,
             node="revise",

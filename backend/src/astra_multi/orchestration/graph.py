@@ -211,8 +211,10 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> StateGraph:
             k: v for k, v in proposal_out.requirement_coverage.items() if k in valid_reqs
         }
 
+        round_num = state.get("round", 0)
+        prop_id = f"PROP-{uuid.uuid5(uuid.NAMESPACE_URL, f'{curr_state.run.id}:{round_num}:propose:0').hex[:8]}"
         domain_proposal = Proposal(
-            id=f"PROP-{uuid.uuid4().hex[:6]}",
+            id=prop_id,
             run_id=curr_state.run.id,
             author_role="planner",
             base_revision=curr_state.plan.revision if curr_state.plan else 0,
@@ -269,11 +271,9 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> StateGraph:
             verif_req = ir.verification_request
             if not filtered_evi_ids and not verif_req:
                 verif_req = f"Verification required: {ir.claim[:100]}"
-            issue_id = f"ISSUE-{issue_round}-{idx + 1}"
-            counter = idx + 1
-            while issue_id in existing_issue_ids:
-                counter += 1
-                issue_id = f"ISSUE-{issue_round}-{counter}"
+            issue_id = f"ISSUE-{uuid.uuid5(uuid.NAMESPACE_URL, f'{curr_state.run.id}:{issue_round}:review:{idx + 1}').hex[:8]}"
+            if issue_id in existing_issue_ids:
+                continue
             existing_issue_ids.add(issue_id)
             domain_issue = Issue(
                 id=issue_id,
