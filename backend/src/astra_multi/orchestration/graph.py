@@ -26,6 +26,7 @@ from astra_multi.agents.roles import (
     format_independent_analysis_prompt,
     format_propose_prompt,
     format_review_prompt,
+    format_semantic_review_prompt,
     format_synthesize_prompt,
 )
 from astra_multi.context.bundle import ContextBuilder, orchestration_limits
@@ -64,6 +65,7 @@ class OrchestrationState(TypedDict, total=False):
     analyses: Annotated[list[dict[str, Any]], _merge_analyses]
     proposal: dict[str, Any] | None
     review: dict[str, Any] | None
+    semantic_review: dict[str, Any] | None
     gate_passed: bool
     stop_reason: str
     events: Annotated[list[str], operator.add]
@@ -289,6 +291,21 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> StateGraph:
             )
             ctrl.record_issue(domain_issue)
 
+        # Apply resolutions
+        for res_report in review_out.resolutions:
+            try:
+                ctrl.resolve_issue(
+                    issue_id=res_report.issue_id,
+                    reviewer="reviewer",
+                    review_result=res_report.review_result,
+                    review_note=res_report.review_note,
+                    resolution_text=res_report.resolution_text,
+                    evidence_ids=res_report.evidence_ids,
+                    node="review",
+                )
+            except Exception:
+                pass
+
         return {
             "review": review_out.model_dump(mode="json"),
             "events": [f"[REVIEW] Found {len(review_out.issues)} issues"],
@@ -402,12 +419,99 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> StateGraph:
         )
         ctrl.commit_plan_revision(new_plan)
 
-        # Check stagnation
-        detector.record_round(ctrl.get_state(), current_round)
-
         return {
             "round": current_round,
             "events": [f"[REVISE] Committed plan revision {new_plan.revision}"],
+        }
+
+    def semantic_review_node(state: OrchestrationState) -> dict:
+        ctrl.transition_phase(RunPhase.SEMANTIC_REVIEW)
+        curr_state = ctrl.get_state()
+        if not curr_state.plan:
+            return {"events": ["[SEMANTIC_REVIEW] No plan revision to evaluate"]}
+
+        open_issues = [
+            i for i in curr_state.issues
+            if i.status != IssueStatus.RESOLVED
+        ]
+
+        bundle = builder.build_context(
+            run=curr_state,
+            role="reviewer",
+            phase=RunPhase.SEMANTIC_REVIEW,
+            refs=[],
+            limits=orchestration_limits(),
+        )
+        plan_dict = curr_state.plan.model_dump(mode="json")
+        open_issues_dict = [i.model_dump(mode="json") for i in open_issues]
+        messages = format_semantic_review_prompt(bundle, plan_dict, open_issues_dict)
+
+        res = gateway.call(
+            provider=wf_ctx.provider,
+            role="reviewer",
+            messages=messages,
+            output_schema=ReviewOutput,
+        )
+        review_out = ReviewOutput.model_validate(res.content)
+        ctrl.record_model_call(
+            call_id=f"CALL-SEMANTIC-REVIEW-{state.get('round', 0)}",
+            role="reviewer",
+            provider=res.provider,
+            model_id=res.model_id,
+            prompt_version=PROMPT_VERSION_V1,
+            input_data=bundle.content,
+        )
+
+        # Apply resolutions
+        for res_report in review_out.resolutions:
+            try:
+                ctrl.resolve_issue(
+                    issue_id=res_report.issue_id,
+                    reviewer="reviewer",
+                    review_result=res_report.review_result,
+                    review_note=res_report.review_note,
+                    resolution_text=res_report.resolution_text,
+                    evidence_ids=res_report.evidence_ids,
+                    node="semantic_review",
+                )
+            except Exception:
+                pass
+
+        # If any new issues are found during semantic review
+        valid_reqs = {r.id for r in curr_state.task.requirements}
+        valid_evidence = {e.id for e in curr_state.evidence}
+        existing_issue_ids = {i.id for i in curr_state.issues}
+        issue_round = state.get("round", 0)
+        for idx, ir in enumerate(review_out.issues):
+            filtered_req_ids = [rid for rid in ir.requirement_ids if rid in valid_reqs]
+            filtered_evi_ids = [eid for eid in ir.evidence_ids if eid in valid_evidence]
+            verif_req = ir.verification_request
+            if not filtered_evi_ids and not verif_req:
+                verif_req = f"Verification required: {ir.claim[:100]}"
+            issue_id = f"ISSUE-{uuid.uuid5(uuid.NAMESPACE_URL, f'{curr_state.run.id}:{issue_round}:semantic_review:{idx + 1}').hex[:8]}"
+            if issue_id in existing_issue_ids:
+                continue
+            existing_issue_ids.add(issue_id)
+            domain_issue = Issue(
+                id=issue_id,
+                run_id=curr_state.run.id,
+                severity=ir.severity,
+                based_on_revision=curr_state.plan.revision if curr_state.plan else 0,
+                claim=ir.claim,
+                impact=ir.impact,
+                verification_request=verif_req,
+                suggested_resolution=ir.suggested_resolution,
+                requirement_ids=filtered_req_ids,
+                evidence_ids=filtered_evi_ids,
+            )
+            ctrl.record_issue(domain_issue)
+
+        # Check stagnation after resolutions are evaluated
+        detector.record_round(ctrl.get_state(), state.get("round", 0))
+
+        return {
+            "semantic_review": review_out.model_dump(mode="json"),
+            "events": [f"[SEMANTIC_REVIEW] Evaluated {len(review_out.resolutions)} resolutions, {len(review_out.issues)} issues"],
         }
 
     def quality_gate_node(state: OrchestrationState) -> dict:
@@ -499,6 +603,7 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> StateGraph:
     graph.add_node("review", review_node)
     graph.add_node("verify", verify_node)
     graph.add_node("revise", revise_node)
+    graph.add_node("semantic_review", semantic_review_node)
     graph.add_node("gate", quality_gate_node)
     graph.add_node("export", export_node)
 
@@ -513,7 +618,8 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> StateGraph:
     graph.add_edge("propose", "review")
     graph.add_edge("review", "verify")
     graph.add_edge("verify", "revise")
-    graph.add_edge("revise", "gate")
+    graph.add_edge("revise", "semantic_review")
+    graph.add_edge("semantic_review", "gate")
     graph.add_conditional_edges(
         "gate",
         should_loop_or_export,

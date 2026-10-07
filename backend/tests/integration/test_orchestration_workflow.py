@@ -5,10 +5,13 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
 
+import pytest
+
 from astra_multi.agents.roles import (
     AnalysisOutput,
     DecisionDraft,
     IssueReport,
+    IssueResolutionReport,
     ProposalOutput,
     ReviewOutput,
     StepDraft,
@@ -16,7 +19,8 @@ from astra_multi.agents.roles import (
 )
 from astra_multi.context.bundle import ContextBuilder
 from astra_multi.domain.fixtures import sample_state
-from astra_multi.domain.models import IssueSeverity, PlanRevision, PlanStep, Requirement, RunPhase, RunStatus
+from astra_multi.domain.models import Issue, IssueSeverity, IssueStatus, PlanRevision, PlanStep, Requirement, RunPhase, RunStatus
+from astra_multi.exports.finalization import FinalizationService, SemanticReviewAssessment
 from astra_multi.gateway.model_gateway import GatewayConfig, ModelGateway
 from astra_multi.orchestration.controller import WorkflowController
 from astra_multi.orchestration.graph import (
@@ -836,6 +840,298 @@ def test_f005_idempotent_nodes_no_duplicate_proposals_or_issues():
             review_fn.invoke({"round": 1, "run_id": state.run.id, "proposal": res3["proposal"]})
             curr = store.load(state.run.id)
             assert len(curr.issues) == 2
+
+
+def test_f002_blocking_issue_resolved_by_independent_reviewer():
+    """F-002: A blocking issue can be resolved through valid ChangeIssue transitions by an independent reviewer."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = Path(tmpdir) / "workflow_f002.db"
+        art_path = Path(tmpdir) / "artifacts"
+        with SQLiteStore(db_path) as store:
+            state = sample_state(repo=False)
+            store.create(state.task, state.run, state.snapshot)
+            lease = store.acquire(state.run.id, owner="test-worker", ttl=60)
+            controller = WorkflowController(store, lease, actor="orchestration-controller")
+
+            # Record a blocking issue
+            issue = Issue(
+                id="ISSUE-BLOCK-1",
+                run_id=state.run.id,
+                severity=IssueSeverity.BLOCKING,
+                based_on_revision=0,
+                claim="Missing auth mechanism",
+                impact="Critical security vulnerability",
+                verification_request="Verify auth tokens",
+                suggested_resolution="Implement bearer tokens",
+                requirement_ids=["REQ-001"],
+            )
+            controller.record_issue(issue)
+
+            # Revise plan addressing the issue
+            step = PlanStep(
+                id="STEP-1",
+                objective="Implement auth",
+                requirement_ids=["REQ-001"],
+                dependencies=[],
+                targets=["auth.py"],
+                validation="pytest",
+                deliverables=["token handler"],
+                completion_criteria=["tests pass"],
+            )
+            plan = PlanRevision(
+                id="PLAN-1",
+                run_id=state.run.id,
+                revision=1,
+                based_on_revision=0,
+                requirements_revision=1,
+                snapshot_id=None,
+                steps=[step],
+                decisions=[],
+                risks=[],
+                issues_addressed=["ISSUE-BLOCK-1"],
+            )
+            controller.commit_plan_revision(plan)
+
+            # Attempt 1: Non-independent reviewer (actor == controller.actor) must be rejected
+            with pytest.raises(Exception):
+                controller.resolve_issue(
+                    issue_id="ISSUE-BLOCK-1",
+                    reviewer="orchestration-controller",  # Same as controller.actor!
+                    review_result="PASS",
+                    review_note="Self approval",
+                )
+
+            # Attempt 2: Independent reviewer succeeds
+            updated = controller.resolve_issue(
+                issue_id="ISSUE-BLOCK-1",
+                reviewer="independent-reviewer",  # Different from controller.actor!
+                review_result="PASS",
+                review_note="Verified fix in plan revision 1",
+            )
+            resolved_issue = next(i for i in updated.issues if i.id == "ISSUE-BLOCK-1")
+            assert resolved_issue.status == IssueStatus.RESOLVED
+            assert resolved_issue.resolution is not None
+            assert resolved_issue.resolution.review_result == "PASS"
+            assert [h.status for h in resolved_issue.history] == [
+                IssueStatus.OPEN,
+                IssueStatus.INVESTIGATING,
+                IssueStatus.PROPOSED_RESOLUTION,
+                IssueStatus.RESOLVED,
+            ]
+
+
+def test_f002_minesweeper_fixture_resolves_blocker_and_finalizes_by_p4():
+    """F-002: Minesweeper fixture run where a blocking issue is resolved via semantic review and achieves FINAL status issued by P4."""
+    call_counts = {"review": 0, "synth": 0, "semantic": 0}
+    recorded_issue_id: list[str] = []
+
+    def minesweeper_model_adapter(
+        provider: str,
+        role: str,
+        messages: list[dict[str, str]],
+        output_schema: Any = None,
+        **kwargs: Any,
+    ) -> ModelResult:
+        nonlocal recorded_issue_id
+        if output_schema == AnalysisOutput:
+            content = AnalysisOutput(
+                role=role,
+                findings=["Minesweeper board model needs grid generation and mine distribution"],
+                risks=["PRNG non-determinism"],
+                assumptions=["9x9 board with 10 mines"],
+                marker=f"{role}-marker",
+            )
+        elif output_schema == ProposalOutput:
+            content = ProposalOutput(
+                approach="Implement Minesweeper board logic with seedable PRNG",
+                alternatives=["Static board layouts"],
+                tradeoffs=["Memory overhead vs flexibility"],
+                requirement_coverage={"REQ-001": "Grid allocation", "REQ-002": "Mine placement"},
+                claim_ids=[],
+            )
+        elif output_schema == ReviewOutput:
+            # Distinguish semantic review phase from initial review
+            is_semantic = any("SEMANTIC_REVIEW" in m.get("content", "") for m in messages)
+            if is_semantic:
+                call_counts["semantic"] += 1
+                # In round 2 semantic review, resolve the blocking issue!
+                curr_issues = store.load(state.run.id).issues
+                target_issue = curr_issues[0].id if curr_issues else "ISSUE-0-1"
+                content = ReviewOutput(
+                    summary="Semantic review: verified fixes in latest plan",
+                    reviewed_evidence_ids=[],
+                    issues=[],
+                    resolutions=[
+                        IssueResolutionReport(
+                            issue_id=target_issue,
+                            resolution_text="Seedable PRNG verified in PlanRevision 2",
+                            review_result="PASS",
+                            review_note="Verified deterministic seeding implementation in STEP-2",
+                        )
+                    ],
+                )
+            else:
+                call_counts["review"] += 1
+                if call_counts["review"] == 1:
+                    # Round 1 review raises a BLOCKING issue
+                    content = ReviewOutput(
+                        summary="Identified critical flaw in random distribution",
+                        reviewed_evidence_ids=[],
+                        issues=[
+                            IssueReport(
+                                claim="Mine placement lacks deterministic seed support",
+                                impact="Cannot test or replay board generation",
+                                severity=IssueSeverity.BLOCKING,
+                                verification_request="Verify reproducibility of boards with fixed seed",
+                                suggested_resolution="Accept optional seed in board generator",
+                                requirement_ids=["REQ-002"],
+                            )
+                        ],
+                    )
+                else:
+                    content = ReviewOutput(
+                        summary="Follow-up review: no new issues",
+                        reviewed_evidence_ids=[],
+                        issues=[],
+                    )
+        elif output_schema == SynthesizerOutput:
+            call_counts["synth"] += 1
+            if call_counts["synth"] == 1:
+                # PlanRevision 1 does not address the issue
+                content = SynthesizerOutput(
+                    steps=[
+                        StepDraft(
+                            objective="Create 9x9 grid",
+                            requirement_ids=["REQ-001", "REQ-002"],
+                            dependencies=[],
+                            targets=["board.py"],
+                            validation="pytest test_board.py",
+                            deliverables=["board.py"],
+                            completion_criteria=["grid initialized"],
+                            evidence_ids=[],
+                        )
+                    ],
+                    decisions=[],
+                    risks=["PRNG non-determinism"],
+                    issues_addressed=[],
+                    rationale="Initial naive grid",
+                )
+            else:
+                # PlanRevision 2 addresses the blocking issue
+                curr_issues = store.load(state.run.id).issues
+                target_issue = curr_issues[0].id if curr_issues else "ISSUE-0-1"
+                content = SynthesizerOutput(
+                    steps=[
+                        StepDraft(
+                            objective="Create 9x9 grid with seedable PRNG",
+                            requirement_ids=["REQ-001", "REQ-002"],
+                            dependencies=[],
+                            targets=["board.py"],
+                            validation="pytest test_board.py",
+                            deliverables=["board.py with seed support"],
+                            completion_criteria=["grid initialized with seed"],
+                            evidence_ids=[],
+                        )
+                    ],
+                    decisions=[],
+                    risks=[],
+                    issues_addressed=[target_issue],
+                    rationale="Addressed seed issue",
+                )
+        else:
+            content = "ok"
+
+        return ModelResult(
+            content=content.model_dump(mode="json") if hasattr(content, "model_dump") else content,
+            model_id=f"fake-{role}",
+            provider="fake",
+            usage={"prompt_tokens": 100, "completion_tokens": 50, "total_tokens": 150},
+            cost_actual_usd=0.001,
+        )
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = Path(tmpdir) / "minesweeper_f002.db"
+        art_path = Path(tmpdir) / "artifacts"
+        with SQLiteStore(db_path) as store:
+            art_store = FileArtifactStore(art_path)
+            state = sample_state(repo=False)
+            state.task.requirements.append(
+                Requirement(id="REQ-002", text="Mine distribution", acceptance="pass")
+            )
+            store.create(state.task, state.run, state.snapshot)
+            lease = store.acquire(state.run.id, owner="test-worker", ttl=60)
+
+            controller = WorkflowController(store, lease)
+            gateway = ModelGateway(
+                config=GatewayConfig(enable_output_repair=False),
+                provider_adapter=minesweeper_model_adapter,
+            )
+            context_builder = ContextBuilder(art_store)
+            wf_ctx = WorkflowContext(
+                controller=controller,
+                gateway=gateway,
+                context_builder=context_builder,
+            )
+            graph = create_workflow_graph(wf_ctx)
+            app = graph.compile()
+
+            # Run initial round - blocking issue will be created
+            # We track the created issue ID so synthesizer and reviewer can target it dynamically
+            def check_state_after_review(curr_s):
+                if curr_s.issues and not recorded_issue_id:
+                    recorded_issue_id.append(curr_s.issues[0].id)
+
+            initial_state = {
+                "run_id": state.run.id,
+                "round": 0,
+                "max_rounds": 2,
+                "events": [],
+            }
+
+            # Run workflow
+            final_output = app.invoke(initial_state)
+
+            final_state = store.load(state.run.id)
+            assert final_output["gate_passed"] is True, f"Gate failed with: {final_output.get('stop_reason')}, events: {final_output.get('events')}"
+            # Confirm that the blocking issue was resolved
+            assert all(
+                i.status == IssueStatus.RESOLVED
+                for i in final_state.issues
+                if i.severity == IssueSeverity.BLOCKING
+            )
+
+            # P4 Quality Service finalization
+            finalization_service = FinalizationService()
+            decision = finalization_service.evaluate(
+                final_state,
+                semantic_review=SemanticReviewAssessment(
+                    passed=True,
+                    reviewed_plan_revision=final_state.plan.revision,
+                    feedback="Passed all criteria",
+                    concerns=[],
+                ),
+            )
+            assert decision.can_finalize is True
+            assert decision.target_status == RunStatus.FINAL
+
+            # Verify: Non-P4 actor is REJECTED when attempting to grant FINAL
+            non_p4_controller = WorkflowController(store, lease, actor="rogue-worker")
+            with pytest.raises(Exception):
+                non_p4_controller.transition_phase(
+                    final_state.run.phase, RunStatus.FINAL, reason="Attempted unauthorized finalization"
+                )
+
+            # P4 actor succeeds in issuing FINAL
+            p4_controller = WorkflowController(store, lease, actor="P4-quality-service")
+            p4_controller.transition_phase(
+                final_state.run.phase, RunStatus.FINAL, reason=decision.reason
+            )
+
+            certified_state = store.load(state.run.id)
+            assert certified_state.run.status == RunStatus.FINAL
+            assert certified_state.run.phase == RunPhase.EXPORT
+
+
 
 
 

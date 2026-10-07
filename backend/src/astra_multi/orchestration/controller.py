@@ -10,11 +10,13 @@ from __future__ import annotations
 
 import hashlib
 import threading
+from typing import Literal
 import uuid
 
 from astra_multi.domain.commands import (
     AddRecord,
     AnswerQuestion,
+    ChangeIssue,
     CommitPlan,
     ReviseTask,
     TransitionRun,
@@ -22,6 +24,9 @@ from astra_multi.domain.commands import (
 from astra_multi.domain.models import (
     Decision,
     Issue,
+    IssueResolution,
+    IssueSeverity,
+    IssueStatus,
     Lease,
     ModelCall,
     PlanRevision,
@@ -95,6 +100,83 @@ class WorkflowController:
         )
         self.repository.commit(self.lease.run_id, cmd, self.lease)
         return self.get_state()
+
+    def resolve_issue(
+        self,
+        issue_id: str,
+        reviewer: str,
+        review_result: Literal["PASS", "FAIL"],
+        review_note: str,
+        resolution_text: str = "Resolved based on plan revision",
+        evidence_ids: list[str] | None = None,
+        node: str = "review",
+    ) -> RunState:
+        state = self.get_state()
+        issue = next((i for i in state.issues if i.id == issue_id), None)
+        if not issue:
+            return state
+        if issue.status == IssueStatus.RESOLVED:
+            return state
+
+        # Step 1: OPEN -> INVESTIGATING
+        if issue.status == IssueStatus.OPEN:
+            cmd = ChangeIssue(
+                expected_revision=state.run.revision,
+                node=node,
+                logical_operation_id=f"issue-{issue_id}-investigating",
+                actor=self.actor,
+                issue_id=issue_id,
+                status=IssueStatus.INVESTIGATING,
+                reason="Investigating issue during review",
+            )
+            self.repository.commit(self.lease.run_id, cmd, self.lease)
+            state = self.get_state()
+            issue = next((i for i in state.issues if i.id == issue_id), None)
+            if not issue:
+                return state
+
+        # Step 2: INVESTIGATING -> PROPOSED_RESOLUTION
+        if issue.status == IssueStatus.INVESTIGATING:
+            cmd = ChangeIssue(
+                expected_revision=state.run.revision,
+                node=node,
+                logical_operation_id=f"issue-{issue_id}-proposed",
+                actor=self.actor,
+                issue_id=issue_id,
+                status=IssueStatus.PROPOSED_RESOLUTION,
+                reason="Proposed resolution",
+                resolution=IssueResolution(text=resolution_text),
+            )
+            self.repository.commit(self.lease.run_id, cmd, self.lease)
+            state = self.get_state()
+            issue = next((i for i in state.issues if i.id == issue_id), None)
+            if not issue:
+                return state
+
+        # Step 3: PROPOSED_RESOLUTION -> RESOLVED (only if review_result == PASS)
+        if issue.status == IssueStatus.PROPOSED_RESOLUTION and review_result == "PASS":
+            resolution = IssueResolution(
+                text=resolution_text,
+                evidence_ids=evidence_ids or [],
+                reviewed_revision=state.plan.revision if state.plan else None,
+                reviewer=reviewer,
+                review_result=review_result,
+                review_note=review_note,
+            )
+            cmd = ChangeIssue(
+                expected_revision=state.run.revision,
+                node=node,
+                logical_operation_id=f"issue-{issue_id}-resolved",
+                actor=self.actor,
+                issue_id=issue_id,
+                status=IssueStatus.RESOLVED,
+                reason=review_note,
+                resolution=resolution,
+            )
+            self.repository.commit(self.lease.run_id, cmd, self.lease)
+            return self.get_state()
+
+        return state
 
     def commit_plan_revision(self, plan: PlanRevision) -> RunState:
         state = self.get_state()

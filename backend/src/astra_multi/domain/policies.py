@@ -63,7 +63,8 @@ PHASE_TRANSITIONS: dict[RunPhase, frozenset[RunPhase]] = {
     RunPhase.PROPOSE: frozenset({RunPhase.REVIEW}),
     RunPhase.REVIEW: frozenset({RunPhase.VERIFY, RunPhase.REVISE}),
     RunPhase.VERIFY: frozenset({RunPhase.REVISE}),
-    RunPhase.REVISE: frozenset({RunPhase.QUALITY_GATE}),
+    RunPhase.REVISE: frozenset({RunPhase.QUALITY_GATE, RunPhase.SEMANTIC_REVIEW}),
+    RunPhase.SEMANTIC_REVIEW: frozenset({RunPhase.QUALITY_GATE}),
     RunPhase.QUALITY_GATE: frozenset({RunPhase.REVIEW, RunPhase.EXPORT, RunPhase.PROPOSE}),
     RunPhase.EXPORT: frozenset(),
 }
@@ -173,7 +174,13 @@ def apply_mutation(
             f"expected {command.expected_revision}, current {state.run.revision}"
         )
     if state.run.status in TERMINAL:
-        raise InvalidState("terminal runs are immutable; create a new run")
+        if not (
+            state.run.status == RunStatus.PARTIAL
+            and isinstance(command, TransitionRun)
+            and command.status == RunStatus.FINAL
+            and command.actor in ("P4-quality-service", "quality-service")
+        ):
+            raise InvalidState("terminal runs are immutable; create a new run")
     updated = state.model_copy(deep=True)
     result: dict[str, JsonValue] = {}
     if isinstance(command, CommitPlan):

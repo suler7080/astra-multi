@@ -78,12 +78,23 @@ class IssueReport(AgentContract):
     evidence_ids: list[ID] = Field(default_factory=list)
 
 
+class IssueResolutionReport(AgentContract):
+    """Reviewer evaluation/resolution for an existing issue."""
+
+    issue_id: ID
+    resolution_text: Text = "Resolved based on current plan revision"
+    review_result: Literal["PASS", "FAIL"] = "PASS"
+    review_note: Text = "Verified in plan revision"
+    evidence_ids: list[ID] = Field(default_factory=list)
+
+
 class ReviewOutput(AgentContract):
     """Output schema for Reviewer in REVIEW phase."""
 
     issues: list[IssueReport] = Field(default_factory=list)
     summary: Text
     reviewed_evidence_ids: list[ID] = Field(default_factory=list)
+    resolutions: list[IssueResolutionReport] = Field(default_factory=list)
 
 
 class StepDraft(AgentContract):
@@ -274,3 +285,32 @@ def format_synthesize_prompt(
         {"role": "system", "content": system_message},
         {"role": "user", "content": user_message},
     ]
+
+
+def format_semantic_review_prompt(
+    bundle: ContextBundle,
+    current_plan: dict,
+    open_issues: list[dict],
+) -> list[dict[str, str]]:
+    """Prompt for Reviewer in SEMANTIC_REVIEW phase."""
+    system_message = (
+        "You are the REVIEWER in Astra Multi.\n"
+        f"Prompt Version: {PROMPT_VERSION_V1}\n"
+        "Phase: SEMANTIC_REVIEW\n"
+        "Rules:\n"
+        "1. Rigorously evaluate the newly synthesized plan revision against previous issues and task requirements.\n"
+        "2. If an existing issue is adequately addressed in the plan, produce a resolution with review_result='PASS' and review_note.\n"
+        "3. If new problems remain or are introduced, identify them as issues.\n"
+        "4. Output strictly according to ReviewOutput schema."
+    )
+    user_message = (
+        f"Context:\n{bundle.content}\n\n"
+        f"Current Plan Revision:\n{json.dumps(current_plan, ensure_ascii=False, indent=2)}\n\n"
+        f"Open Issues to evaluate:\n{json.dumps(open_issues, ensure_ascii=False, indent=2)}\n\n"
+        "Please provide your review, new issues (if any), and resolutions for addressed issues."
+    )
+    return [
+        {"role": "system", "content": system_message},
+        {"role": "user", "content": user_message},
+    ]
+

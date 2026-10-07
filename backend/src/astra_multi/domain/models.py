@@ -66,6 +66,7 @@ class RunPhase(str, Enum):
     REVIEW = "REVIEW"
     VERIFY = "VERIFY"
     REVISE = "REVISE"
+    SEMANTIC_REVIEW = "SEMANTIC_REVIEW"
     QUALITY_GATE = "QUALITY_GATE"
     EXPORT = "EXPORT"
 
