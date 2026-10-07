@@ -3,6 +3,7 @@
 import tempfile
 from pathlib import Path
 from typing import Any
+from unittest.mock import MagicMock
 
 from astra_multi.agents.roles import (
     AnalysisOutput,
@@ -15,13 +16,14 @@ from astra_multi.agents.roles import (
 )
 from astra_multi.context.bundle import ContextBuilder
 from astra_multi.domain.fixtures import sample_state
-from astra_multi.domain.models import IssueSeverity, Requirement, RunPhase, RunStatus
+from astra_multi.domain.models import IssueSeverity, PlanRevision, PlanStep, Requirement, RunPhase, RunStatus
 from astra_multi.gateway.model_gateway import GatewayConfig, ModelGateway
 from astra_multi.orchestration.controller import WorkflowController
 from astra_multi.orchestration.graph import (
     WorkflowContext,
     create_workflow_graph,
 )
+from astra_multi.orchestration.termination import StagnationDetector
 from astra_multi.persistence.artifacts import FileArtifactStore
 from astra_multi.persistence.sqlite import SQLiteStore
 from astra_multi.schemas import ModelResult
@@ -516,6 +518,55 @@ def test_f003_no_spoofing_when_llm_omits_coverage():
             # Proposal requirement_coverage must be empty - NOT spoofed with approach[:100]!
             assert len(final_domain_state.proposals) >= 1
             assert final_domain_state.proposals[0].requirement_coverage == {}
+
+
+def test_f008_quality_gate_detects_dag_cycle():
+    """F-008: quality_gate_node must call StructuralQualityValidator and reject plans with DAG cycles."""
+    state = sample_state(repo=False)
+    step1 = PlanStep(
+        id="STEP-1",
+        objective="Step 1",
+        requirement_ids=["REQ-001"],
+        dependencies=["STEP-2"],
+        targets=["app.py"],
+        validation="pytest",
+        deliverables=["code"],
+        completion_criteria=["tests pass"],
+    )
+    step2 = PlanStep(
+        id="STEP-2",
+        objective="Step 2",
+        requirement_ids=["REQ-001"],
+        dependencies=["STEP-1"],
+        targets=["app.py"],
+        validation="pytest",
+        deliverables=["code"],
+        completion_criteria=["tests pass"],
+    )
+    cyclic_plan = PlanRevision.model_construct(
+        id="PLAN-1",
+        run_id=state.run.id,
+        revision=1,
+        based_on_revision=0,
+        requirements_revision=1,
+        snapshot_id=None,
+        steps=[step1, step2],
+        decisions=[],
+        risks=[],
+        issues_addressed=[],
+    )
+    state = state.model_copy(update={"plans": [cyclic_plan]})
+
+    ctrl = MagicMock()
+    ctrl.get_state.return_value = state
+    wf_ctx = MagicMock(controller=ctrl, stagnation_detector=StagnationDetector())
+    graph = create_workflow_graph(wf_ctx)
+
+    result = graph.nodes["gate"].runnable.invoke({"round": 0, "max_rounds": 2})
+
+    assert result["gate_passed"] is False
+    assert "Dependency cycle" in result["stop_reason"] or "RULE-DAG-002" in result["stop_reason"]
+
 
 
 

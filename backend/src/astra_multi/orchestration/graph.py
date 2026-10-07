@@ -41,6 +41,7 @@ from astra_multi.domain.models import (
     RunPhase,
     RunStatus,
 )
+from astra_multi.exports.quality_validator import StructuralQualityValidator, ViolationSeverity
 from astra_multi.gateway.model_gateway import ModelGateway
 from astra_multi.orchestration.budget import BudgetService
 from astra_multi.orchestration.controller import WorkflowController
@@ -439,6 +440,14 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> StateGraph:
         # Check stagnation
         if detector.is_stagnant():
             problems.append(StopReason.STAGNATION_DETECTED.value)
+
+        # Structural quality validator (P4.1)
+        validator = StructuralQualityValidator()
+        report = validator.validate(curr_state)
+        if not report.passed:
+            for violation in report.violations:
+                if violation.severity == ViolationSeverity.BLOCKER:
+                    problems.append(f"[{violation.rule_id}] {violation.message}")
 
         passed = len(problems) == 0
         if not passed and round_num >= max_rounds:
