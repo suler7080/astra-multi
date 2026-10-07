@@ -209,10 +209,6 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> StateGraph:
         filtered_coverage = {
             k: v for k, v in proposal_out.requirement_coverage.items() if k in valid_reqs
         }
-        if not filtered_coverage and valid_reqs:
-            filtered_coverage = {
-                r.id: proposal_out.approach[:100] for r in curr_state.task.requirements
-            }
 
         domain_proposal = Proposal(
             id=f"PROP-{uuid.uuid4().hex[:6]}",
@@ -356,8 +352,8 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> StateGraph:
                     dependencies=filtered_deps,
                     targets=s.targets,
                     validation=s.validation,
-                    deliverables=s.deliverables or ["Deliverable artifact"],
-                    completion_criteria=s.completion_criteria or ["Completion criteria verified"],
+                    deliverables=s.deliverables,
+                    completion_criteria=s.completion_criteria,
                     evidence_ids=filtered_evis,
                 )
             )

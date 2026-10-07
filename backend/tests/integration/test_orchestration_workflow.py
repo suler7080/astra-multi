@@ -406,3 +406,116 @@ def test_workflow_multi_round_decision_id_uniqueness():
             assert "DEC-2" in dec_ids
 
 
+def test_f003_no_spoofing_when_llm_omits_coverage():
+    """F-003: If LLM omits requirement coverage, state must retain missing data and Gate must reject."""
+    def missing_coverage_adapter(
+        provider: str,
+        role: str,
+        messages: list[dict[str, str]],
+        output_schema: Any = None,
+        **kwargs: Any,
+    ) -> ModelResult:
+        if output_schema == AnalysisOutput:
+            content = AnalysisOutput(
+                role="planner" if role == "planner" else "reviewer",
+                findings=["Valid base architecture"],
+                risks=[],
+                assumptions=[],
+            )
+        elif output_schema == ProposalOutput:
+            # LLM completely omits requirement_coverage
+            content = ProposalOutput(
+                approach="Custom approach with no explicit requirement coverage map",
+                alternatives=[],
+                tradeoffs=[],
+                requirement_coverage={},
+                claim_ids=[],
+            )
+        elif output_schema == ReviewOutput:
+            content = ReviewOutput(
+                summary="Review completed",
+                reviewed_evidence_ids=[],
+                issues=[],
+            )
+        elif output_schema == SynthesizerOutput:
+            # Synthesizer covers only REQ-001, leaving REQ-002 uncovered
+            content = SynthesizerOutput(
+                steps=[
+                    StepDraft(
+                        objective="Step covering REQ-001 only",
+                        requirement_ids=["REQ-001"],
+                        dependencies=[],
+                        targets=["module.py"],
+                        validation="pytest",
+                        deliverables=["code"],
+                        completion_criteria=["tests pass"],
+                        evidence_ids=[],
+                    )
+                ],
+                decisions=[],
+                risks=[],
+                issues_addressed=[],
+                rationale="Partial synthesis missing REQ-002",
+            )
+        else:
+            content = "ok"
+
+        return ModelResult(
+            content=content.model_dump(mode="json") if hasattr(content, "model_dump") else content,
+            model_id=f"fake-{role}",
+            provider="fake",
+            usage={"prompt_tokens": 100, "completion_tokens": 50, "total_tokens": 150},
+            cost_actual_usd=0.001,
+        )
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = Path(tmpdir) / "workflow_f003.db"
+        art_path = Path(tmpdir) / "artifacts"
+        with SQLiteStore(db_path) as store:
+            art_store = FileArtifactStore(art_path)
+            state = sample_state(repo=False)
+            state.task.requirements.append(
+                Requirement(
+                    id="REQ-002",
+                    text="Secondary endpoint requirement",
+                    acceptance="GET /metrics returns 200",
+                )
+            )
+            store.create(state.task, state.run, state.snapshot)
+            lease = store.acquire(state.run.id, owner="test-worker", ttl=60)
+
+            controller = WorkflowController(store, lease)
+            gateway = ModelGateway(
+                config=GatewayConfig(enable_output_repair=False),
+                provider_adapter=missing_coverage_adapter,
+            )
+            context_builder = ContextBuilder(art_store)
+
+            wf_ctx = WorkflowContext(
+                controller=controller,
+                gateway=gateway,
+                context_builder=context_builder,
+            )
+
+            graph = create_workflow_graph(wf_ctx)
+            app = graph.compile()
+
+            initial_state = {
+                "run_id": state.run.id,
+                "round": 0,
+                "max_rounds": 1,
+                "events": [],
+            }
+            final_output = app.invoke(initial_state)
+
+            # Gate must REJECT because REQ-002 is uncovered
+            assert final_output["gate_passed"] is False
+            assert "Missing requirement coverage" in final_output["stop_reason"]
+
+            final_domain_state = store.load(state.run.id)
+            # Proposal requirement_coverage must be empty - NOT spoofed with approach[:100]!
+            assert len(final_domain_state.proposals) >= 1
+            assert final_domain_state.proposals[0].requirement_coverage == {}
+
+
+
