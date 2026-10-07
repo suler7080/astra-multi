@@ -568,5 +568,100 @@ def test_f008_quality_gate_detects_dag_cycle():
     assert "Dependency cycle" in result["stop_reason"] or "RULE-DAG-002" in result["stop_reason"]
 
 
+def test_f006_review_node_ignores_deleted_requirements():
+    """F-006: review_node must use curr_state.task.requirements so deleted requirements are omitted."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = Path(tmpdir) / "workflow_f006.db"
+        art_path = Path(tmpdir) / "artifacts"
+        with SQLiteStore(db_path) as store:
+            art_store = FileArtifactStore(art_path)
+            state = sample_state(repo=False)
+            old_task = state.task.model_copy(
+                update={
+                    "requirements": [
+                        Requirement(id="REQ-DELETED", text="Obsolete requirement", acceptance="none"),
+                        Requirement(id="REQ-001", text="Active requirement", acceptance="pass"),
+                    ]
+                }
+            )
+            store.create(old_task, state.run, state.snapshot)
+            lease = store.acquire(state.run.id, "worker", 60)
+            ctrl = WorkflowController(store, lease)
+
+            # Revise task to remove REQ-DELETED
+            new_task = old_task.model_copy(
+                update={
+                    "revision": 2,
+                    "requirements": [Requirement(id="REQ-001", text="Active requirement", acceptance="pass")],
+                }
+            )
+            ctrl.revise_task(new_task, reason="Removed REQ-DELETED")
+
+            def adapter(
+                provider: str,
+                role: str,
+                messages: list[dict[str, str]],
+                output_schema: Any = None,
+                **kwargs: Any,
+            ) -> ModelResult:
+                if output_schema == AnalysisOutput:
+                    content = AnalysisOutput(role="planner", findings=["ok"])
+                elif output_schema == ProposalOutput:
+                    content = ProposalOutput(approach="app", requirement_coverage={"REQ-001": "cov"})
+                elif output_schema == ReviewOutput:
+                    content = ReviewOutput(
+                        summary="Review mentioning both old and active requirements",
+                        issues=[
+                            IssueReport(
+                                claim="Issue referencing deleted req",
+                                impact="impact",
+                                severity=IssueSeverity.WARNING,
+                                requirement_ids=["REQ-DELETED", "REQ-001"],
+                                suggested_resolution="fix",
+                            )
+                        ],
+                    )
+                elif output_schema == SynthesizerOutput:
+                    content = SynthesizerOutput(
+                        steps=[
+                            StepDraft(
+                                objective="o",
+                                requirement_ids=["REQ-001"],
+                                validation="v",
+                                deliverables=["d"],
+                                completion_criteria=["c"],
+                            )
+                        ],
+                        decisions=[],
+                        risks=[],
+                        issues_addressed=[],
+                        rationale="r",
+                    )
+                else:
+                    content = "ok"
+                return ModelResult(
+                    content=content.model_dump(mode="json") if hasattr(content, "model_dump") else content,
+                    model_id="m",
+                    provider="p",
+                    usage={},
+                    cost_actual_usd=0,
+                )
+
+            ctx = WorkflowContext(
+                controller=ctrl,
+                gateway=ModelGateway(GatewayConfig(enable_output_repair=False), provider_adapter=adapter),
+                context_builder=ContextBuilder(art_store),
+            )
+            g = create_workflow_graph(ctx).compile()
+            g.invoke({"run_id": state.run.id, "round": 0, "max_rounds": 1, "events": []})
+
+            final_state = store.load(state.run.id)
+            assert len(final_state.issues) >= 1
+            # REQ-DELETED was removed in current task revision, so it must not be in issue requirement_ids
+            assert "REQ-DELETED" not in final_state.issues[0].requirement_ids
+            assert final_state.issues[0].requirement_ids == ["REQ-001"]
+
+
+
 
 

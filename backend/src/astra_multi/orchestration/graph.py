@@ -259,7 +259,7 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> StateGraph:
         )
 
         # Commit domain issues
-        valid_reqs = {r.id for task in curr_state.tasks for r in task.requirements}
+        valid_reqs = {r.id for r in curr_state.task.requirements}
         valid_evidence = {e.id for e in curr_state.evidence}
         existing_issue_ids = {i.id for i in curr_state.issues}
         issue_round = state.get("round", 0)
