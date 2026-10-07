@@ -64,7 +64,7 @@ PHASE_TRANSITIONS: dict[RunPhase, frozenset[RunPhase]] = {
     RunPhase.REVIEW: frozenset({RunPhase.VERIFY, RunPhase.REVISE}),
     RunPhase.VERIFY: frozenset({RunPhase.REVISE}),
     RunPhase.REVISE: frozenset({RunPhase.QUALITY_GATE}),
-    RunPhase.QUALITY_GATE: frozenset({RunPhase.REVIEW, RunPhase.EXPORT}),
+    RunPhase.QUALITY_GATE: frozenset({RunPhase.REVIEW, RunPhase.EXPORT, RunPhase.PROPOSE}),
     RunPhase.EXPORT: frozenset(),
 }
 

@@ -662,6 +662,130 @@ def test_f006_review_node_ignores_deleted_requirements():
             assert final_state.issues[0].requirement_ids == ["REQ-001"]
 
 
+def test_f001_multi_round_calls_propose_each_round():
+    """F-001: should_loop_or_export must return 'propose', calling propose_node in every loop round."""
+    round_calls: dict[str, int] = {"propose": 0, "synth": 0}
+
+    def multi_round_adapter(
+        provider: str,
+        role: str,
+        messages: list[dict[str, str]],
+        output_schema: Any = None,
+        **kwargs: Any,
+    ) -> ModelResult:
+        if output_schema == AnalysisOutput:
+            content = AnalysisOutput(
+                role="planner" if role == "planner" else "reviewer",
+                findings=["Base architecture"],
+                risks=[],
+                assumptions=[],
+            )
+        elif output_schema == ProposalOutput:
+            round_calls["propose"] += 1
+            call_num = round_calls["propose"]
+            content = ProposalOutput(
+                approach=f"Approach in round {call_num}",
+                alternatives=[],
+                tradeoffs=[],
+                requirement_coverage={"REQ-001": "Covered"},
+                claim_ids=[],
+            )
+        elif output_schema == ReviewOutput:
+            content = ReviewOutput(
+                summary="Review completed",
+                reviewed_evidence_ids=[],
+                issues=[],
+            )
+        elif output_schema == SynthesizerOutput:
+            round_calls["synth"] += 1
+            call_num = round_calls["synth"]
+            # Round 1 leaves REQ-002 uncovered to force loop; round 2 covers both
+            req_ids = ["REQ-001"] if call_num == 1 else ["REQ-001", "REQ-002"]
+            content = SynthesizerOutput(
+                steps=[
+                    StepDraft(
+                        objective=f"Step in round {call_num}",
+                        requirement_ids=req_ids,
+                        dependencies=[],
+                        targets=["module.py"],
+                        validation="pytest",
+                        deliverables=["code"],
+                        completion_criteria=["tests pass"],
+                        evidence_ids=[],
+                    )
+                ],
+                decisions=[
+                    DecisionDraft(
+                        question=f"Q for round {call_num}",
+                        chosen=f"Option {call_num}",
+                        rationale="r",
+                        alternatives=[],
+                        evidence_ids=[],
+                        related_issue_ids=[],
+                    )
+                ],
+                risks=[],
+                issues_addressed=[],
+                rationale="Synthesis",
+            )
+        else:
+            content = "ok"
+
+        return ModelResult(
+            content=content.model_dump(mode="json") if hasattr(content, "model_dump") else content,
+            model_id=f"fake-{role}",
+            provider="fake",
+            usage={"prompt_tokens": 100, "completion_tokens": 50, "total_tokens": 150},
+            cost_actual_usd=0.001,
+        )
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = Path(tmpdir) / "workflow_f001.db"
+        art_path = Path(tmpdir) / "artifacts"
+        with SQLiteStore(db_path) as store:
+            art_store = FileArtifactStore(art_path)
+            state = sample_state(repo=False)
+            state.task.requirements.append(
+                Requirement(
+                    id="REQ-002",
+                    text="Second requirement",
+                    acceptance="pass",
+                )
+            )
+            store.create(state.task, state.run, state.snapshot)
+            lease = store.acquire(state.run.id, owner="test-worker", ttl=60)
+
+            controller = WorkflowController(store, lease)
+            gateway = ModelGateway(
+                config=GatewayConfig(enable_output_repair=False),
+                provider_adapter=multi_round_adapter,
+            )
+            context_builder = ContextBuilder(art_store)
+
+            wf_ctx = WorkflowContext(
+                controller=controller,
+                gateway=gateway,
+                context_builder=context_builder,
+            )
+
+            graph = create_workflow_graph(wf_ctx)
+            app = graph.compile()
+
+            initial_state = {
+                "run_id": state.run.id,
+                "round": 0,
+                "max_rounds": 2,
+                "events": [],
+            }
+            final_output = app.invoke(initial_state)
+
+            assert final_output["gate_passed"] is True
+            assert round_calls["synth"] == 2
+            # F-001 assertion: propose_node must be called once per round!
+            assert round_calls["propose"] == 2
+
+
+
 
 
 

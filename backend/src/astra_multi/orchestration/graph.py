@@ -486,7 +486,7 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> StateGraph:
         max_rounds = state.get("max_rounds", 2)
         if round_num >= max_rounds or detector.is_stagnant():
             return "export"
-        return "review"
+        return "propose"
 
     # Assemble StateGraph
     graph = StateGraph(OrchestrationState)
@@ -519,7 +519,7 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> StateGraph:
         should_loop_or_export,
         {
             "export": "export",
-            "review": "review",
+            "propose": "propose",
         },
     )
     graph.add_edge("export", END)
