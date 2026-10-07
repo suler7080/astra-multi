@@ -98,6 +98,43 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> StateGraph:
     gateway = wf_ctx.gateway
     builder = wf_ctx.context_builder
     detector = wf_ctx.stagnation_detector
+    budget = wf_ctx.budget_service
+
+    def _call_model_with_budget(
+        role: str,
+        messages: list[dict[str, str]],
+        output_schema: Any,
+        call_id: str,
+        estimated_tokens: int = 1000,
+        estimated_cost: float = 0.01,
+    ) -> Any:
+        reservation_id = None
+        if budget:
+            reservation_id = budget.reserve(
+                estimated_tokens=estimated_tokens,
+                estimated_cost=estimated_cost,
+                operation_id=f"RES-{call_id}",
+            )
+        settled = False
+        try:
+            res = gateway.call(
+                provider=wf_ctx.provider,
+                role=role,
+                messages=messages,
+                output_schema=output_schema,
+            )
+            if budget and reservation_id:
+                actual_tokens = res.usage.get("total_tokens", 0) if res.usage else 0
+                budget.settle(
+                    operation_id=reservation_id,
+                    actual_tokens=actual_tokens,
+                    actual_cost=res.cost_actual_usd,
+                )
+                settled = True
+            return res
+        finally:
+            if budget and reservation_id and not settled:
+                budget.release(reservation_id)
 
     def intake_node(state: OrchestrationState) -> dict:
         ctrl.transition_phase(RunPhase.SNAPSHOT)
@@ -126,20 +163,23 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> StateGraph:
         )
         messages = format_independent_analysis_prompt(bundle)
 
-        res = gateway.call(
-            provider=wf_ctx.provider,
+        call_id = f"CALL-P-ANALYSIS-{state.get('round', 0)}"
+        res = _call_model_with_budget(
             role="planner",
             messages=messages,
             output_schema=AnalysisOutput,
+            call_id=call_id,
         )
         output = AnalysisOutput.model_validate(res.content)
         ctrl.record_model_call(
-            call_id=f"CALL-P-ANALYSIS-{state.get('round', 0)}",
+            call_id=call_id,
             role="planner",
             provider=res.provider,
             model_id=res.model_id,
             prompt_version=PROMPT_VERSION_V1,
             input_data=bundle.content,
+            usage=res.usage,
+            estimated_cost=res.cost_actual_usd,
         )
         return {
             "analyses": [output.model_dump(mode="json")],
@@ -157,20 +197,23 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> StateGraph:
         )
         messages = format_independent_analysis_prompt(bundle)
 
-        res = gateway.call(
-            provider=wf_ctx.provider,
+        call_id = f"CALL-R-ANALYSIS-{state.get('round', 0)}"
+        res = _call_model_with_budget(
             role="reviewer",
             messages=messages,
             output_schema=AnalysisOutput,
+            call_id=call_id,
         )
         output = AnalysisOutput.model_validate(res.content)
         ctrl.record_model_call(
-            call_id=f"CALL-R-ANALYSIS-{state.get('round', 0)}",
+            call_id=call_id,
             role="reviewer",
             provider=res.provider,
             model_id=res.model_id,
             prompt_version=PROMPT_VERSION_V1,
             input_data=bundle.content,
+            usage=res.usage,
+            estimated_cost=res.cost_actual_usd,
         )
         return {
             "analyses": [output.model_dump(mode="json")],
@@ -190,20 +233,23 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> StateGraph:
         analyses = [AnalysisOutput.model_validate(a) for a in state.get("analyses", [])]
         messages = format_propose_prompt(bundle, analyses)
 
-        res = gateway.call(
-            provider=wf_ctx.provider,
+        call_id = f"CALL-PROPOSE-{state.get('round', 0)}"
+        res = _call_model_with_budget(
             role="planner",
             messages=messages,
             output_schema=ProposalOutput,
+            call_id=call_id,
         )
         proposal_out = ProposalOutput.model_validate(res.content)
         ctrl.record_model_call(
-            call_id=f"CALL-PROPOSE-{state.get('round', 0)}",
+            call_id=call_id,
             role="planner",
             provider=res.provider,
             model_id=res.model_id,
             prompt_version=PROMPT_VERSION_V1,
             input_data=bundle.content,
+            usage=res.usage,
+            estimated_cost=res.cost_actual_usd,
         )
 
         valid_claims = {c.id for c in curr_state.claims}
@@ -246,20 +292,23 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> StateGraph:
         prop = ProposalOutput.model_validate(state["proposal"])
         messages = format_review_prompt(bundle, prop, curr_state.plan.model_dump(mode="json") if curr_state.plan else None)
 
-        res = gateway.call(
-            provider=wf_ctx.provider,
+        call_id = f"CALL-REVIEW-{state.get('round', 0)}"
+        res = _call_model_with_budget(
             role="reviewer",
             messages=messages,
             output_schema=ReviewOutput,
+            call_id=call_id,
         )
         review_out = ReviewOutput.model_validate(res.content)
         ctrl.record_model_call(
-            call_id=f"CALL-REVIEW-{state.get('round', 0)}",
+            call_id=call_id,
             role="reviewer",
             provider=res.provider,
             model_id=res.model_id,
             prompt_version=PROMPT_VERSION_V1,
             input_data=bundle.content,
+            usage=res.usage,
+            estimated_cost=res.cost_actual_usd,
         )
 
         # Commit domain issues
@@ -330,20 +379,23 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> StateGraph:
         rev = ReviewOutput.model_validate(state["review"])
         messages = format_synthesize_prompt(bundle, prop, rev, curr_state.plan.model_dump(mode="json") if curr_state.plan else None)
 
-        res = gateway.call(
-            provider=wf_ctx.provider,
+        call_id = f"CALL-SYNTH-{current_round}"
+        res = _call_model_with_budget(
             role="synthesizer",
             messages=messages,
             output_schema=SynthesizerOutput,
+            call_id=call_id,
         )
         synth_out = SynthesizerOutput.model_validate(res.content)
         ctrl.record_model_call(
-            call_id=f"CALL-SYNTH-{current_round}",
+            call_id=call_id,
             role="synthesizer",
             provider=res.provider,
             model_id=res.model_id,
             prompt_version=PROMPT_VERSION_V1,
             input_data=bundle.content,
+            usage=res.usage,
+            estimated_cost=res.cost_actual_usd,
         )
 
         # Build PlanRevision
@@ -456,20 +508,23 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> StateGraph:
         open_issues_dict = [i.model_dump(mode="json") for i in open_issues]
         messages = format_semantic_review_prompt(bundle, plan_dict, open_issues_dict)
 
-        res = gateway.call(
-            provider=wf_ctx.provider,
+        call_id = f"CALL-SEMANTIC-REVIEW-{state.get('round', 0)}"
+        res = _call_model_with_budget(
             role="reviewer",
             messages=messages,
             output_schema=ReviewOutput,
+            call_id=call_id,
         )
         review_out = ReviewOutput.model_validate(res.content)
         ctrl.record_model_call(
-            call_id=f"CALL-SEMANTIC-REVIEW-{state.get('round', 0)}",
+            call_id=call_id,
             role="reviewer",
             provider=res.provider,
             model_id=res.model_id,
             prompt_version=PROMPT_VERSION_V1,
             input_data=bundle.content,
+            usage=res.usage,
+            estimated_cost=res.cost_actual_usd,
         )
 
         # Apply resolutions

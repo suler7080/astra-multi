@@ -10,8 +10,11 @@ from __future__ import annotations
 
 import hashlib
 import threading
+import time
 from typing import Literal
 import uuid
+
+from astra_multi.domain.policies import RevisionConflict
 
 from astra_multi.domain.commands import (
     AddRecord,
@@ -219,33 +222,38 @@ class WorkflowController:
         attempts: int = 1,
     ) -> RunState:
         with self._lock:
-            state = self.get_state()
-            existing_call_ids = {m.id for m in state.model_calls}
-            final_call_id = call_id
-            if final_call_id in existing_call_ids:
-                final_call_id = f"{call_id}-{uuid.uuid4().hex[:4]}"
-            input_hash = hashlib.sha256(input_data.encode("utf-8")).hexdigest()
-            call = ModelCall(
-                id=final_call_id,
-                run_id=state.run.id,
-                role=role,
-                provider=provider,
-                model_id=model_id,
-                prompt_version=prompt_version,
-                input_hash=input_hash,
-                usage=usage or {},
-                estimated_cost=estimated_cost,
-                attempts=attempts,
-            )
-            cmd = AddRecord(
-                expected_revision=state.run.revision,
-                node="model-gateway",
-                logical_operation_id=f"model-call-{final_call_id}",
-                actor=self.actor,
-                record=call,
-            )
-            self.repository.commit(self.lease.run_id, cmd, self.lease)
-            return self.get_state()
+            for attempt in range(15):
+                state = self.get_state()
+                existing_call_ids = {m.id for m in state.model_calls}
+                if call_id in existing_call_ids:
+                    return state
+                final_call_id = call_id
+                input_hash = hashlib.sha256(input_data.encode("utf-8")).hexdigest()
+                call = ModelCall(
+                    id=final_call_id,
+                    run_id=state.run.id,
+                    role=role,
+                    provider=provider,
+                    model_id=model_id,
+                    prompt_version=prompt_version,
+                    input_hash=input_hash,
+                    usage=usage or {},
+                    estimated_cost=estimated_cost,
+                    attempts=attempts,
+                )
+                cmd = AddRecord(
+                    expected_revision=state.run.revision,
+                    node="model-gateway",
+                    logical_operation_id=f"model-call-{final_call_id}",
+                    actor=self.actor,
+                    record=call,
+                )
+                try:
+                    self.repository.commit(self.lease.run_id, cmd, self.lease)
+                    return self.get_state()
+                except RevisionConflict:
+                    time.sleep(0.005 * (attempt + 1))
+            raise RuntimeError(f"Failed to record model call {call_id} due to revision conflicts")
 
     def ask_question(self, question: Question) -> RunState:
         state = self.get_state()
