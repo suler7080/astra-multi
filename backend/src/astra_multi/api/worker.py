@@ -20,6 +20,12 @@ from astra_multi.persistence.sqlite import SQLiteStore
 
 logger = logging.getLogger(__name__)
 
+# Lease lives longer than any single LLM call chain; heartbeat keeps it alive.
+# 300s gives fast crash-takeover while tolerating transient stalls.
+LEASE_TTL = 300
+HEARTBEAT_INTERVAL = 30
+FAILURE_LEASE_TTL = 30
+
 
 class RunWorker:
     """Executes queued runs under lease and coordinates background lifecycle."""
@@ -52,13 +58,47 @@ class RunWorker:
         task = asyncio.create_task(self._execute_run(run_id, max_rounds))
         self._active_tasks[run_id] = task
 
+    def is_running(self, run_id: str) -> bool:
+        """Returns True if a background task for the run is still active."""
+        task = self._active_tasks.get(run_id)
+        return task is not None and not task.done()
+
+    async def stop_task(self, run_id: str, timeout: float = 5.0) -> None:
+        """Cancels the background task for a run and forgets local state."""
+        task = self._active_tasks.get(run_id)
+        if task is None:
+            self._run_errors.pop(run_id, None)
+            self._cancellation_events.pop(run_id, None)
+            return
+        if not task.done():
+            task.cancel()
+            try:
+                await asyncio.wait_for(asyncio.shield(task), timeout)
+            except (asyncio.CancelledError, asyncio.TimeoutError):
+                pass
+            except BaseException:
+                pass
+        self._active_tasks.pop(run_id, None)
+        self._run_errors.pop(run_id, None)
+        self._cancellation_events.pop(run_id, None)
+
+    def forget(self, run_id: str) -> None:
+        """Drops cached task/error state without cancelling (delete path)."""
+        self._active_tasks.pop(run_id, None)
+        self._run_errors.pop(run_id, None)
+        self._cancellation_events.pop(run_id, None)
+
     async def _execute_run(self, run_id: str, max_rounds: int) -> None:
         """Asynchronously executes the full discussion workflow graph."""
         owner = f"worker-{run_id}"
         lease = None
+        failure_lease = None
+        heartbeat_task: asyncio.Task[None] | None = None
+        lease_holder: dict[str, Any] = {}
         try:
-            # Acquire lease for execution
-            lease = self.store.acquire(run_id, owner=owner, ttl=120)
+            # Acquire lease for execution (heartbeat extends it below)
+            lease = self.store.acquire(run_id, owner=owner, ttl=LEASE_TTL)
+            lease_holder["lease"] = lease
             controller = WorkflowController(self.store, lease, actor="api-worker")
             context_builder = ContextBuilder(self.store.artifacts)
 
@@ -87,6 +127,44 @@ class RunWorker:
             graph = create_workflow_graph(wf_ctx)
             app = graph.compile()
 
+            async def _keepalive() -> None:
+                """Periodically renew the lease while the graph is running."""
+                try:
+                    while True:
+                        await asyncio.sleep(HEARTBEAT_INTERVAL)
+                        try:
+                            current = lease_holder.get("lease")
+                            if current is None:
+                                break
+                            renewed = self.store.heartbeat(current, ttl=LEASE_TTL)
+                            lease_holder["lease"] = renewed
+                            # Propagate renewed lease so later commits/failure
+                            # handling use a fresh object (token unchanged,
+                            # only expires_at moves; old object still passes
+                            # _check_lease, but keep references consistent).
+                            try:
+                                controller.lease = renewed
+                            except Exception:
+                                pass
+                            if budget_service is not None:
+                                try:
+                                    budget_service.lease = renewed
+                                except Exception:
+                                    pass
+                        except asyncio.CancelledError:
+                            break
+                        except Exception as exc_heartbeat:
+                            # LeaseLost here means takeover/terminal; stop
+                            # heartbeating, graph commit will surface it.
+                            logger.warning(
+                                "Heartbeat failed for run %s: %s", run_id, exc_heartbeat
+                            )
+                            break
+                except asyncio.CancelledError:
+                    pass
+
+            heartbeat_task = asyncio.create_task(_keepalive())
+
             # Execute graph in worker thread to prevent blocking asyncio loop
             loop = asyncio.get_running_loop()
             initial_state = {
@@ -96,7 +174,19 @@ class RunWorker:
                 "events": [],
             }
 
-            await loop.run_in_executor(None, app.invoke, initial_state)
+            try:
+                await loop.run_in_executor(None, app.invoke, initial_state)
+            finally:
+                if heartbeat_task is not None:
+                    heartbeat_task.cancel()
+                    try:
+                        await heartbeat_task
+                    except asyncio.CancelledError:
+                        pass
+                    except Exception:
+                        pass
+                # Use the latest renewed lease for cleanup / failure marking.
+                lease = lease_holder.get("lease", lease)
 
         except Exception as exc:
             import traceback
@@ -113,23 +203,50 @@ class RunWorker:
             except Exception:
                 pass
             try:
-                # Mark run as FAILED if not already terminal
+                # Mark run as FAILED if not already terminal.
+                # Never reuse a possibly-expired lease: try to acquire a fresh
+                # one first, fall back to the last known lease only if takeover
+                # is rejected (i.e. current lease is still valid).
                 state = self.store.load(run_id)
                 if state.run.status not in (RunStatus.FINAL, RunStatus.PARTIAL, RunStatus.CANCELLED):
-                    if not lease:
-                        lease = self.store.acquire(run_id, owner=owner, ttl=30)
-                    ctrl = WorkflowController(self.store, lease, actor="api-worker")
+                    try:
+                        failure_lease = self.store.acquire(
+                            run_id, owner=owner, ttl=FAILURE_LEASE_TTL
+                        )
+                    except Exception:
+                        failure_lease = lease_holder.get("lease", lease)
+                    if failure_lease is None:
+                        raise RuntimeError("no lease available to mark run FAILED")
+                    ctrl = WorkflowController(
+                        self.store, failure_lease, actor="api-worker"
+                    )
                     ctrl.transition_phase(
                         new_phase=state.run.phase,
                         new_status=RunStatus.FAILED,
                         reason=f"Execution error: {exc}",
                     )
-            except Exception:
-                pass
+            except Exception as exc_mark:
+                logger.warning("Failed to mark run %s as FAILED: %s", run_id, exc_mark)
         finally:
+            if heartbeat_task is not None and not heartbeat_task.done():
+                heartbeat_task.cancel()
+                try:
+                    # _execute_run is async; awaiting here is safe except when
+                    # the task itself was cancelled — guard anyway.
+                    await heartbeat_task
+                except asyncio.CancelledError:
+                    pass
+                except BaseException:
+                    pass
+            # Release main lease (latest renewed) and failure lease if distinct.
             if lease:
                 try:
                     self.store.release(lease)
+                except Exception:
+                    pass
+            if failure_lease is not None and failure_lease is not lease:
+                try:
+                    self.store.release(failure_lease)
                 except Exception:
                     pass
             self._active_tasks.pop(run_id, None)

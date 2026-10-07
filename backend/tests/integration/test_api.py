@@ -300,7 +300,8 @@ def test_api_entity_queries_and_sse():
                 assert sse_res.status_code == 200
                 assert "text/event-stream" in sse_res.headers["content-type"]
                 body_text = sse_res.text
-                assert "event: " in body_text
+                assert "event: transition_run" in body_text
+                assert "event: transition_phase" in body_text
                 assert "run_completed" in body_text
 
                 # Test SSE with Last-Event-ID header replay

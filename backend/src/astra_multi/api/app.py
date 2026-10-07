@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import uuid
@@ -110,13 +111,18 @@ def create_app(
         if path.startswith("/api/runs"):
             admin_hash = store.settings.get_setting("admin_password_hash")
             if admin_hash is not None:
+                token = None
                 auth_header = request.headers.get("Authorization")
-                if not auth_header or not auth_header.startswith("Bearer "):
+                if auth_header and auth_header.startswith("Bearer "):
+                    token = auth_header.split("Bearer ", 1)[1].strip()
+                elif request.query_params.get("token"):
+                    token = request.query_params.get("token")
+
+                if not token:
                     return JSONResponse(
                         status_code=status.HTTP_401_UNAUTHORIZED,
                         content={"error": {"code": "unauthorized", "message": "Authentication required"}},
                     )
-                token = auth_header.split("Bearer ", 1)[1].strip()
                 secret = ensure_auth_secret_key(store.settings)
                 if not verify_access_token(token, secret):
                     return JSONResponse(
@@ -342,6 +348,8 @@ def create_app(
             async for ev in worker.event_stream(run_id, last_event_id=start_id):
                 payload_json = json.dumps(ev["data"], ensure_ascii=False)
                 yield f"id: {ev['id']}\nevent: {ev['event']}\ndata: {payload_json}\n\n"
+                if ev["event"] == "transition_run":
+                    yield f"id: {ev['id']}\nevent: transition_phase\ndata: {payload_json}\n\n"
 
         return StreamingResponse(
             sse_generator(),
@@ -604,6 +612,50 @@ def create_app(
             }
         finally:
             store.release(lease)
+
+    @app.delete("/api/runs/{run_id}", summary="Delete a run/session permanently")
+    async def delete_run(
+        run_id: str, force: bool = Query(default=False, description="Force delete an active run")
+    ) -> dict[str, Any]:
+        try:
+            state = store.load(run_id)
+        except Exception:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Run {run_id} not found.",
+            )
+        is_active_task = worker.is_running(run_id)
+        is_active_status = state.run.status in (RunStatus.RUNNING, RunStatus.WAITING_FOR_INPUT)
+        if (is_active_task or is_active_status) and not force:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    f"Run {run_id} is active (status={state.run.status.value}). "
+                    "Cancel it first or retry with ?force=true to stop and delete."
+                ),
+            )
+        if is_active_task:
+            await worker.stop_task(run_id)
+        else:
+            worker.forget(run_id)
+        # Drop idempotency cache entries pointing at this run
+        try:
+            for key, (_, cached_run_id) in list(app.state.idempotency_records.items()):
+                if cached_run_id == run_id:
+                    del app.state.idempotency_records[key]
+        except Exception:
+            pass
+        try:
+            store.delete(run_id)
+        except KeyError:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Run {run_id} not found.",
+            )
+        return {
+            "run_id": run_id,
+            "message": "Run deleted permanently.",
+        }
 
     @app.get("/api/runs/{run_id}/export", summary="Export candidate plan as JSON or Markdown")
     async def export_plan(

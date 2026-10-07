@@ -53,6 +53,14 @@ def test_auth_setup_login_and_protection():
             auth_runs = client.get("/api/runs", headers={"Authorization": f"Bearer {login_token}"})
             assert auth_runs.status_code == 200
 
+            # 7b. Access /api/runs with query param token succeeds (needed for EventSource SSE)
+            auth_runs_query = client.get(f"/api/runs?token={login_token}")
+            assert auth_runs_query.status_code == 200
+
+            # Access with invalid query param token fails
+            bad_token_query = client.get("/api/runs?token=invalid-token")
+            assert bad_token_query.status_code == 401
+
             # 8. Change password
             change_res = client.post(
                 "/api/auth/change-password",

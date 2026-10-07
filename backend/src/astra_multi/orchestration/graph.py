@@ -28,7 +28,7 @@ from astra_multi.agents.roles import (
     format_review_prompt,
     format_synthesize_prompt,
 )
-from astra_multi.context.bundle import ContextBuilder, ContextLimits
+from astra_multi.context.bundle import ContextBuilder, orchestration_limits
 from astra_multi.context.evidence import EvidenceLedger
 from astra_multi.domain.models import (
     Decision,
@@ -119,7 +119,7 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> StateGraph:
             role="planner",
             phase=RunPhase.INDEPENDENT_ANALYSIS,
             refs=[],
-            limits=ContextLimits(max_tokens=4000),
+            limits=orchestration_limits(),
         )
         messages = format_independent_analysis_prompt(bundle)
 
@@ -150,7 +150,7 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> StateGraph:
             role="reviewer",
             phase=RunPhase.INDEPENDENT_ANALYSIS,
             refs=[],
-            limits=ContextLimits(max_tokens=4000),
+            limits=orchestration_limits(),
         )
         messages = format_independent_analysis_prompt(bundle)
 
@@ -182,7 +182,7 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> StateGraph:
             role="planner",
             phase=RunPhase.PROPOSE,
             refs=[],
-            limits=ContextLimits(max_tokens=4000),
+            limits=orchestration_limits(),
         )
         analyses = [AnalysisOutput.model_validate(a) for a in state.get("analyses", [])]
         messages = format_propose_prompt(bundle, analyses)
@@ -240,7 +240,7 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> StateGraph:
             role="reviewer",
             phase=RunPhase.REVIEW,
             refs=[],
-            limits=ContextLimits(max_tokens=4000),
+            limits=orchestration_limits(),
         )
         prop = ProposalOutput.model_validate(state["proposal"])
         messages = format_review_prompt(bundle, prop, curr_state.plan.model_dump(mode="json") if curr_state.plan else None)
@@ -264,14 +264,22 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> StateGraph:
         # Commit domain issues
         valid_reqs = {r.id for task in curr_state.tasks for r in task.requirements}
         valid_evidence = {e.id for e in curr_state.evidence}
+        existing_issue_ids = {i.id for i in curr_state.issues}
+        issue_round = state.get("round", 0)
         for idx, ir in enumerate(review_out.issues):
             filtered_req_ids = [rid for rid in ir.requirement_ids if rid in valid_reqs]
             filtered_evi_ids = [eid for eid in ir.evidence_ids if eid in valid_evidence]
             verif_req = ir.verification_request
             if not filtered_evi_ids and not verif_req:
                 verif_req = f"Verification required: {ir.claim[:100]}"
+            issue_id = f"ISSUE-{issue_round}-{idx + 1}"
+            counter = idx + 1
+            while issue_id in existing_issue_ids:
+                counter += 1
+                issue_id = f"ISSUE-{issue_round}-{counter}"
+            existing_issue_ids.add(issue_id)
             domain_issue = Issue(
-                id=f"ISSUE-{state.get('round', 0)}-{idx + 1}",
+                id=issue_id,
                 run_id=curr_state.run.id,
                 severity=ir.severity,
                 based_on_revision=curr_state.plan.revision if curr_state.plan else 0,
@@ -302,7 +310,7 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> StateGraph:
             role="synthesizer",
             phase=RunPhase.REVISE,
             refs=[],
-            limits=ContextLimits(max_tokens=4000),
+            limits=orchestration_limits(),
         )
         prop = ProposalOutput.model_validate(state["proposal"])
         rev = ReviewOutput.model_validate(state["review"])
@@ -354,12 +362,20 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> StateGraph:
                 )
             )
 
+        existing_dec_ids = {dec.id for dec in curr_state.decisions}
+        dec_counter = len(curr_state.decisions) + 1
         plan_decisions: list[Decision] = []
-        for idx, d in enumerate(synth_out.decisions):
+        for d in synth_out.decisions:
             filtered_evis = [eid for eid in d.evidence_ids if eid in valid_evidence]
             filtered_issues = [iid for iid in d.related_issue_ids if iid in valid_issues]
+            while f"DEC-{dec_counter}" in existing_dec_ids:
+                dec_counter += 1
+            dec_id = f"DEC-{dec_counter}"
+            existing_dec_ids.add(dec_id)
+            dec_counter += 1
+
             dec = Decision(
-                id=f"DEC-{idx + 1}",
+                id=dec_id,
                 run_id=curr_state.run.id,
                 question=d.question,
                 chosen=d.chosen,

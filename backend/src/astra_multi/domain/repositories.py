@@ -32,6 +32,7 @@ class RunRepository(Protocol):
     def operation(
         self, run_id: str, node: str, logical_operation_id: str
     ) -> OperationRecord | None: ...
+    def delete(self, run_id: str) -> None: ...
 
 
 class LeaseService(Protocol):

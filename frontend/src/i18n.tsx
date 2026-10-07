@@ -78,6 +78,9 @@ export const translations = {
     overview_finalize_plan: 'Finalize Plan',
     overview_export_md: 'Export Markdown',
     overview_export_json: 'Export JSON',
+    overview_delete_run: 'Delete Run',
+    overview_confirm_delete: 'Permanently delete this run? This cannot be undone.',
+    overview_confirm_delete_active: 'This run is still active. Force stop and permanently delete it?',
 
     // Execution Logs
     logs_title: 'Execution Logs',
@@ -191,11 +194,15 @@ export const translations = {
     dash_recent_runs: 'Recent Architecture Runs',
     dash_no_runs_desc: 'No architecture deliberation runs found. Click "+ New Run" to start your first task.',
     dash_btn_open_run: 'Open Run',
+    dash_btn_delete_run: 'Delete',
+    dash_confirm_delete: 'Permanently delete this run? This cannot be undone.',
+    dash_confirm_delete_active: 'This run is still active. Force stop and permanently delete it?',
     dash_col_goal: 'Task Objective',
     dash_col_status: 'Lifecycle Status',
     dash_col_revision: 'Revision',
     dash_col_created: 'Started At',
     header_all_runs: '⬅ All Runs (Dashboard)',
+    feedback_run_deleted: 'Run deleted permanently.',
   },
   VN: {
     // Header
@@ -272,6 +279,9 @@ export const translations = {
     overview_finalize_plan: 'Chốt kế hoạch (Finalize)',
     overview_export_md: 'Xuất Markdown',
     overview_export_json: 'Xuất JSON',
+    overview_delete_run: 'Xóa phiên',
+    overview_confirm_delete: 'Xóa vĩnh viễn phiên này? Hành động không thể hoàn tác.',
+    overview_confirm_delete_active: 'Phiên vẫn đang chạy. Dừng và xóa vĩnh viễn?',
 
     // Execution Logs
     logs_title: 'Nhật ký thực thi',
@@ -385,11 +395,15 @@ export const translations = {
     dash_recent_runs: 'Danh sách các phiên làm việc',
     dash_no_runs_desc: 'Chưa có phiên làm việc nào. Bấm nút "+ Tạo phiên mới" để bắt đầu bài toán thiết kế.',
     dash_btn_open_run: 'Vào phiên làm việc',
+    dash_btn_delete_run: 'Xóa',
+    dash_confirm_delete: 'Xóa vĩnh viễn phiên này? Hành động không thể hoàn tác.',
+    dash_confirm_delete_active: 'Phiên vẫn đang chạy. Dừng và xóa vĩnh viễn?',
     dash_col_goal: 'Mục tiêu bài toán',
     dash_col_status: 'Trạng thái quy trình',
     dash_col_revision: 'Phiên bản',
     dash_col_created: 'Khởi tạo lúc',
     header_all_runs: '⬅ Tất cả phiên (Trang chủ)',
+    feedback_run_deleted: 'Đã xóa phiên vĩnh viễn.',
   },
 } as const;
 

@@ -11,6 +11,7 @@ import {
   FileText,
   CheckCircle2,
   ListTodo,
+  Trash2,
 } from 'lucide-react';
 import { useI18n } from '../i18n';
 
@@ -19,11 +20,13 @@ interface RunOverviewProps {
   onAnswerQuestion: (questionId: string, answer: string, expectedRevision: number) => Promise<void>;
   onResumeRun: () => Promise<void>;
   onCancelRun: (reason: string) => Promise<void>;
+  onDeleteRun: () => Promise<void>;
   onValidate: () => Promise<void>;
   onFinalize: () => Promise<void>;
   onExportMarkdown: () => void;
   onExportJson: () => void;
   isProcessing: boolean;
+  isDeleting?: boolean;
   actionMessage?: string | null;
   onViewLogs?: () => void;
 }
@@ -33,11 +36,13 @@ export const RunOverview: React.FC<RunOverviewProps> = ({
   onAnswerQuestion,
   onResumeRun,
   onCancelRun,
+  onDeleteRun,
   onValidate,
   onFinalize,
   onExportMarkdown,
   onExportJson,
   isProcessing,
+  isDeleting,
   actionMessage,
   onViewLogs,
 }) => {
@@ -45,6 +50,7 @@ export const RunOverview: React.FC<RunOverviewProps> = ({
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [cancelReason, setCancelReason] = useState('Stopped by operator');
   const [showCancelPrompt, setShowCancelPrompt] = useState(false);
+  const [showDeletePrompt, setShowDeletePrompt] = useState(false);
 
   const handleAnswerSubmit = async (questionId: string) => {
     const text = (answers[questionId] || '').trim();
@@ -295,6 +301,40 @@ export const RunOverview: React.FC<RunOverviewProps> = ({
             <Award size={15} className="text-emerald-400" />
             <span>{t('overview_finalize_plan')}</span>
           </button>
+
+          {showDeletePrompt ? (
+            <span className="cancel-prompt-inline">
+              <span className="text-xs text-slate-300">
+                {!isTerminal ? t('overview_confirm_delete_active') : t('overview_confirm_delete')}
+              </span>
+              <button
+                onClick={() => {
+                  onDeleteRun();
+                  setShowDeletePrompt(false);
+                }}
+                className="btn-danger-sm"
+                disabled={isProcessing || isDeleting}
+              >
+                {t('overview_confirm_stop')}
+              </button>
+              <button
+                onClick={() => setShowDeletePrompt(false)}
+                className="btn-text-sm"
+              >
+                {t('overview_cancel')}
+              </button>
+            </span>
+          ) : (
+            <button
+              onClick={() => setShowDeletePrompt(true)}
+              className="btn-danger"
+              disabled={isProcessing || isDeleting}
+              title={t('overview_delete_run')}
+            >
+              <Trash2 size={15} />
+              <span>{isDeleting ? '...' : t('overview_delete_run')}</span>
+            </button>
+          )}
         </div>
 
         <div className="toolbar-right">

@@ -327,3 +327,28 @@ class SQLiteStore:
                 "UPDATE leases SET expires_at=? WHERE run_id=?",
                 (self.clock().isoformat(), lease.run_id),
             )
+
+    def delete(self, run_id: str) -> None:
+        """Permanently removes a run and all its child rows.
+
+        Child tables reference ``runs(id)`` with foreign keys, so they must
+        be deleted first. Content-addressed artifacts under ``artifacts.root``
+        are shared between runs and are intentionally kept; only the
+        per-run error log (``errors/{run_id}.log``) is removed.
+        """
+        with self._transaction():
+            row = self.connection.execute(
+                "SELECT id FROM runs WHERE id=?", (run_id,)
+            ).fetchone()
+            if row is None:
+                raise KeyError(run_id)
+            self.connection.execute("DELETE FROM operations WHERE run_id=?", (run_id,))
+            self.connection.execute("DELETE FROM events WHERE run_id=?", (run_id,))
+            self.connection.execute("DELETE FROM leases WHERE run_id=?", (run_id,))
+            self.connection.execute("DELETE FROM runs WHERE id=?", (run_id,))
+        try:
+            err_file = self.artifacts.root / "errors" / f"{run_id}.log"
+            if err_file.exists():
+                err_file.unlink()
+        except Exception:
+            pass

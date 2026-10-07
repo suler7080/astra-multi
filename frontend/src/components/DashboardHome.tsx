@@ -13,22 +13,27 @@ import {
   Clock,
   CircleDot,
   XCircle,
+  Trash2,
 } from 'lucide-react';
 
 interface DashboardHomeProps {
   runs: RunSummary[];
   onSelectRun: (runId: string) => void;
+  onDeleteRun: (runId: string) => void;
   onOpenNewRun: () => void;
   onRefresh: () => void;
   isLoading: boolean;
+  isDeletingId?: string | null;
 }
 
 export const DashboardHome: React.FC<DashboardHomeProps> = ({
   runs,
   onSelectRun,
+  onDeleteRun,
   onOpenNewRun,
   onRefresh,
   isLoading,
+  isDeletingId,
 }) => {
   const { t } = useI18n();
 
@@ -221,6 +226,18 @@ export const DashboardHome: React.FC<DashboardHomeProps> = ({
                       >
                         <span>{t('dash_btn_open_run')}</span>
                         <ArrowRight size={12} />
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onDeleteRun(r.run_id);
+                        }}
+                        className="btn-danger-sm ml-2"
+                        title={t('dash_btn_delete_run')}
+                        disabled={isDeletingId === r.run_id}
+                      >
+                        <Trash2 size={12} />
+                        <span>{isDeletingId === r.run_id ? '...' : t('dash_btn_delete_run')}</span>
                       </button>
                     </td>
                   </tr>

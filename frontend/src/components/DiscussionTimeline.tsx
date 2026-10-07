@@ -25,7 +25,35 @@ export const DiscussionTimeline: React.FC<DiscussionTimelineProps> = ({
 
   const filteredEvents = events.filter((e) => {
     if (filterType === 'all') return true;
-    return e.event === filterType || e.data.type === filterType;
+    if (filterType === 'transition_phase' || filterType === 'transition_run') {
+      return (
+        e.event === 'transition_phase' ||
+        e.event === 'transition_run' ||
+        e.data?.type === 'transition_run'
+      );
+    }
+    if (filterType === 'record_issue') {
+      return (
+        e.event === 'record_issue' ||
+        (e.event === 'add_record' &&
+          String(e.data?.payload?.logical_operation_id || '').startsWith('issue'))
+      );
+    }
+    if (filterType === 'record_decision') {
+      return (
+        e.event === 'record_decision' ||
+        (e.event === 'add_record' &&
+          String(e.data?.payload?.logical_operation_id || '').startsWith('decision'))
+      );
+    }
+    if (filterType === 'ask_question') {
+      return (
+        e.event === 'ask_question' ||
+        (e.event === 'add_record' &&
+          String(e.data?.payload?.logical_operation_id || '').startsWith('question'))
+      );
+    }
+    return e.event === filterType || e.data?.type === filterType;
   });
 
   const getActorBadge = (actor?: string) => {
@@ -122,6 +150,21 @@ export const DiscussionTimeline: React.FC<DiscussionTimelineProps> = ({
                         </pre>
                       </div>
                     )}
+
+                    {(() => {
+                      if (item.event !== 'transition_run' && item.event !== 'transition_phase') return null;
+                      const payload = d.payload as Record<string, any> | undefined;
+                      const res = payload?.result || payload;
+                      const phaseName = res?.phase;
+                      const statusName = res?.status || 'RUNNING';
+                      if (!phaseName) return null;
+                      return (
+                        <div className="run-completed-banner" style={{ borderColor: 'rgba(56, 189, 248, 0.4)', background: 'rgba(12, 74, 110, 0.2)' }}>
+                          <span className="text-sky-400 font-semibold">➔ {t('phase_workflow_lifecycle')}:</span>
+                          <span>Phase advanced to <strong>{phaseName}</strong> ({statusName})</span>
+                        </div>
+                      );
+                    })()}
 
                     {item.event === 'run_completed' && (
                       <div className="run-completed-banner">

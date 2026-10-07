@@ -80,6 +80,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="Cancellation reason",
     )
 
+    # delete
+    delete_p = subparsers.add_parser("delete", help="Permanently delete a run/session")
+    delete_p.add_argument("run_id", help="Target run ID")
+    delete_p.add_argument(
+        "--force",
+        action="store_true",
+        help="Also delete runs that are still active",
+    )
+
     # artifacts
     art_p = subparsers.add_parser("artifacts", help="Export or view candidate artifacts")
     art_p.add_argument("run_id", help="Target run ID")
@@ -202,6 +211,28 @@ def cmd_cancel(store: SQLiteStore, args: argparse.Namespace) -> int:
     )
     store.release(lease)
     print(f"Cancelled run {args.run_id}")
+    return 0
+
+
+def cmd_delete(store: SQLiteStore, args: argparse.Namespace) -> int:
+    try:
+        state = store.load(args.run_id)
+    except Exception:
+        print(f"Error: Run {args.run_id} not found.", file=sys.stderr)
+        return 1
+    if state.run.status.value in ("RUNNING", "WAITING_FOR_INPUT") and not args.force:
+        print(
+            f"Error: Run {args.run_id} is active ({state.run.status.value}). "
+            "Cancel it first or retry with --force.",
+            file=sys.stderr,
+        )
+        return 1
+    try:
+        store.delete(args.run_id)
+    except KeyError:
+        print(f"Error: Run {args.run_id} not found.", file=sys.stderr)
+        return 1
+    print(f"Deleted run {args.run_id}")
     return 0
 
 
@@ -397,6 +428,8 @@ def main(argv: list[str] | None = None) -> int:
             return cmd_answer(store, args)
         elif args.command == "cancel":
             return cmd_cancel(store, args)
+        elif args.command == "delete":
+            return cmd_delete(store, args)
         elif args.command == "artifacts":
             return cmd_artifacts(store, args)
         elif args.command == "validate":

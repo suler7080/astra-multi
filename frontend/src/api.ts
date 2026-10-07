@@ -245,6 +245,15 @@ export const api = {
     return handleResponse(res);
   },
 
+  async deleteRun(runId: string, force?: boolean): Promise<{ run_id: string; message: string }> {
+    const query = force ? '?force=true' : '';
+    const res = await fetch(`${BASE_URL}/runs/${runId}${query}`, {
+      method: 'DELETE',
+      headers: getAuthHeaders(),
+    });
+    return handleResponse(res);
+  },
+
   async validateRun(runId: string): Promise<ValidationReport> {
     const res = await fetch(`${BASE_URL}/runs/${runId}/validate`, {
       method: 'POST',
@@ -286,6 +295,10 @@ export const api = {
     const url = new URL(`${BASE_URL}/runs/${runId}/events`, window.location.origin);
     if (lastEventId) {
       url.searchParams.set('last_event_id', String(lastEventId));
+    }
+    const token = localStorage.getItem('astra_auth_token');
+    if (token) {
+      url.searchParams.set('token', token);
     }
     return url.pathname + url.search;
   },

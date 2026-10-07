@@ -15,7 +15,7 @@ from astra_multi.agents.roles import (
 )
 from astra_multi.context.bundle import ContextBuilder
 from astra_multi.domain.fixtures import sample_state
-from astra_multi.domain.models import IssueSeverity, RunPhase, RunStatus
+from astra_multi.domain.models import IssueSeverity, Requirement, RunPhase, RunStatus
 from astra_multi.gateway.model_gateway import GatewayConfig, ModelGateway
 from astra_multi.orchestration.controller import WorkflowController
 from astra_multi.orchestration.graph import (
@@ -277,4 +277,132 @@ def test_workflow_sanitizes_unvalidated_llm_references():
             assert final_domain_state.proposals[0].claim_ids == []
             # coverage must not have UNKNOWN_REQ
             assert "UNKNOWN_REQ" not in final_domain_state.proposals[0].requirement_coverage
+
+
+def test_workflow_multi_round_decision_id_uniqueness():
+    """Verifies that multi-round discussions produce unique decision IDs without operation key conflicts."""
+    round_calls: dict[str, int] = {"synth": 0}
+
+    def multi_round_adapter(
+        provider: str,
+        role: str,
+        messages: list[dict[str, str]],
+        output_schema: Any = None,
+        **kwargs: Any,
+    ) -> ModelResult:
+        if output_schema == AnalysisOutput:
+            content = AnalysisOutput(
+                role="planner" if role == "planner" else "reviewer",
+                findings=["Valid base architecture"],
+                risks=[],
+                assumptions=[],
+            )
+        elif output_schema == ProposalOutput:
+            content = ProposalOutput(
+                approach="Multi-round architecture test",
+                alternatives=[],
+                tradeoffs=[],
+                requirement_coverage={"REQ-001": "Full coverage"},
+                claim_ids=[],
+            )
+        elif output_schema == ReviewOutput:
+            content = ReviewOutput(
+                summary="Review completed",
+                reviewed_evidence_ids=[],
+                issues=[],
+            )
+        elif output_schema == SynthesizerOutput:
+            round_calls["synth"] += 1
+            call_num = round_calls["synth"]
+            # In round 1 (call_num == 1), leave REQ-002 uncovered to force loop to round 2
+            req_ids = ["REQ-001"] if call_num == 1 else ["REQ-001", "REQ-002"]
+            content = SynthesizerOutput(
+                steps=[
+                    StepDraft(
+                        objective=f"Step in round {call_num}",
+                        requirement_ids=req_ids,
+                        dependencies=[],
+                        targets=["module.py"],
+                        validation="pytest",
+                        deliverables=["code"],
+                        completion_criteria=["tests pass"],
+                        evidence_ids=[],
+                    )
+                ],
+                decisions=[
+                    DecisionDraft(
+                        question=f"Decision Q for round {call_num}?",
+                        chosen=f"Option {call_num}",
+                        rationale=f"Rationale {call_num}",
+                        alternatives=[],
+                        evidence_ids=[],
+                        related_issue_ids=[],
+                    )
+                ],
+                risks=[],
+                issues_addressed=[],
+                rationale="Multi-round synthesis",
+            )
+        else:
+            content = "ok"
+
+        return ModelResult(
+            content=content.model_dump(mode="json") if hasattr(content, "model_dump") else content,
+            model_id=f"fake-{role}",
+            provider="fake",
+            usage={"prompt_tokens": 100, "completion_tokens": 50, "total_tokens": 150},
+            cost_actual_usd=0.001,
+        )
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = Path(tmpdir) / "workflow_multiround.db"
+        art_path = Path(tmpdir) / "artifacts"
+        with SQLiteStore(db_path) as store:
+            art_store = FileArtifactStore(art_path)
+            state = sample_state(repo=False)
+            state.task.requirements.append(
+                Requirement(
+                    id="REQ-002",
+                    text="Secondary endpoint requirement",
+                    acceptance="GET /metrics returns 200",
+                )
+            )
+            store.create(state.task, state.run, state.snapshot)
+            lease = store.acquire(state.run.id, owner="test-worker", ttl=60)
+
+            controller = WorkflowController(store, lease)
+            gateway = ModelGateway(
+                config=GatewayConfig(enable_output_repair=False),
+                provider_adapter=multi_round_adapter,
+            )
+            context_builder = ContextBuilder(art_store)
+
+            wf_ctx = WorkflowContext(
+                controller=controller,
+                gateway=gateway,
+                context_builder=context_builder,
+            )
+
+            graph = create_workflow_graph(wf_ctx)
+            app = graph.compile()
+
+            initial_state = {
+                "run_id": state.run.id,
+                "round": 0,
+                "max_rounds": 2,
+                "events": [],
+            }
+            # This must complete both rounds without OperationConflict!
+            final_output = app.invoke(initial_state)
+            assert final_output["gate_passed"] is True
+            assert round_calls["synth"] == 2
+
+            final_domain_state = store.load(state.run.id)
+            # Verify both decisions exist and have distinct IDs
+            dec_ids = [d.id for d in final_domain_state.decisions]
+            assert len(dec_ids) == 2
+            assert len(set(dec_ids)) == 2
+            assert "DEC-1" in dec_ids
+            assert "DEC-2" in dec_ids
+
 

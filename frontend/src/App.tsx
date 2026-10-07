@@ -60,6 +60,7 @@ export const App: React.FC = () => {
 
   const [isLoading, setIsLoading] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isDeletingId, setIsDeletingId] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isSseConnected, setIsSseConnected] = useState(false);
@@ -105,33 +106,65 @@ export const App: React.FC = () => {
     window.history.replaceState({}, '', url.toString());
   };
 
-  const loadRuns = async (initialRunId?: string | null) => {
+  const loadRuns = async (initialRunId?: string | null, silent = false) => {
     try {
-      setIsLoading(true);
+      if (!silent) setIsLoading(true);
       const list = await api.listRuns();
       setRuns(list);
 
       if (initialRunId && list.some((r) => r.run_id === initialRunId)) {
         setSelectedRunId(initialRunId);
         updateUrlParam(initialRunId);
-        await loadRunDetails(initialRunId);
-      } else {
+        await loadRunDetails(initialRunId, silent);
+      } else if (initialRunId === undefined && selectedRunId) {
+        // Sync selected run if present in updated list
+        const inList = list.find((r) => r.run_id === selectedRunId);
+        if (inList && currentRun) {
+          if (inList.phase !== currentRun.phase || inList.status !== currentRun.status) {
+            setCurrentRun((prev) =>
+              prev
+                ? {
+                    ...prev,
+                    phase: inList.phase,
+                    status: inList.status,
+                    stop_reason: inList.stop_reason,
+                  }
+                : null
+            );
+          }
+        }
+      } else if (initialRunId === null) {
         setSelectedRunId(null);
         setCurrentRun(null);
         updateUrlParam('');
       }
     } catch (err: unknown) {
-      handleError(err, 'Failed to load runs');
+      if (!silent) handleError(err, 'Failed to load runs');
     } finally {
-      setIsLoading(false);
+      if (!silent) setIsLoading(false);
     }
   };
 
-  const loadRunDetails = async (runId: string) => {
+  const loadRunDetails = async (runId: string, silent = false) => {
     try {
-      setIsLoading(true);
+      if (!silent) setIsLoading(true);
       const detail = await api.getRun(runId);
       setCurrentRun(detail);
+
+      // Keep runs list in sync with current run phase and status
+      setRuns((prev) =>
+        prev.map((r) =>
+          r.run_id === detail.run_id
+            ? {
+                ...r,
+                phase: detail.phase,
+                status: detail.status,
+                revision: detail.revision,
+                stop_reason: detail.stop_reason,
+              }
+            : r
+        )
+      );
 
       // Concurrently fetch entities
       const [iss, dec, ev] = await Promise.all([
@@ -154,9 +187,9 @@ export const App: React.FC = () => {
         setCurrentPlan(null);
       }
     } catch (err: unknown) {
-      handleError(err, `Failed to load run ${runId}`);
+      if (!silent) handleError(err, `Failed to load run ${runId}`);
     } finally {
-      setIsLoading(false);
+      if (!silent) setIsLoading(false);
     }
   };
 
@@ -180,43 +213,103 @@ export const App: React.FC = () => {
       setIsSseConnected(true);
     };
 
+    const handleStreamEvent = (type: string, data: any, lastId?: string) => {
+      const streamEv: StreamEvent = {
+        id: lastId ? Number(lastId) : Date.now(),
+        event: type,
+        data,
+      };
+      setEvents((prev) => {
+        if (prev.some((p) => p.id === streamEv.id && p.event === streamEv.event)) {
+          return prev;
+        }
+        return [...prev, streamEv];
+      });
+
+      // Instantly update phase & status without waiting for network call
+      if (type === 'transition_run' || type === 'transition_phase') {
+        const res = data?.payload?.result || data?.result;
+        const newPhase = res?.phase;
+        const newStatus = res?.status;
+        if (newPhase) {
+          setCurrentRun((prev) => {
+            if (!prev) return prev;
+            return {
+              ...prev,
+              phase: newPhase,
+              status: newStatus || prev.status,
+            };
+          });
+          setRuns((prev) =>
+            prev.map((r) =>
+              r.run_id === selectedRunId
+                ? { ...r, phase: newPhase, status: newStatus || r.status }
+                : r
+            )
+          );
+        }
+      } else if (type === 'run_completed') {
+        const newStatus = data?.status;
+        const newPhase = data?.phase;
+        const stopReason = data?.stop_reason;
+        if (newStatus || newPhase) {
+          setCurrentRun((prev) => {
+            if (!prev) return prev;
+            return {
+              ...prev,
+              phase: newPhase || prev.phase,
+              status: newStatus || prev.status,
+              stop_reason: stopReason ?? prev.stop_reason,
+            };
+          });
+          setRuns((prev) =>
+            prev.map((r) =>
+              r.run_id === selectedRunId
+                ? {
+                    ...r,
+                    phase: newPhase || r.phase,
+                    status: newStatus || r.status,
+                    stop_reason: stopReason ?? r.stop_reason,
+                  }
+                : r
+            )
+          );
+        }
+      }
+
+      // Silent background refresh of run details
+      loadRunDetails(selectedRunId, true);
+    };
+
     es.onmessage = (e) => {
       try {
         const parsed = JSON.parse(e.data);
-        const streamEv: StreamEvent = {
-          id: e.lastEventId ? Number(e.lastEventId) : Date.now(),
-          event: parsed.type || 'message',
-          data: parsed,
-        };
-        setEvents((prev) => [...prev, streamEv]);
+        handleStreamEvent(parsed.type || 'message', parsed, e.lastEventId);
       } catch {
         // raw data
       }
     };
 
-    // Listen to custom events
+    // Listen to all custom events emitted by domain & worker
     const customTypes = [
+      'transition_run',
+      'transition_phase',
+      'add_record',
       'commit_plan',
+      'change_issue',
+      'answer_question',
+      'revise_task',
+      'run_completed',
       'record_issue',
       'record_decision',
       'ask_question',
-      'transition_phase',
-      'run_completed',
     ];
 
     customTypes.forEach((type) => {
       es.addEventListener(type, (e: MessageEvent) => {
         try {
           const parsed = JSON.parse(e.data);
-          const streamEv: StreamEvent = {
-            id: e.lastEventId ? Number(e.lastEventId) : Date.now(),
-            event: type,
-            data: parsed,
-          };
-          setEvents((prev) => [...prev, streamEv]);
-
-          // Refresh details on state changes
-          loadRunDetails(selectedRunId);
+          handleStreamEvent(type, parsed, e.lastEventId);
         } catch {
           // parse error
         }
@@ -231,6 +324,58 @@ export const App: React.FC = () => {
       es.close();
       eventSourceRef.current = null;
     };
+  }, [selectedRunId]);
+
+  // Periodic background safety-net polling for the selected run
+  useEffect(() => {
+    if (!selectedRunId) return;
+
+    const isActive =
+      currentRun?.status === 'RUNNING' ||
+      currentRun?.status === 'WAITING_FOR_INPUT';
+
+    // Poll active runs every 2.5s, or disconnected SSE every 2s, or idle runs every 12s
+    const pollInterval = !isSseConnected ? 2000 : isActive ? 2500 : 12000;
+
+    const timer = setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        loadRunDetails(selectedRunId, true);
+      }
+    }, pollInterval);
+
+    return () => clearInterval(timer);
+  }, [selectedRunId, currentRun?.status, isSseConnected]);
+
+  // Periodic background auto-refresh for runs list (dashboard / header)
+  useEffect(() => {
+    const hasActiveRuns = runs.some(
+      (r) => r.status === 'RUNNING' || r.status === 'WAITING_FOR_INPUT'
+    );
+    // Poll runs list: 2.5s if active runs exist, otherwise 6s on dashboard or 15s inside a run
+    const intervalTime = hasActiveRuns ? 2500 : selectedRunId ? 15000 : 6000;
+
+    const timer = setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        loadRuns(undefined, true);
+      }
+    }, intervalTime);
+
+    return () => clearInterval(timer);
+  }, [selectedRunId, runs]);
+
+  // Immediately refresh on tab visibility / focus change
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        if (selectedRunId) {
+          loadRunDetails(selectedRunId, true);
+        } else {
+          loadRuns(undefined, true);
+        }
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
   }, [selectedRunId]);
 
   const handleSelectRun = (runId: string) => {
@@ -299,6 +444,37 @@ export const App: React.FC = () => {
       handleError(err, 'Failed to cancel run');
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleDeleteRun = async (runId: string) => {
+    if (!runId) return;
+    const target = runs.find((r) => r.run_id === runId);
+    const isActive = target
+      ? target.status === 'RUNNING' || target.status === 'WAITING_FOR_INPUT'
+      : currentRun
+        ? currentRun.status === 'RUNNING' || currentRun.status === 'WAITING_FOR_INPUT'
+        : false;
+    const confirmMsg = isActive ? t('dash_confirm_delete_active') : t('dash_confirm_delete');
+    if (!window.confirm(`${confirmMsg}\n${runId}`)) return;
+    try {
+      setIsDeletingId(runId);
+      if (eventSourceRef.current && selectedRunId === runId) {
+        eventSourceRef.current.close();
+        eventSourceRef.current = null;
+      }
+      await api.deleteRun(runId, true);
+      showFeedback(t('feedback_run_deleted'));
+      if (selectedRunId === runId) {
+        setSelectedRunId(null);
+        setCurrentRun(null);
+        updateUrlParam('');
+      }
+      await loadRuns();
+    } catch (err: unknown) {
+      handleError(err, 'Failed to delete run');
+    } finally {
+      setIsDeletingId(null);
     }
   };
 
@@ -500,11 +676,13 @@ export const App: React.FC = () => {
                 onAnswerQuestion={handleAnswerQuestion}
                 onResumeRun={handleResumeRun}
                 onCancelRun={handleCancelRun}
+                onDeleteRun={() => handleDeleteRun(selectedRunId ?? '')}
                 onValidate={handleValidate}
                 onFinalize={handleFinalize}
                 onExportMarkdown={() => handleExportMarkdown()}
                 onExportJson={() => handleExportJson()}
                 isProcessing={isLoading}
+                isDeleting={isDeletingId === selectedRunId}
                 actionMessage={actionMessage}
                 onViewLogs={() => setActiveTab('logs')}
               />
@@ -548,9 +726,11 @@ export const App: React.FC = () => {
         <DashboardHome
           runs={runs}
           onSelectRun={handleSelectRun}
+          onDeleteRun={handleDeleteRun}
           onOpenNewRun={() => setIsNewRunOpen(true)}
           onRefresh={() => loadRuns()}
           isLoading={isLoading}
+          isDeletingId={isDeletingId}
         />
       )}
 

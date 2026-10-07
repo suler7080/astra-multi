@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import threading
+import uuid
 
 from astra_multi.domain.commands import (
     AddRecord,
@@ -127,9 +128,13 @@ class WorkflowController:
     ) -> RunState:
         with self._lock:
             state = self.get_state()
+            existing_call_ids = {m.id for m in state.model_calls}
+            final_call_id = call_id
+            if final_call_id in existing_call_ids:
+                final_call_id = f"{call_id}-{uuid.uuid4().hex[:4]}"
             input_hash = hashlib.sha256(input_data.encode("utf-8")).hexdigest()
             call = ModelCall(
-                id=call_id,
+                id=final_call_id,
                 run_id=state.run.id,
                 role=role,
                 provider=provider,
@@ -143,7 +148,7 @@ class WorkflowController:
             cmd = AddRecord(
                 expected_revision=state.run.revision,
                 node="model-gateway",
-                logical_operation_id=f"model-call-{call_id}",
+                logical_operation_id=f"model-call-{final_call_id}",
                 actor=self.actor,
                 record=call,
             )
