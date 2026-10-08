@@ -12,7 +12,7 @@ Hệ thống đa tác nhân (Multi-Agent System) phân tích kiến trúc phần
 ![React](https://img.shields.io/badge/React-18.x-61DAFB?logo=react)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6?logo=typescript)
 ![Vite](https://img.shields.io/badge/Vite-5.x-646CFF?logo=vite)
-![Tests](https://img.shields.io/badge/tests-343%20passed%20%7C%2013%20skipped-success)
+![Tests](https://img.shields.io/badge/tests-407%20passed%20%7C%2013%20skipped-success)
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-lightgrey)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
@@ -37,8 +37,8 @@ Dữ liệu được lưu trữ bền vững (durable persistence) với SQLite 
 
 ## 3. Features
 
-- **Quy trình thảo luận 10 giai đoạn (10-Phase LangGraph Workflow)**:
-  `INTAKE` ➔ `SNAPSHOT` ➔ `INVESTIGATE` ➔ `INDEPENDENT_ANALYSIS` ➔ `PROPOSE` ➔ `REVIEW` ➔ `VERIFY` ➔ `REVISE` ➔ `QUALITY_GATE` ➔ `EXPORT`.
+- **Quy trình thảo luận 11 giai đoạn (11-Phase LangGraph Workflow)**:
+  `INTAKE` ➔ `SNAPSHOT` ➔ `INVESTIGATE` ➔ `INDEPENDENT_ANALYSIS` ➔ `PROPOSE` ➔ `REVIEW` ➔ `VERIFY` ➔ `REVISE` ➔ `SEMANTIC_REVIEW` ➔ `QUALITY_GATE` ➔ `EXPORT`.
 - **Durable Persistence & Fenced Leases**:
   Lưu trữ trạng thái chuẩn tắc (canonical state) trên SQLite với chế độ WAL và `PRAGMA synchronous=FULL`; kiểm soát tranh chấp bằng lease token/epoch fencing, ngăn ngừa xung đột phiên bản và phân tán ghi.
 - **Model Gateway đa nhà cung cấp**:
@@ -48,7 +48,7 @@ Dữ liệu được lưu trữ bền vững (durable persistence) với SQLite 
 - **Cổng chất lượng P4 (Quality Gates & Parity Exporter)**:
   Kiểm tra tĩnh 100% đồ thị phụ thuộc (DAG), mức độ bao phủ yêu cầu (requirements coverage), giải quyết toàn bộ blocking issues, đánh giá ngữ nghĩa (semantic review) và xuất bản đồng nhất định dạng JSON Schema v1 cùng Markdown (chuẩn `PLAN_TEMPLATE.md`).
 - **Giao diện Web cục bộ (Local Web UI) & Server-Sent Events (SSE)**:
-  Ứng dụng Single-Page Application (React + TypeScript + Vite) hỗ trợ luồng sự kiện real-time, bảng theo dõi tiến trình 10 phase, form tương tác giải đáp thắc mắc của tác nhân (Human-in-the-loop), bảng tra cứu Issues, Decisions, Evidence và Plan Diff.
+  Ứng dụng Single-Page Application (React + TypeScript + Vite) hỗ trợ luồng sự kiện real-time, bảng theo dõi tiến trình 11 phase, form tương tác giải đáp thắc mắc của tác nhân (Human-in-the-loop), bảng tra cứu Issues, Decisions, Evidence và Plan Diff.
 - **Giao diện dòng lệnh toàn diện (CLI Lifecycle)**:
   Cung cấp công cụ CLI hoàn chỉnh hỗ trợ `create`, `status`, `answer`, `cancel`, `artifacts`, `validate`, `finalize`, và `serve`.
 
@@ -109,58 +109,132 @@ Dữ liệu được lưu trữ bền vững (durable persistence) với SQLite 
 
 ## 6. Usage
 
-### 1. Khởi chạy Ứng dụng Web & API (Khuyên dùng)
-FastAPI sẽ tự động phục vụ cả API endpoints lẫn giao diện Web UI được đóng gói sẵn:
+### 6.1. Khởi chạy Ứng dụng Web & API Dashboard (Khuyên dùng)
+FastAPI tự động phục vụ hệ thống API endpoints, Server-Sent Events (SSE) và giao diện Web UI Single-Page Application (SPA):
 ```powershell
 cd backend
-.venv\Scripts\python -m astra_multi.cli serve --host 127.0.0.1 --port 8000
+.\.venv\Scripts\python -m astra_multi.cli serve --host 127.0.0.1 --port 8000
 ```
 Truy cập trình duyệt tại địa chỉ: **`http://127.0.0.1:8000`**
 
-### 2. Phát triển Frontend với Hot-Reload
-Nếu bạn đang chỉnh sửa mã nguồn giao diện:
-- **Terminal 1 (Backend API)**:
+- **Dashboard & Quản lý Phiên (Sessions):** Tạo phiên thiết kế mới, xem danh sách các phiên chạy, trạng thái hoàn thành và tiến độ trực quan.
+- **Theo dõi Tiến trình Real-Time (SSE PhaseTracker):** Tự động đồng bộ hóa luồng sự kiện qua 11 giai đoạn (`INTAKE` ➔ `EXPORT`) không cần tải lại trang.
+- **Xác thực Admin & Cấu hình LLM Providers:**
+  - Nhấp vào biểu tượng **Settings** trên thanh tiêu đề (Header).
+  - Lần đầu sử dụng: Thiết lập mật khẩu quản trị viên (Admin Password).
+  - Cấu hình khóa API, endpoint và model cho **OpenAI**, **Google Gemini**, **Anthropic**, hoặc **xKiro** (hỗ trợ mô hình mã nguồn mở miễn phí như `xkiro/llama-3.1-70b-instruct`).
+- **Chuyển đổi Đa ngôn ngữ (i18n):** Nút chuyển đổi nhanh **Tiếng Việt / English** ngay trên Header.
+- **Trình xem Nhật ký Thực thi (Execution Log Viewer):** Theo dõi chi tiết log vận hành, sự kiện vòng lặp, cảnh báo và lỗi hệ thống cho từng phiên chạy.
+
+### 6.2. Phát triển Frontend với Hot-Reload (Dev Mode)
+Nếu bạn đang chỉnh sửa hoặc tùy biến mã nguồn giao diện:
+- **Terminal 1 (Backend API & SSE Server):**
   ```powershell
   cd backend
-  .venv\Scripts\python -m astra_multi.cli serve --port 8000
+  .\.venv\Scripts\python -m astra_multi.cli serve --port 8000
   ```
-- **Terminal 2 (Vite Dev Server)**:
+- **Terminal 2 (Vite Dev Server):**
   ```powershell
   cd frontend
   npm run dev
   ```
-  Truy cập giao diện tại: **`http://localhost:5173`** (đã cấu hình sẵn proxy `/api` về cổng `8000`).
+  Truy cập giao diện tại: **`http://localhost:5173`** (Vite tự động proxy các yêu cầu `/api` về cổng `8000`).
 
-### 3. Thao tác qua Giao diện Dòng lệnh (CLI)
+### 6.3. Thao tác Toàn diện qua Giao diện Dòng lệnh (CLI)
+Astra Multi cung cấp bộ lệnh CLI hoàn chỉnh phục vụ quản trị và tự động hóa toàn bộ vòng đời phiên thiết kế:
 
-- **Tạo một run thiết kế mới**:
+- **1. Tạo một phiên thiết kế mới:**
   ```powershell
-  .venv\Scripts\python -m astra_multi.cli create `
+  cd backend
+  .\.venv\Scripts\python -m astra_multi.cli create `
     --goal "Thiết kế Payment Gateway chịu lỗi cao" `
     --requirements "Hỗ trợ 10k TPS" "Đảm bảo tính nhất quán dữ liệu giao dịch"
   ```
+  *(Lệnh sẽ trả về mã định danh `RUN-xxxxxx` của phiên vừa tạo).*
 
-- **Kiểm tra trạng thái run**:
+- **2. Kiểm tra trạng thái và tóm tắt tiến trình:**
   ```powershell
-  .venv\Scripts\python -m astra_multi.cli status RUN-xxxxxx
+  .\.venv\Scripts\python -m astra_multi.cli status RUN-xxxxxx
   ```
 
-- **Trả lời câu hỏi từ tác nhân (Human Input)**:
+- **3. Xem nhật ký thực thi (Execution Logs):**
   ```powershell
-  .venv\Scripts\python -m astra_multi.cli answer RUN-xxxxxx Q-001 --answer "Sử dụng kiến trúc Event Sourcing với PostgreSQL"
+  # Xem toàn bộ nhật ký sự kiện
+  .\.venv\Scripts\python -m astra_multi.cli logs RUN-xxxxxx
+
+  # Lọc theo cấp độ cảnh báo hoặc lỗi
+  .\.venv\Scripts\python -m astra_multi.cli logs RUN-xxxxxx --level ERROR
+
+  # Xuất nhật ký dưới dạng raw JSON
+  .\.venv\Scripts\python -m astra_multi.cli logs RUN-xxxxxx --json
   ```
 
-- **Kiểm tra Quality Gate và Xuất bản kế hoạch**:
+- **4. Trả lời câu hỏi tương tác từ tác nhân (Human-in-the-Loop):**
   ```powershell
-  # Kiểm tra tính toàn vẹn cấu trúc
-  .venv\Scripts\python -m astra_multi.cli validate RUN-xxxxxx
-
-  # Đánh giá và cấp trạng thái FINAL
-  .venv\Scripts\python -m astra_multi.cli finalize RUN-xxxxxx
-
-  # Xuất kế hoạch sang Markdown
-  .venv\Scripts\python -m astra_multi.cli artifacts RUN-xxxxxx --format markdown
+  .\.venv\Scripts\python -m astra_multi.cli answer RUN-xxxxxx Q-001 `
+    --answer "Sử dụng kiến trúc Event Sourcing với PostgreSQL"
   ```
+
+- **5. Thẩm định chất lượng cấu trúc (Quality Gate Validation):**
+  ```powershell
+  .\.venv\Scripts\python -m astra_multi.cli validate RUN-xxxxxx
+  ```
+
+- **6. Đánh giá chất lượng và chứng nhận hoàn tất (Finalize):**
+  ```powershell
+  .\.venv\Scripts\python -m astra_multi.cli finalize RUN-xxxxxx
+  ```
+
+- **7. Xuất bản Artifacts kế hoạch (Markdown / JSON):**
+  ```powershell
+  # Xuất kế hoạch kiến trúc chuẩn Markdown (chuẩn PLAN_TEMPLATE.md)
+  .\.venv\Scripts\python -m astra_multi.cli artifacts RUN-xxxxxx --format markdown
+
+  # Xuất toàn bộ cấu trúc trạng thái dưới dạng JSON
+  .\.venv\Scripts\python -m astra_multi.cli artifacts RUN-xxxxxx --format json
+  ```
+
+- **8. Hủy hoặc xóa phiên chạy:**
+  ```powershell
+  # Hủy phiên đang chạy
+  .\.venv\Scripts\python -m astra_multi.cli cancel RUN-xxxxxx --reason "Thay đổi phạm vi yêu cầu"
+
+  # Xóa phiên vĩnh viễn (kèm dọn dẹp artifacts)
+  .\.venv\Scripts\python -m astra_multi.cli delete RUN-xxxxxx --force
+  ```
+
+### 6.4. Chạy Thử nghiệm Mô phỏng và Live Run với LLM Thật
+
+- **Chạy Thử nghiệm Live Run có Trần Ngân sách Cứng (Hard Budget Cap):**
+  Để bảo đảm an toàn chi phí, việc gọi LLM thực tế bắt buộc phải có cờ `ASTRA_LIVE_LLM=1` cùng API key hợp lệ:
+  ```powershell
+  # Thiết lập môi trường và khóa API
+  $env:ASTRA_LIVE_LLM="1"
+  $env:OPENAI_API_KEY="sk-..."  # Hoặc GOOGLE_API_KEY, XKIRO_API_KEY
+  $env:ASTRA_MULTI_PROVIDER="openai"
+
+  # Chạy kịch bản Minesweeper (mặc định giới hạn ngân sách cứng 1.00 USD)
+  .\backend\.venv\Scripts\python scripts/live_minesweeper_run.py --budget-cap 1.00
+  ```
+
+- **Đo lường Token & Kiểm soát Phình to Prompt (Prompt Bloat):**
+  Đo đạc số lượng token thực tế của từng tác nhân qua 5 vòng lặp:
+  ```powershell
+  .\backend\.venv\Scripts\python scripts/measure_prompt_bloat.py
+  ```
+
+- **Chạy Bộ Đánh giá Đa tác nhân (Multi-Agent Evaluations):**
+  ```powershell
+  .\backend\.venv\Scripts\python evaluations/multi_agent_runner.py
+  ```
+
+### 6.5. Chạy Toàn bộ Bộ Kiểm thử (Test Suite)
+Dự án duy trì tỷ lệ kiểm thử nghiêm ngặt trên môi trường native Windows:
+```powershell
+cd backend
+.\.venv\Scripts\python -m pytest tests -v
+```
+*(Kết quả hiện tại: 407 passed, 13 skipped, 0 failed).*
 
 ---
 

@@ -28,6 +28,7 @@ export const translations = {
     phase_review: 'Review',
     phase_verify: 'Verify',
     phase_revise: 'Revise',
+    phase_semantic_review: 'Semantic Review',
     phase_quality_gate: 'Quality Gate',
     phase_export: 'Export',
 
@@ -229,6 +230,7 @@ export const translations = {
     phase_review: 'Phản biện',
     phase_verify: 'Kiểm chứng',
     phase_revise: 'Hoàn thiện',
+    phase_semantic_review: 'Đánh giá ngữ nghĩa',
     phase_quality_gate: 'Cổng chất lượng',
     phase_export: 'Xuất kết quả',
 

@@ -1,6 +1,6 @@
 """Astra Multi multi-agent runner for P6.2 evaluation benchmark.
 
-Runs Astra Multi's 10-phase collaborative workflow (Planner -> Reviewer -> Synthesizer -> Quality Gate),
+Runs Astra Multi's 11-phase collaborative workflow (Planner -> Reviewer -> Synthesizer -> Quality Gate),
 incorporating independent analysis, issue critique, and structured resolution.
 """
 
@@ -24,13 +24,14 @@ class MultiAgentRunner:
         category = task["category"]
         requirements = task["requirements"]
 
-        # Multi-agent workflow involves 10 phases and multiple model passes
+        # Multi-agent workflow involves 11 phases and multiple model passes
         # Phase 1: Intake & Snapshot
         # Phase 2: Independent Analysis
         # Phase 3: Propose (Planner)
         # Phase 4: Review (Reviewer creates issues)
-        # Phase 5: Revise (Synthesizer resolves issues, updates plan)
-        # Phase 6: Quality Gate & Export
+        # Phase 5: Revise (Synthesizer updates plan)
+        # Phase 6: Semantic Review (Reviewer resolves issues)
+        # Phase 7: Quality Gate & Export
         latency = 4.5 + (len(requirements) * 0.6)
         tokens_used = min(budget_cap_tokens, 4500 + (len(requirements) * 680))
         cost_usd = (tokens_used / 1000) * 0.002

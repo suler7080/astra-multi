@@ -31,7 +31,7 @@ Ngày khởi tạo: 01/10/2026.
 | P2 | P2.1, P2.2, P2.3, P2.4, P2.5 | DONE | Linux Docker và Windows native đều đạt. Xem docs/spikes/P2_PHASE_REPORT.md |
 | P3 | P3.1 | DONE | Model gateway với capability registry, retry, budget control, output repair, fake providers, ADR-004. Xem docs/adr/ADR-004-model-gateway.md |
 | P3 | P3.2 | DONE | Role prompts & schemas cho Planner/Reviewer/Synthesizer, context isolation |
-| P3 | P3.3 | DONE | LangGraph discussion workflow (10 phases), domain persistence, ADR-003 |
+| P3 | P3.3 | DONE | LangGraph discussion workflow (11 phases), domain persistence, ADR-003, ADR-007 |
 | P3 | P3.4 | DONE | Budget service (atomic reservations), stagnation detector, typed stop reasons |
 | P3 | P3.5 | DONE | CLI lifecycle (create, status, answer, cancel, artifacts), recovery |
 | P4 | P4.1 | DONE | Structural quality validator: DAG, coverage, reference integrity |
@@ -41,7 +41,7 @@ Ngày khởi tạo: 01/10/2026.
 | P5 | P5.1 | DONE | FastAPI commands và queries, idempotency, 409 conflict, error envelope |
 | P5 | P5.2 | DONE | RunWorker background lifecycle, SSE streaming, Last-Event-ID replay, disconnect safety |
 | P5 | P5.3 | DONE | React/TypeScript Web UI: New run form, overview, pending questions, keyboard access |
-| P5 | P5.4 | DONE | 10-phase tracker, discussion timeline, issues table, decisions log, evidence ledger, plan revisions |
+| P5 | P5.4 | DONE | 11-phase tracker, discussion timeline, issues table, decisions log, evidence ledger, plan revisions |
 | P5 | P5.5 | DONE | E2E setup, CLI `astra-multi serve`, FastAPI mount frontend/dist, 334 tests passed |
 | P6 | P6.1 | DONE | Fault injection matrix & invariants: budget race, zero final blocker, runner unavailable, hash tamper, SSE replay, restore |
 | P6 | P6.2 | DONE | Evaluation harness: 12-task dataset, baseline runner, multi-agent runner, 0-4 rubric scoring, anonymized comparison |
@@ -194,8 +194,8 @@ uv build --python .venv/bin/python
   - Kiểm thử: `tests/unit/test_agents.py` (6 passed).
 - **P3.3 (Discussion workflow & domain integration):**
   - Đã triển khai `backend/src/astra_multi/orchestration/graph.py`, `controller.py`.
-  - Luồng 10 pha: `INTAKE` -> `SNAPSHOT` -> `INVESTIGATE` -> `INDEPENDENT_ANALYSIS` -> `PROPOSE` -> `REVIEW` -> `VERIFY` -> `REVISE` -> `QUALITY_GATE` -> `EXPORT`.
-  - Toàn bộ thay đổi commit qua P1 commands (`CommitPlan`, `AddRecord`, `TransitionRun`). Bàn giao ADR-003 tại `docs/adr/ADR-003-discussion-protocol.md`.
+  - Luồng 11 pha (cập nhật theo ADR-007): `INTAKE` -> `SNAPSHOT` -> `INVESTIGATE` -> `INDEPENDENT_ANALYSIS` -> `PROPOSE` -> `REVIEW` -> `VERIFY` -> `REVISE` -> `SEMANTIC_REVIEW` -> `QUALITY_GATE` -> `EXPORT`.
+  - Toàn bộ thay đổi commit qua P1 commands (`CommitPlan`, `AddRecord`, `TransitionRun`). Bàn giao ADR-003 tại `docs/adr/ADR-003-discussion-protocol.md` và ADR-007 tại `docs/adr/00X-semantic-review-phase.md`.
   - Kiểm thử: `tests/integration/test_orchestration_workflow.py` (1 passed).
 - **P3.4 (Budget & termination policies):**
   - Đã triển khai `backend/src/astra_multi/orchestration/budget.py` (`BudgetService` với atomic reservation và settlement) và `termination.py` (`StagnationDetector`, typed `StopReason`).
@@ -214,12 +214,12 @@ uv build --python .venv/bin/python
   - Idempotency key tracking, 409 conflict khi thay đổi payload hoặc expected_revision sai, error envelope đồng nhất.
 - **P5.2 (Worker Lifecycle & SSE Streaming):**
   - Đã triển khai `backend/src/astra_multi/api/worker.py`.
-  - Quản lý lifecycle run qua thread pool độc lập, claim lease và chạy LangGraph 10-phase graph.
+  - Quản lý lifecycle run qua thread pool độc lập, claim lease và chạy LangGraph 11-phase graph.
   - Endpoint `GET /api/runs/{id}/events` stream Server-Sent Events với replay từ `Last-Event-ID` / `last_event_id`, heartbeat và emit `run_completed`.
 - **P5.3–P5.4 (Local Web UI):**
   - Xây dựng ứng dụng hoàn chỉnh React 18 + TypeScript + Vite trong `frontend/`.
   - Typed API client (`frontend/src/api.ts`).
-  - Giao diện: New Run modal (dynamic requirements, mode, budget limits), Phase tracker 10 phases, Overview với pending questions answering và resume, Discussion live timeline với role badges, Issues table với severity filter, Decisions log, Evidence ledger, Plan viewer với revision switcher và export JSON/Markdown.
+  - Giao diện: New Run modal (dynamic requirements, mode, budget limits), Phase tracker 11 phases, Overview với pending questions answering và resume, Discussion live timeline với role badges, Issues table với severity filter, Decisions log, Evidence ledger, Plan viewer với revision switcher và export JSON/Markdown.
   - Phím tắt và accessibility, URL query syncing (`?run=RUN_ID`).
 - **P5.5 (End-to-End Walkthrough & Setup):**
   - Tích hợp CLI subcommand `astra-multi serve --host 127.0.0.1 --port 8000`.

@@ -204,7 +204,10 @@ def format_independent_analysis_prompt(bundle: ContextBundle) -> list[dict[str, 
 
 def format_propose_prompt(bundle: ContextBundle, analyses: list[AnalysisOutput]) -> list[dict[str, str]]:
     """Prompt for Planner in PROPOSE phase."""
-    analyses_summary = [a.model_dump(mode="json") for a in analyses]
+    if '"plan":' in bundle.content:
+        analyses_summary = [{"role": a.role, "findings": a.findings} for a in analyses]
+    else:
+        analyses_summary = [a.model_dump(mode="json") for a in analyses]
     system_message = (
         "You are the PLANNER in Astra Multi.\n"
         f"Prompt Version: {PROMPT_VERSION_V1}\n"
@@ -217,7 +220,7 @@ def format_propose_prompt(bundle: ContextBundle, analyses: list[AnalysisOutput])
     )
     user_message = (
         f"Context:\n{bundle.content}\n\n"
-        f"Independent Analyses:\n{json.dumps(analyses_summary, ensure_ascii=False, indent=2)}\n\n"
+        f"Independent Analyses:\n{json.dumps(analyses_summary, ensure_ascii=False, separators=(',', ': '))}\n\n"
         "Please generate your proposal."
     )
     return [
@@ -244,10 +247,10 @@ def format_review_prompt(
     )
     user_message = (
         f"Context:\n{bundle.content}\n\n"
-        f"Proposal under review:\n{json.dumps(proposal.model_dump(mode='json'), ensure_ascii=False, indent=2)}\n\n"
+        f"Proposal under review:\n{json.dumps(proposal.model_dump(mode='json'), ensure_ascii=False, separators=(',', ': '))}\n\n"
     )
-    if current_plan:
-        user_message += f"Current Plan:\n{json.dumps(current_plan, ensure_ascii=False, indent=2)}\n\n"
+    if current_plan and '"plan":' not in bundle.content:
+        user_message += f"Current Plan:\n{json.dumps(current_plan, ensure_ascii=False, separators=(',', ': '))}\n\n"
     user_message += "Please provide your review and issues."
     return [
         {"role": "system", "content": system_message},
@@ -275,11 +278,11 @@ def format_synthesize_prompt(
     )
     user_message = (
         f"Context:\n{bundle.content}\n\n"
-        f"Proposal:\n{json.dumps(proposal.model_dump(mode='json'), ensure_ascii=False, indent=2)}\n\n"
-        f"Review Issues:\n{json.dumps(review.model_dump(mode='json'), ensure_ascii=False, indent=2)}\n\n"
+        f"Proposal:\n{json.dumps(proposal.model_dump(mode='json'), ensure_ascii=False, separators=(',', ': '))}\n\n"
+        f"Review Issues:\n{json.dumps(review.model_dump(mode='json'), ensure_ascii=False, separators=(',', ': '))}\n\n"
     )
-    if current_plan:
-        user_message += f"Current Plan Baseline:\n{json.dumps(current_plan, ensure_ascii=False, indent=2)}\n\n"
+    if current_plan and '"plan":' not in bundle.content:
+        user_message += f"Current Plan Baseline:\n{json.dumps(current_plan, ensure_ascii=False, separators=(',', ': '))}\n\n"
     user_message += "Please produce the synthesized revision."
     return [
         {"role": "system", "content": system_message},
@@ -305,12 +308,14 @@ def format_semantic_review_prompt(
     )
     user_message = (
         f"Context:\n{bundle.content}\n\n"
-        f"Current Plan Revision:\n{json.dumps(current_plan, ensure_ascii=False, indent=2)}\n\n"
-        f"Open Issues to evaluate:\n{json.dumps(open_issues, ensure_ascii=False, indent=2)}\n\n"
-        "Please provide your review, new issues (if any), and resolutions for addressed issues."
+        f"Current Plan Revision to Evaluate:\n{json.dumps(current_plan, ensure_ascii=False, separators=(',', ': '))}\n\n"
     )
+    if open_issues and '"open_issues":' not in bundle.content:
+        user_message += f"Open Issues to evaluate:\n{json.dumps(open_issues, ensure_ascii=False, separators=(',', ': '))}\n\n"
+    user_message += "Please provide your review, new issues (if any), and resolutions for addressed issues."
     return [
         {"role": "system", "content": system_message},
         {"role": "user", "content": user_message},
     ]
+
 

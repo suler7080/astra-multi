@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 from typing import Annotated, Any, Protocol
 
 from pydantic import Field
@@ -11,9 +12,11 @@ from astra_multi.domain.models import (
     Contract,
     Evidence,
     IssueStatus,
+    ModelCall,
     RunPhase,
     RunState,
 )
+
 from astra_multi.domain.repositories import ArtifactStore
 
 logger = logging.getLogger(__name__)
@@ -180,14 +183,83 @@ def _minimal_plan(plan: dict[str, Any], max_text: int = 100) -> dict[str, Any]:
     }
 
 
+def _partition_model_calls(
+    calls: list[ModelCall],
+    current_round: int,
+    recent_full_rounds: int,
+) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
+    if not calls:
+        return [], None
+    cutoff_round = max(0, current_round - recent_full_rounds + 1)
+    recent: list[dict[str, Any]] = []
+    older: list[ModelCall] = []
+
+    for call in calls:
+        match = re.search(r"-(\d+)$", call.id)
+        call_round = int(match.group(1)) if match else 0
+        if call_round >= cutoff_round:
+            recent.append({
+                "call": call.id,
+                "role": call.role,
+                "tokens": call.usage.get("total_tokens", 0) if call.usage else 0,
+            })
+        else:
+            older.append(call)
+
+    if not older:
+        return recent, None
+
+    by_role: dict[str, int] = {}
+    total_tokens = 0
+    for c in older:
+        by_role[c.role] = by_role.get(c.role, 0) + 1
+        total_tokens += c.usage.get("total_tokens", 0) if c.usage else 0
+
+    older_summary = {
+        "call_count": len(older),
+        "by_role": by_role,
+        "total_tokens": total_tokens,
+    }
+    return recent, older_summary
+
+
+def _partition_events(
+    events: list[str] | None,
+    current_round: int,
+    recent_full_rounds: int,
+) -> tuple[list[str], dict[str, Any] | None]:
+    if not events:
+        return [], None
+    max_recent_events = max(5, recent_full_rounds * 8)
+    if len(events) <= max_recent_events:
+        return list(events), None
+
+    older = events[:-max_recent_events]
+    recent = list(events[-max_recent_events:])
+
+    milestones = [e for e in older if "[GATE]" in e or "[EXPORT]" in e or "[INTAKE]" in e]
+    older_summary = {
+        "total_prior_events": len(older),
+        "key_milestones": milestones[-5:],
+    }
+    return recent, older_summary
+
+
 class ContextBuilder:
     def __init__(self, artifacts: ArtifactStore, tokenizer: Tokenizer | None = None) -> None:
         self.artifacts = artifacts
         self.tokenizer = tokenizer if tokenizer is not None else ByteTokenizer()
 
     def build_context(
-        self, run: RunState, role: str, phase: RunPhase,
-        refs: list[str], limits: ContextLimits,
+        self,
+        run: RunState,
+        role: str,
+        phase: RunPhase,
+        refs: list[str],
+        limits: ContextLimits,
+        round_num: int = 0,
+        events: list[str] | None = None,
+        recent_full_rounds: int | None = None,
     ) -> ContextBundle:
         run = RunState.model_validate(run.model_dump())
         by_id = {item.id: item for item in run.evidence}
@@ -217,18 +289,67 @@ class ContextBuilder:
              "status": by_id[key].status.value} for key in required
         ]
         full_plan: dict[str, Any] | None = None
+        full_proposal: dict[str, Any] | None = None
         full_issues: list[dict[str, Any]] = []
+        closed_resolutions: list[dict[str, Any]] = []
+        recent_calls: list[dict[str, Any]] = []
+        older_calls_summary: dict[str, Any] | None = None
+        recent_events: list[str] = []
+        older_events_summary: dict[str, Any] | None = None
+
         if phase != RunPhase.INDEPENDENT_ANALYSIS:
             full_plan = run.plan.model_dump(mode="json") if run.plan else None
+            full_proposal = run.proposals[-1].model_dump(mode="json") if run.proposals else None
             full_issues = [
-                issue.model_dump(mode="json") for issue in run.issues
+                {
+                    "id": issue.id,
+                    "severity": issue.severity.value,
+                    "claim": issue.claim,
+                    "impact": issue.impact,
+                    "suggested_resolution": issue.suggested_resolution,
+                    "requirement_ids": issue.requirement_ids,
+                    "evidence_ids": issue.evidence_ids,
+                    "verification_request": issue.verification_request,
+                }
+                for issue in run.issues
                 if issue.status not in {IssueStatus.RESOLVED, IssueStatus.REJECTED, IssueStatus.DUPLICATE}
             ]
+
             # Blocking issues first so truncation keeps the most important ones.
             full_issues.sort(key=lambda d: (0 if d.get("severity") == "blocking" else 1, str(d.get("id"))))
 
+            for issue in run.issues:
+                if issue.status in {IssueStatus.RESOLVED, IssueStatus.REJECTED, IssueStatus.DUPLICATE}:
+                    res_info = None
+                    if issue.resolution:
+                        res_info = {
+                            "text": issue.resolution.text,
+                            "review_result": issue.resolution.review_result,
+                            "review_note": issue.resolution.review_note,
+                        }
+                    closed_resolutions.append({
+                        "issue_id": issue.id,
+                        "status": issue.status.value,
+                        "claim": issue.claim,
+                        "resolution": res_info,
+                    })
+
+            effective_full_rounds = recent_full_rounds
+            if effective_full_rounds is None:
+                try:
+                    effective_full_rounds = int(os.environ.get("ASTRA_CONTEXT_FULL_ROUNDS", "1"))
+                except ValueError:
+                    effective_full_rounds = 1
+
+            recent_calls, older_calls_summary = _partition_model_calls(
+                run.model_calls, round_num, effective_full_rounds
+            )
+            recent_events, older_events_summary = _partition_events(
+                events, round_num, effective_full_rounds
+            )
+
         def _dump(baseline: dict[str, Any]) -> str:
-            return json.dumps(baseline, ensure_ascii=False, sort_keys=True)
+            return json.dumps(baseline, ensure_ascii=False, sort_keys=True, separators=(',', ':'))
 
         def _make_baseline(
             repo_map: list[str],
@@ -244,7 +365,26 @@ class ContextBuilder:
             }
             if phase != RunPhase.INDEPENDENT_ANALYSIS:
                 baseline["plan"] = plan
+                baseline["proposal"] = (
+                    {
+                        "id": full_proposal.get("id"),
+                        "approach": full_proposal.get("approach"),
+                        "requirement_coverage": full_proposal.get("requirement_coverage"),
+                    }
+                    if full_proposal is not None
+                    else None
+                )
                 baseline["open_issues"] = issues if issues is not None else []
+                if closed_resolutions:
+                    baseline["closed_resolutions"] = closed_resolutions
+                if recent_calls:
+                    baseline["recent_model_calls"] = recent_calls
+                if older_calls_summary:
+                    baseline["prior_model_calls_summary"] = older_calls_summary
+                if recent_events:
+                    baseline["recent_events"] = recent_events
+                if older_events_summary:
+                    baseline["prior_events_summary"] = older_events_summary
             if notes:
                 baseline["baseline_notes"] = notes
             return baseline
@@ -258,6 +398,7 @@ class ContextBuilder:
         while repo_map and self.tokenizer.count(content) > limits.max_tokens:
             repo_map.pop()
             content = _dump(_make_baseline(repo_map, plan_view, issues_view, baseline_notes))
+
 
         # Level 1: summarize long text fields in plan/issues (keep DAG + ids).
         if self.tokenizer.count(content) > limits.max_tokens and phase != RunPhase.INDEPENDENT_ANALYSIS:

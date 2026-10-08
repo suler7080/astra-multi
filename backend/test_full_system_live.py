@@ -5,7 +5,7 @@ Verifies:
 2. Direct text and structured JSON schema generation.
 3. ModelGateway with attempt tracing and output repair.
 4. Multi-agent role outputs (Planner analysis, Reviewer analysis, Planner proposal, Reviewer critique, Synthesizer revision).
-5. 10-Phase LangGraph workflow integration with domain persistence (SQLite WAL).
+5. 11-Phase LangGraph workflow integration with domain persistence (SQLite WAL).
 6. Quality Gate static DAG validation and requirement coverage.
 7. Plan Exporter parity (JSON v1 and Markdown conforming to PLAN_TEMPLATE.md).
 8. Execution of plan validation steps in Windows sandbox runner.

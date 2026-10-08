@@ -77,8 +77,8 @@ Hệ thống Astra Multi bao gồm 7 cụm tính năng chính trải dài qua c�
 - **Tác nhân Xác minh (Verifier):** Kích hoạt các bài kiểm thử thực thi trong môi trường sandbox để xác minh tính đúng đắn của các giả định kỹ thuật.
 - **Context Isolation & Contract Adherence:** Giao thức đảm bảo trong pha `INDEPENDENT_ANALYSIS`, tác nhân không nhìn thấy kết quả của nhau để loại bỏ thiên kiến hùa theo (groupthink). Toàn bộ schema đầu ra được bảo vệ bằng Pydantic `extra="forbid"`, ngăn chặn LLM tự ý can thiệp vào quyền định tuyến hoặc ngân sách.
 
-### 2.2. Máy Trạng thái Quy trình 10 Giai đoạn (10-Phase LangGraph State Machine - P3.3)
-Quy trình thảo luận được mô hình hóa dưới dạng đồ thị trạng thái hữu hạn trên LangGraph 0.6+, trải qua 10 giai đoạn tuần tự:
+### 2.2. Máy Trạng thái Quy trình 11 Giai đoạn (11-Phase LangGraph State Machine - P3.3 & ADR-007)
+Quy trình thảo luận được mô hình hóa dưới dạng đồ thị trạng thái hữu hạn trên LangGraph 0.6+, trải qua 11 giai đoạn tuần tự:
 1. `INTAKE`: Tiếp nhận mục tiêu, danh sách yêu cầu (`TaskSpec`), chế độ chạy (`repo` hoặc `greenfield`) và ngân sách tối đa.
 2. `SNAPSHOT`: Tạo ảnh chụp trạng thái mã nguồn cục bộ, tính mã băm SHA-256 từng tệp, loại bỏ thư mục rác (`.git`, `node_modules`, `venv`).
 3. `INVESTIGATE`: Quét và thu thập các bằng chứng cấu trúc từ codebase (file manifests, cấu hình, mã nguồn hiện tại).
@@ -87,8 +87,9 @@ Quy trình thảo luận được mô hình hóa dưới dạng đồ thị tr�
 6. `REVIEW`: Reviewer thẩm tra đề xuất, tạo các vấn đề (`Issue`) phân loại theo mức độ nghiêm trọng.
 7. `VERIFY`: Verifier chạy các lệnh kiểm chứng sandbox để xác minh các tuyên bố còn nghi vấn.
 8. `REVISE`: Synthesizer dung hòa phản hồi, tạo phiên bản kế hoạch mới (`PlanRevision`), gắn các quyết định kiến trúc (`Decision`).
-9. `QUALITY_GATE`: Bộ kiểm tra tĩnh thẩm tra 100% DAG các bước, độ bao phủ yêu cầu và tình trạng giải quyết các blocking issues.
-10. `EXPORT`: Xuất bản tài liệu kiến trúc chính thức ở cả hai định dạng JSON v1 và Markdown.
+9. `SEMANTIC_REVIEW`: Reviewer độc lập (P4) thẩm tra ngữ nghĩa bản PlanRevision mới, đóng các blocking issues qua `ChangeIssue` (`RESOLVED`).
+10. `QUALITY_GATE`: Bộ kiểm tra tĩnh thẩm tra 100% DAG các bước, độ bao phủ yêu cầu và tình trạng giải quyết các blocking issues.
+11. `EXPORT`: Xuất bản tài liệu kiến trúc chính thức ở cả hai định dạng JSON v1 và Markdown.
 
 ### 2.3. Cổng Tương tác Người dùng (Human-in-the-Loop Interruption)
 - Khi phát sinh các câu hỏi kiến trúc mang tính định hướng nghiệp vụ (ví dụ: *"Lựa chọn lưu trữ ScyllaDB hay PostgreSQL?"*), tác nhân tạo đối tượng `Question` có thuộc tính `blocking=True`.
@@ -130,7 +131,7 @@ Quy trình thảo luận được mô hình hóa dưới dạng đồ thị tr�
 - Tự động đóng gói và phục vụ ứng dụng React SPA từ thư mục `frontend/dist` tại địa chỉ gốc `/`.
 
 ### 2.9. Giao diện Người dùng Đồ họa Web Cục bộ (Local Web UI - P5.3 - P5.4)
-- **Phase Tracker:** Trực quan hóa tiến độ qua 10 giai đoạn bằng thanh tiến trình thời gian thực.
+- **Phase Tracker:** Trực quan hóa tiến độ qua 11 giai đoạn bằng thanh tiến trình thời gian thực.
 - **Discussion Timeline:** Hiển thị luồng trao đổi tranh luận giữa các tác nhân có định danh màu sắc và vai trò rõ ràng.
 - **Issues Table:** Bảng quản lý vấn đề với bộ lọc theo mức độ nghiêm trọng (Blocking, Warning, Info) và trạng thái (Open, Resolved).
 - **Decisions Log:** Bảng ghi nhận các quyết định kiến trúc kèm lý do lựa chọn và các giải pháp thay thế bị loại bỏ.
@@ -179,7 +180,7 @@ astra-multi/
 │   │   │   ├── fake.py                    # Gateway giả lập deterministic cho kiểm thử
 │   │   │   └── __init__.py
 │   │   ├── orchestration/                 # ĐIỀU PHỐI QUY TRÌNH LANGGRAPH (P3.3)
-│   │   │   ├── graph.py                   # Xây dựng StateGraph 10 giai đoạn trên LangGraph
+│   │   │   ├── graph.py                   # Xây dựng StateGraph 11 giai đoạn trên LangGraph
 │   │   │   ├── controller.py              # WorkflowController bọc quyền lease và các mutation
 │   │   │   ├── budget.py                  # Quản lý trần ngân sách Token và USD
 │   │   │   ├── termination.py             # Phát hiện bế tắc lặp lại (StagnationDetector)
@@ -211,7 +212,7 @@ astra-multi/
 │   ├── src/
 │   │   ├── components/                    # Các thành phần giao diện chuyên biệt
 │   │   │   ├── Header.tsx                 # Thanh tiêu đề, thông tin run, nút thao tác
-│   │   │   ├── PhaseTracker.tsx           # Thanh trạng thái 10 giai đoạn trực quan
+│   │   │   ├── PhaseTracker.tsx           # Thanh trạng thái 11 giai đoạn trực quan
 │   │   │   ├── DiscussionTimeline.tsx     # Dòng thời gian thảo luận giữa các tác nhân
 │   │   │   ├── IssuesTable.tsx            # Bảng quản lý và theo dõi các vấn đề (Issues)
 │   │   │   ├── DecisionsLog.tsx           # Nhật ký các quyết định kiến trúc (ADRs)
@@ -446,7 +447,7 @@ Khi giao diện frontend kết nối tới `/api/runs/{id}/events`, nó có th�
 ### 8.3. Giao diện Người dùng Web (Local SPA)
 Giao diện người dùng được xây dựng hoàn toàn bằng **React 18**, **TypeScript**, và **Vite**:
 - Không sử dụng các thư viện UI cồng kềnh bên ngoài; toàn bộ component được tối ưu hóa nhẹ nhàng, phản hồi tức thì dưới 16ms.
-- Phân chia bố cục làm 2 cột khoa học: Cột bên trái hiển thị tiến độ 10 pha, thông số ngân sách và dòng thời gian thảo luận; Cột bên phải chuyển đổi linh hoạt giữa các tab: **Kế hoạch hiện tại (Plan)**, **Vấn đề (Issues)**, **Quyết định (ADRs)** và **Sổ cái bằng chứng (Evidence)**.
+- Phân chia bố cục làm 2 cột khoa học: Cột bên trái hiển thị tiến độ 11 pha, thông số ngân sách và dòng thời gian thảo luận; Cột bên phải chuyển đổi linh hoạt giữa các tab: **Kế hoạch hiện tại (Plan)**, **Vấn đề (Issues)**, **Quyết định (ADRs)** và **Sổ cái bằng chứng (Evidence)**.
 
 ---
 

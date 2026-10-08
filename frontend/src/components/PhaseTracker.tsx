@@ -11,6 +11,7 @@ const PHASES = [
   'REVIEW',
   'VERIFY',
   'REVISE',
+  'SEMANTIC_REVIEW',
   'QUALITY_GATE',
   'EXPORT',
 ] as const;

@@ -10,8 +10,10 @@ P3.3 Production multi-agent discussion workflow graph:
 
 from __future__ import annotations
 
+import hashlib
 import operator
 import os
+import re
 import uuid
 from typing import Annotated, Any, TypedDict
 
@@ -20,6 +22,7 @@ from langgraph.graph import END, StateGraph
 from astra_multi.agents.roles import (
     PROMPT_VERSION_V1,
     AnalysisOutput,
+    IssueReport,
     ProposalOutput,
     ReviewOutput,
     SynthesizerOutput,
@@ -71,6 +74,98 @@ class OrchestrationState(TypedDict, total=False):
     events: Annotated[list[str], operator.add]
 
 
+def normalize_issue_content(ir: IssueReport) -> str:
+    """Normalize issue content for deterministic hashing:
+    - Text fields: strip whitespace, collapse consecutive whitespace to single space.
+    - Identifier fields: lowercase, stripped, sorted.
+    """
+    def _norm_text(s: str | None) -> str:
+        if not s:
+            return ""
+        return re.sub(r"\s+", " ", s.strip())
+
+    req_ids = sorted(r.strip().lower() for r in ir.requirement_ids if r and r.strip())
+    evi_ids = sorted(e.strip().lower() for e in ir.evidence_ids if e and e.strip())
+    sev = ir.severity.value.lower() if hasattr(ir.severity, "value") else str(ir.severity).lower()
+
+    fields = [
+        f"claim:{_norm_text(ir.claim)}",
+        f"impact:{_norm_text(ir.impact)}",
+        f"severity:{sev}",
+        f"verification_request:{_norm_text(ir.verification_request)}",
+        f"suggested_resolution:{_norm_text(ir.suggested_resolution)}",
+        f"requirement_ids:{','.join(req_ids)}",
+        f"evidence_ids:{','.join(evi_ids)}",
+    ]
+    return "|".join(fields)
+
+
+def derive_issue_id(run_id: str, round_num: int, node: str, ir: IssueReport) -> str:
+    """Derive deterministic Issue ID from (run_id, round, node, hash(normalized_content)).
+
+    Avoids ID collision when retrying with different content at the same index,
+    while guaranteeing identical ID on retry with identical content (no duplication).
+    """
+    norm_content = normalize_issue_content(ir)
+    content_hash = hashlib.sha256(norm_content.encode("utf-8")).hexdigest()[:16]
+    derived_uuid = uuid.uuid5(
+        uuid.NAMESPACE_URL,
+        f"{run_id}:{round_num}:{node}:{content_hash}",
+    )
+    return f"ISSUE-{derived_uuid.hex[:8]}"
+
+
+def estimate_call_tokens_and_cost(
+    messages: list[dict[str, str]],
+    builder: ContextBuilder | None = None,
+    max_output_tokens: int | None = None,
+    safety_factor: float | None = None,
+    cost_per_1k_tokens: float = 0.01,
+) -> tuple[int, float]:
+    """Estimate token reservation and cost based on prepared prompt length and expected output.
+
+    Formula:
+        prompt_tokens = count(prompt_text) (via tokenizer or ~4 chars/bytes per token)
+        total_tokens = int((prompt_tokens + max_output_tokens) * safety_factor)
+        cost = (total_tokens / 1000.0) * cost_per_1k_tokens
+    """
+    # 1. Configurable safety factor (default 1.25, env override ASTRA_BUDGET_SAFETY_FACTOR)
+    if safety_factor is None:
+        try:
+            safety_factor = float(os.environ.get("ASTRA_BUDGET_SAFETY_FACTOR", "1.25"))
+        except ValueError:
+            safety_factor = 1.25
+    if safety_factor < 1.0:
+        safety_factor = 1.0
+
+    # 2. Configurable max output tokens (default 2000, env override ASTRA_MULTI_MAX_OUTPUT_TOKENS)
+    if max_output_tokens is None:
+        try:
+            max_output_tokens = int(os.environ.get("ASTRA_MULTI_MAX_OUTPUT_TOKENS", "2000"))
+        except ValueError:
+            max_output_tokens = 2000
+    if max_output_tokens < 1:
+        max_output_tokens = 2000
+
+    # 3. Prompt tokens estimation using available tokenizer or character length assumption
+    prompt_text = "".join(m.get("content", "") for m in messages)
+    if builder and getattr(builder, "tokenizer", None):
+        tokenizer = builder.tokenizer
+        raw_count = tokenizer.count(prompt_text)
+        # ByteTokenizer returns raw byte count; standard heuristic is ~4 bytes/char per token
+        if type(tokenizer).__name__ == "ByteTokenizer":
+            prompt_tokens = max(1, raw_count // 4)
+        else:
+            prompt_tokens = max(1, raw_count)
+    else:
+        # Fallback assumption: 1 token ~= 4 characters for UTF-8 text
+        prompt_tokens = max(1, len(prompt_text) // 4)
+
+    estimated_tokens = int((prompt_tokens + max_output_tokens) * safety_factor)
+    estimated_cost = round((estimated_tokens / 1000.0) * cost_per_1k_tokens, 6)
+    return estimated_tokens, estimated_cost
+
+
 class WorkflowContext:
     """Carries runtime dependencies for graph node executions."""
 
@@ -105,9 +200,24 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> StateGraph:
         messages: list[dict[str, str]],
         output_schema: Any,
         call_id: str,
-        estimated_tokens: int = 1000,
-        estimated_cost: float = 0.01,
+        estimated_tokens: int | None = None,
+        estimated_cost: float | None = None,
+        safety_factor: float | None = None,
+        max_output_tokens: int | None = None,
     ) -> Any:
+        # Dynamically estimate tokens and cost if not provided explicitly
+        if estimated_tokens is None or estimated_cost is None:
+            dyn_tokens, dyn_cost = estimate_call_tokens_and_cost(
+                messages=messages,
+                builder=builder,
+                max_output_tokens=max_output_tokens,
+                safety_factor=safety_factor,
+            )
+            if estimated_tokens is None:
+                estimated_tokens = dyn_tokens
+            if estimated_cost is None:
+                estimated_cost = dyn_cost
+
         reservation_id = None
         if budget:
             reservation_id = budget.reserve(
@@ -160,6 +270,8 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> StateGraph:
             phase=RunPhase.INDEPENDENT_ANALYSIS,
             refs=[],
             limits=orchestration_limits(),
+            round_num=state.get("round", 0),
+            events=state.get("events", []),
         )
         messages = format_independent_analysis_prompt(bundle)
 
@@ -194,6 +306,8 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> StateGraph:
             phase=RunPhase.INDEPENDENT_ANALYSIS,
             refs=[],
             limits=orchestration_limits(),
+            round_num=state.get("round", 0),
+            events=state.get("events", []),
         )
         messages = format_independent_analysis_prompt(bundle)
 
@@ -229,6 +343,8 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> StateGraph:
             phase=RunPhase.PROPOSE,
             refs=[],
             limits=orchestration_limits(),
+            round_num=state.get("round", 0),
+            events=state.get("events", []),
         )
         analyses = [AnalysisOutput.model_validate(a) for a in state.get("analyses", [])]
         messages = format_propose_prompt(bundle, analyses)
@@ -260,6 +376,11 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> StateGraph:
         }
 
         round_num = state.get("round", 0)
+        # Proposal ID derivation: kept as f'{curr_state.run.id}:{round_num}:propose:0'
+        # Explanation: Planner generates strictly one candidate proposal per round.
+        # Retries or resumptions for a given round are designed to replace/update
+        # this single round proposal, unlike the reviewer issue list which contains
+        # arbitrary items at variable indices. Hence, no collision risk across items.
         prop_id = f"PROP-{uuid.uuid5(uuid.NAMESPACE_URL, f'{curr_state.run.id}:{round_num}:propose:0').hex[:8]}"
         domain_proposal = Proposal(
             id=prop_id,
@@ -288,6 +409,8 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> StateGraph:
             phase=RunPhase.REVIEW,
             refs=[],
             limits=orchestration_limits(),
+            round_num=state.get("round", 0),
+            events=state.get("events", []),
         )
         prop = ProposalOutput.model_validate(state["proposal"])
         messages = format_review_prompt(bundle, prop, curr_state.plan.model_dump(mode="json") if curr_state.plan else None)
@@ -322,7 +445,7 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> StateGraph:
             verif_req = ir.verification_request
             if not filtered_evi_ids and not verif_req:
                 verif_req = f"Verification required: {ir.claim[:100]}"
-            issue_id = f"ISSUE-{uuid.uuid5(uuid.NAMESPACE_URL, f'{curr_state.run.id}:{issue_round}:review:{idx + 1}').hex[:8]}"
+            issue_id = derive_issue_id(curr_state.run.id, issue_round, "review", ir)
             if issue_id in existing_issue_ids:
                 continue
             existing_issue_ids.add(issue_id)
@@ -374,6 +497,8 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> StateGraph:
             phase=RunPhase.REVISE,
             refs=[],
             limits=orchestration_limits(),
+            round_num=current_round,
+            events=state.get("events", []),
         )
         prop = ProposalOutput.model_validate(state["proposal"])
         rev = ReviewOutput.model_validate(state["review"])
@@ -503,6 +628,8 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> StateGraph:
             phase=RunPhase.SEMANTIC_REVIEW,
             refs=[],
             limits=orchestration_limits(),
+            round_num=state.get("round", 0),
+            events=state.get("events", []),
         )
         plan_dict = curr_state.plan.model_dump(mode="json")
         open_issues_dict = [i.model_dump(mode="json") for i in open_issues]
@@ -553,7 +680,7 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> StateGraph:
             verif_req = ir.verification_request
             if not filtered_evi_ids and not verif_req:
                 verif_req = f"Verification required: {ir.claim[:100]}"
-            issue_id = f"ISSUE-{uuid.uuid5(uuid.NAMESPACE_URL, f'{curr_state.run.id}:{issue_round}:semantic_review:{idx + 1}').hex[:8]}"
+            issue_id = derive_issue_id(curr_state.run.id, issue_round, "semantic_review", ir)
             if issue_id in existing_issue_ids:
                 continue
             existing_issue_ids.add(issue_id)
@@ -641,6 +768,9 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> StateGraph:
         if not state.get("gate_passed"):
             status = RunStatus.PARTIAL
             reason = state.get("stop_reason") or StopReason.UNRESOLVED_BLOCKERS.value
+        elif ctrl.actor in ("P4-quality-service", "quality-service"):
+            status = RunStatus.FINAL
+            reason = "Certified final plan (passed quality gates)"
         else:
             status = RunStatus.PARTIAL
             reason = "MVP candidate generated (awaiting P4 quality certification)"
