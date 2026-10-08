@@ -233,8 +233,13 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> StateGraph:
                 messages=messages,
                 output_schema=output_schema,
             )
+            actual_tokens = res.usage.get("total_tokens", 0) if res.usage else 0
+            if getattr(res, "cost_actual_usd", None) is None:
+                if actual_tokens > 0:
+                    res.cost_actual_usd = round((actual_tokens / 1000.0) * 0.01, 6)
+                else:
+                    res.cost_actual_usd = estimated_cost if estimated_cost is not None else 0.0
             if budget and reservation_id:
-                actual_tokens = res.usage.get("total_tokens", 0) if res.usage else 0
                 budget.settle(
                     operation_id=reservation_id,
                     actual_tokens=actual_tokens,
@@ -291,7 +296,7 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> StateGraph:
             prompt_version=PROMPT_VERSION_V1,
             input_data=bundle.content,
             usage=res.usage,
-            estimated_cost=res.cost_actual_usd,
+            estimated_cost=res.cost_actual_usd if res.cost_actual_usd is not None else 0.0,
         )
         return {
             "analyses": [output.model_dump(mode="json")],
@@ -327,7 +332,7 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> StateGraph:
             prompt_version=PROMPT_VERSION_V1,
             input_data=bundle.content,
             usage=res.usage,
-            estimated_cost=res.cost_actual_usd,
+            estimated_cost=res.cost_actual_usd if res.cost_actual_usd is not None else 0.0,
         )
         return {
             "analyses": [output.model_dump(mode="json")],
@@ -365,7 +370,7 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> StateGraph:
             prompt_version=PROMPT_VERSION_V1,
             input_data=bundle.content,
             usage=res.usage,
-            estimated_cost=res.cost_actual_usd,
+            estimated_cost=res.cost_actual_usd if res.cost_actual_usd is not None else 0.0,
         )
 
         valid_claims = {c.id for c in curr_state.claims}
@@ -431,7 +436,7 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> StateGraph:
             prompt_version=PROMPT_VERSION_V1,
             input_data=bundle.content,
             usage=res.usage,
-            estimated_cost=res.cost_actual_usd,
+            estimated_cost=res.cost_actual_usd if res.cost_actual_usd is not None else 0.0,
         )
 
         # Commit domain issues
@@ -520,7 +525,7 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> StateGraph:
             prompt_version=PROMPT_VERSION_V1,
             input_data=bundle.content,
             usage=res.usage,
-            estimated_cost=res.cost_actual_usd,
+            estimated_cost=res.cost_actual_usd if res.cost_actual_usd is not None else 0.0,
         )
 
         # Build PlanRevision
@@ -651,7 +656,7 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> StateGraph:
             prompt_version=PROMPT_VERSION_V1,
             input_data=bundle.content,
             usage=res.usage,
-            estimated_cost=res.cost_actual_usd,
+            estimated_cost=res.cost_actual_usd if res.cost_actual_usd is not None else 0.0,
         )
 
         # Apply resolutions

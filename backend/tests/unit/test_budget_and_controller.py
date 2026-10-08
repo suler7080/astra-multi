@@ -340,3 +340,128 @@ def test_f004_graph_budget_integration_settles_and_releases_without_leak():
             # Assert no reservations leaked!
             assert budget2.total_reserved_tokens == 0
             assert budget2.total_reserved_cost == 0.0
+
+
+def test_record_model_call_accepts_none_estimated_cost():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = Path(tmpdir) / "test_none_cost.db"
+        with SQLiteStore(db_path) as store:
+            state = sample_state()
+            store.create(state.task, state.run, state.snapshot)
+            lease = store.acquire(state.run.id, owner="worker-none-cost", ttl=30)
+            controller = WorkflowController(store, lease)
+
+            updated_state = controller.record_model_call(
+                call_id="CALL-NONE-ESTIMATED-COST",
+                role="planner",
+                provider="fake",
+                model_id="test-model",
+                prompt_version="v1",
+                input_data="test input",
+                usage={"total_tokens": 150},
+                estimated_cost=None,
+            )
+            assert len(updated_state.model_calls) == 1
+            assert updated_state.model_calls[0].estimated_cost == 0.0
+
+
+def test_budget_settle_accepts_none_actual_cost():
+    budget = BudgetService(token_limit=1000, cost_limit=1.0)
+    op1 = budget.reserve(estimated_tokens=200, estimated_cost=0.02)
+    budget.settle(op1, actual_tokens=150, actual_cost=None)
+    assert budget.total_reserved_tokens == 0
+    assert budget.total_reserved_cost == 0.0
+    summary = budget.get_summary()
+    assert summary["used_tokens"] == 150
+    assert summary["used_cost"] == 0.0
+    assert summary["settled_calls"] == 1
+
+
+def test_graph_execution_handles_none_cost_actual_usd():
+    """Verify that graph nodes succeed without ValidationError when model returns cost_actual_usd=None."""
+    from astra_multi.agents.roles import (
+        AnalysisOutput,
+        ProposalOutput,
+        ReviewOutput,
+        SynthesizerOutput,
+        StepDraft,
+    )
+    from astra_multi.persistence.artifacts import FileArtifactStore
+    from astra_multi.context.bundle import ContextBuilder
+    from astra_multi.gateway.model_gateway import GatewayConfig, ModelGateway, ModelResult
+    from astra_multi.orchestration.graph import WorkflowContext, create_workflow_graph
+
+    def none_cost_adapter(
+        provider: str,
+        role: str,
+        messages: list[dict[str, str]],
+        output_schema: Any = None,
+        **kwargs: Any,
+    ) -> ModelResult:
+        if output_schema == AnalysisOutput:
+            content = AnalysisOutput(role=role, findings=["Ok"], risks=[], assumptions=[])
+        elif output_schema == ProposalOutput:
+            content = ProposalOutput(approach="Ok", alternatives=[], tradeoffs=[], requirement_coverage={"REQ-001": "Ok"}, claim_ids=[])
+        elif output_schema == ReviewOutput:
+            content = ReviewOutput(summary="Ok", reviewed_evidence_ids=[], issues=[])
+        elif output_schema == SynthesizerOutput:
+            content = SynthesizerOutput(
+                steps=[StepDraft(objective="Step 1", requirement_ids=["REQ-001"], dependencies=[], targets=["main.py"], validation="pytest", deliverables=["main.py"], completion_criteria=["pass"], evidence_ids=[])],
+                decisions=[], risks=[], issues_addressed=[], rationale="Ok"
+            )
+        else:
+            content = "ok"
+        return ModelResult(
+            content=content.model_dump(mode="json") if hasattr(content, "model_dump") else content,
+            model_id=f"real-{role}",
+            provider="openai",
+            usage={"total_tokens": 200},
+            cost_actual_usd=None,  # Simulates real LLM provider returning None
+        )
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = Path(tmpdir) / "graph_none_cost.db"
+        art_path = Path(tmpdir) / "artifacts"
+        with SQLiteStore(db_path) as store:
+            art_store = FileArtifactStore(art_path)
+            state = sample_state(repo=False)
+            store.create(state.task, state.run, state.snapshot)
+            lease = store.acquire(state.run.id, owner="worker-none-cost", ttl=60)
+
+            budget = BudgetService(
+                token_limit=10000,
+                cost_limit=1.0,
+                repository=store,
+                lease=lease,
+            )
+            controller = WorkflowController(store, lease)
+            gateway = ModelGateway(
+                config=GatewayConfig(enable_output_repair=False),
+                provider_adapter=none_cost_adapter,
+            )
+            context_builder = ContextBuilder(art_store)
+            wf_ctx = WorkflowContext(
+                controller=controller,
+                gateway=gateway,
+                context_builder=context_builder,
+                budget_service=budget,
+            )
+            graph = create_workflow_graph(wf_ctx)
+            app = graph.compile()
+
+            res = app.invoke({
+                "run_id": state.run.id,
+                "round": 0,
+                "max_rounds": 1,
+                "events": [],
+            })
+
+            final_state = controller.get_state()
+            assert len(final_state.model_calls) > 0
+            for call in final_state.model_calls:
+                assert call.estimated_cost is not None
+                assert isinstance(call.estimated_cost, float)
+                assert call.estimated_cost >= 0.0
+            assert budget.total_reserved_tokens == 0
+            assert budget.total_reserved_cost == 0.0
+

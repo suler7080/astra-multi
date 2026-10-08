@@ -218,9 +218,10 @@ class WorkflowController:
         prompt_version: str,
         input_data: str,
         usage: dict[str, int] | None = None,
-        estimated_cost: float = 0.0,
+        estimated_cost: float | None = 0.0,
         attempts: int = 1,
     ) -> RunState:
+        effective_cost = float(estimated_cost) if estimated_cost is not None else 0.0
         with self._lock:
             for attempt in range(15):
                 state = self.get_state()
@@ -238,7 +239,7 @@ class WorkflowController:
                     prompt_version=prompt_version,
                     input_hash=input_hash,
                     usage=usage or {},
-                    estimated_cost=estimated_cost,
+                    estimated_cost=effective_cost,
                     attempts=attempts,
                 )
                 cmd = AddRecord(

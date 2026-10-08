@@ -249,10 +249,12 @@ class BudgetService:
     def settle(
         self,
         operation_id: str,
-        actual_tokens: int,
-        actual_cost: float,
+        actual_tokens: int | None = 0,
+        actual_cost: float | None = 0.0,
     ) -> None:
         """Settle a reservation with actual usage data."""
+        settle_tokens = int(actual_tokens) if actual_tokens is not None else 0
+        settle_cost = float(actual_cost) if actual_cost is not None else 0.0
         with self._lock:
             res = self._reservations.get(operation_id)
             if not res or res.status != "reserved":
@@ -261,15 +263,15 @@ class BudgetService:
             prev_tokens = res.tokens
             prev_cost = res.cost
             res.status = "settled"
-            res.tokens = actual_tokens
-            res.cost = actual_cost
+            res.tokens = settle_tokens
+            res.cost = settle_cost
             self._reserved_tokens -= prev_tokens
             self._reserved_cost -= prev_cost
             self._active_reservations_count -= 1
             if abs(self._reserved_cost) < 1e-9:
                 self._reserved_cost = 0.0
-            self._used_tokens += actual_tokens
-            self._used_cost += actual_cost
+            self._used_tokens += settle_tokens
+            self._used_cost += settle_cost
             self._settled_calls += 1
 
         if self.repository and self.lease:
@@ -277,8 +279,8 @@ class BudgetService:
                 id=f"settle-{operation_id}",
                 run_id=self.lease.run_id,
                 operation_id=operation_id,
-                tokens=actual_tokens,
-                cost=actual_cost,
+                tokens=settle_tokens,
+                cost=settle_cost,
                 status="settled",
             )
             try:
@@ -295,8 +297,8 @@ class BudgetService:
                     self._reserved_tokens += prev_tokens
                     self._reserved_cost += prev_cost
                     self._active_reservations_count += 1
-                    self._used_tokens -= actual_tokens
-                    self._used_cost -= actual_cost
+                    self._used_tokens -= settle_tokens
+                    self._used_cost -= settle_cost
                     self._settled_calls -= 1
                 raise
 
