@@ -1,22 +1,25 @@
 import React from 'react';
 import type { Decision } from '../types';
 import { Compass, CheckCircle2 } from 'lucide-react';
+import { useI18n } from '../i18nContext';
 
 interface DecisionsLogProps {
   decisions: Decision[];
 }
 
 export const DecisionsLog: React.FC<DecisionsLogProps> = ({ decisions }) => {
+  const { t } = useI18n();
+
   return (
     <div className="section-card">
       <div className="flex-align-center gap-2 mb-4">
         <Compass size={18} className="text-sky-400" />
-        <h3 className="card-title">Architectural Decisions Log ({decisions.length})</h3>
+        <h3 className="card-title">{t('decisions_title')} ({decisions.length})</h3>
       </div>
 
       {decisions.length === 0 ? (
         <div className="empty-state">
-          <p className="text-slate-400 text-sm">No decisions logged yet.</p>
+          <p className="text-slate-400 text-sm">{t('decisions_empty')}</p>
         </div>
       ) : (
         <div className="decisions-list">

@@ -1,12 +1,14 @@
 import React, { useState } from 'react';
 import type { Issue } from '../types';
 import { AlertOctagon, AlertTriangle, Info, CheckCircle2, Filter } from 'lucide-react';
+import { useI18n } from '../i18nContext';
 
 interface IssuesTableProps {
   issues: Issue[];
 }
 
 export const IssuesTable: React.FC<IssuesTableProps> = ({ issues }) => {
+  const { t } = useI18n();
   const [severityFilter, setSeverityFilter] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<string>('all');
 
@@ -49,7 +51,7 @@ export const IssuesTable: React.FC<IssuesTableProps> = ({ issues }) => {
       <div className="flex-between mb-4">
         <div className="flex-align-center gap-2">
           <AlertOctagon size={18} className="text-amber-400" />
-          <h3 className="card-title">Architectural Issues ({issues.length})</h3>
+          <h3 className="card-title">{t('issues_title')} ({issues.length})</h3>
         </div>
 
         <div className="flex-align-center gap-2">
@@ -80,7 +82,7 @@ export const IssuesTable: React.FC<IssuesTableProps> = ({ issues }) => {
 
       {filtered.length === 0 ? (
         <div className="empty-state">
-          <p className="text-slate-400 text-sm">No issues match the current filter.</p>
+          <p className="text-slate-400 text-sm">{t('issues_empty')}</p>
         </div>
       ) : (
         <div className="data-table-container">

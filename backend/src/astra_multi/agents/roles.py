@@ -60,12 +60,19 @@ class ProposalOutput(AgentContract):
         default_factory=dict,
         description="Map from requirement ID to description of how it is addressed",
     )
-    claim_ids: list[ID] = Field(default_factory=list)
+    claim_ids: list[ID] = Field(
+        default_factory=list,
+        description="IDs of established domain claims (CLAIM-...) if any. Leave empty if none.",
+    )
 
 
 class IssueReport(AgentContract):
     """An issue raised by Reviewer in REVIEW phase."""
 
+    id: ID | None = Field(
+        default=None,
+        description="Deterministic issue ID (e.g. 'ISSUE-3a8c1f0d') when assigned",
+    )
     claim: Text
     impact: Text
     severity: IssueSeverity = IssueSeverity.WARNING
@@ -75,12 +82,23 @@ class IssueReport(AgentContract):
     evidence_ids: list[ID] = Field(default_factory=list)
 
 
+class IssueResolutionReport(AgentContract):
+    """Reviewer evaluation/resolution for an existing issue."""
+
+    issue_id: ID
+    resolution_text: Text = "Resolved based on current plan revision"
+    review_result: Literal["PASS", "FAIL"] = "PASS"
+    review_note: Text = "Verified in plan revision"
+    evidence_ids: list[ID] = Field(default_factory=list)
+
+
 class ReviewOutput(AgentContract):
     """Output schema for Reviewer in REVIEW phase."""
 
     issues: list[IssueReport] = Field(default_factory=list)
     summary: Text
     reviewed_evidence_ids: list[ID] = Field(default_factory=list)
+    resolutions: list[IssueResolutionReport] = Field(default_factory=list)
 
 
 class StepDraft(AgentContract):
@@ -153,9 +171,13 @@ class SynthesizerOutput(AgentContract):
                 continue
             s = item.strip()
             if re.match(r"^[A-Za-z0-9][A-Za-z0-9_.:-]*$", s):
-                cleaned.append(s)
+                cleaned.append(s.rstrip(":.,; "))
             else:
-                cleaned.append(f"ISSUE-{idx + 1}")
+                m = re.search(r"(ISSUE-[A-Za-z0-9_-]+)", s, re.IGNORECASE)
+                if m:
+                    cleaned.append(m.group(1).rstrip(":.,; "))
+                else:
+                    cleaned.append(f"ISSUE-{idx + 1}")
         return cleaned
 
 
@@ -190,7 +212,10 @@ def format_independent_analysis_prompt(bundle: ContextBundle) -> list[dict[str, 
 
 def format_propose_prompt(bundle: ContextBundle, analyses: list[AnalysisOutput]) -> list[dict[str, str]]:
     """Prompt for Planner in PROPOSE phase."""
-    analyses_summary = [a.model_dump(mode="json") for a in analyses]
+    if '"plan":' in bundle.content:
+        analyses_summary = [{"role": a.role, "findings": a.findings} for a in analyses]
+    else:
+        analyses_summary = [a.model_dump(mode="json") for a in analyses]
     system_message = (
         "You are the PLANNER in Astra Multi.\n"
         f"Prompt Version: {PROMPT_VERSION_V1}\n"
@@ -203,7 +228,7 @@ def format_propose_prompt(bundle: ContextBundle, analyses: list[AnalysisOutput])
     )
     user_message = (
         f"Context:\n{bundle.content}\n\n"
-        f"Independent Analyses:\n{json.dumps(analyses_summary, ensure_ascii=False, indent=2)}\n\n"
+        f"Independent Analyses:\n{json.dumps(analyses_summary, ensure_ascii=False, separators=(',', ': '))}\n\n"
         "Please generate your proposal."
     )
     return [
@@ -230,10 +255,10 @@ def format_review_prompt(
     )
     user_message = (
         f"Context:\n{bundle.content}\n\n"
-        f"Proposal under review:\n{json.dumps(proposal.model_dump(mode='json'), ensure_ascii=False, indent=2)}\n\n"
+        f"Proposal under review:\n{json.dumps(proposal.model_dump(mode='json'), ensure_ascii=False, separators=(',', ': '))}\n\n"
     )
-    if current_plan:
-        user_message += f"Current Plan:\n{json.dumps(current_plan, ensure_ascii=False, indent=2)}\n\n"
+    if current_plan and '"plan":' not in bundle.content:
+        user_message += f"Current Plan:\n{json.dumps(current_plan, ensure_ascii=False, separators=(',', ': '))}\n\n"
     user_message += "Please provide your review and issues."
     return [
         {"role": "system", "content": system_message},
@@ -256,18 +281,49 @@ def format_synthesize_prompt(
         "1. Combine proposal, review feedback, and resolved issues into an actionable, step-by-step plan.\n"
         "2. Step dependencies must form a strict Directed Acyclic Graph (DAG).\n"
         "3. Every step must have objective, requirement_ids, validation, deliverables, and completion_criteria.\n"
-        "4. In issues_addressed, list only issue IDs (e.g. ['ISSUE-1', 'ISSUE-2'] or []). Do NOT put sentences or descriptions into issues_addressed.\n"
+        "4. In issues_addressed, list the exact issue IDs from Review Issues that this plan revision resolves (e.g. ['ISSUE-3a8c1f0d'] or []). Do NOT put sentences or descriptions into issues_addressed.\n"
         "5. Output strictly according to SynthesizerOutput schema."
     )
     user_message = (
         f"Context:\n{bundle.content}\n\n"
-        f"Proposal:\n{json.dumps(proposal.model_dump(mode='json'), ensure_ascii=False, indent=2)}\n\n"
-        f"Review Issues:\n{json.dumps(review.model_dump(mode='json'), ensure_ascii=False, indent=2)}\n\n"
+        f"Proposal:\n{json.dumps(proposal.model_dump(mode='json'), ensure_ascii=False, separators=(',', ': '))}\n\n"
+        f"Review Issues:\n{json.dumps(review.model_dump(mode='json'), ensure_ascii=False, separators=(',', ': '))}\n\n"
     )
-    if current_plan:
-        user_message += f"Current Plan Baseline:\n{json.dumps(current_plan, ensure_ascii=False, indent=2)}\n\n"
+    if current_plan and '"plan":' not in bundle.content:
+        user_message += f"Current Plan Baseline:\n{json.dumps(current_plan, ensure_ascii=False, separators=(',', ': '))}\n\n"
     user_message += "Please produce the synthesized revision."
     return [
         {"role": "system", "content": system_message},
         {"role": "user", "content": user_message},
     ]
+
+
+def format_semantic_review_prompt(
+    bundle: ContextBundle,
+    current_plan: dict,
+    open_issues: list[dict],
+) -> list[dict[str, str]]:
+    """Prompt for Reviewer in SEMANTIC_REVIEW phase."""
+    system_message = (
+        "You are the REVIEWER in Astra Multi.\n"
+        f"Prompt Version: {PROMPT_VERSION_V1}\n"
+        "Phase: SEMANTIC_REVIEW\n"
+        "Rules:\n"
+        "1. Rigorously evaluate the newly synthesized plan revision against previous issues and task requirements.\n"
+        "2. If an existing issue is adequately addressed in the plan, produce a resolution specifying its exact issue_id from Open Issues (e.g. 'ISSUE-3a8c1f0d'), review_result='PASS' and review_note.\n"
+        "3. If new problems remain or are introduced, identify them as issues.\n"
+        "4. Output strictly according to ReviewOutput schema."
+    )
+    user_message = (
+        f"Context:\n{bundle.content}\n\n"
+        f"Current Plan Revision to Evaluate:\n{json.dumps(current_plan, ensure_ascii=False, separators=(',', ': '))}\n\n"
+    )
+    if open_issues and '"open_issues":' not in bundle.content:
+        user_message += f"Open Issues to evaluate:\n{json.dumps(open_issues, ensure_ascii=False, separators=(',', ': '))}\n\n"
+    user_message += "Please provide your review, new issues (if any), and resolutions for addressed issues."
+    return [
+        {"role": "system", "content": system_message},
+        {"role": "user", "content": user_message},
+    ]
+
+

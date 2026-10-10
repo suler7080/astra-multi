@@ -29,6 +29,7 @@ class AttemptTrace:
     error: str | None = None
     latency_seconds: float | None = None
     tokens_used: int | None = None
+    is_estimated: bool = False
 
 
 @dataclass
@@ -120,6 +121,8 @@ class ModelGateway:
         self.budget_hook = budget_hook
         self.provider_adapter = provider_adapter
         self._attempt_traces: list[AttemptTrace] = []
+        self.last_cumulative_usage: dict[str, int | None] | None = None
+        self.last_cumulative_cost: float | None = None
 
     def get_attempt_traces(self) -> list[AttemptTrace]:
         """Get all attempt traces for the gateway session."""
@@ -128,6 +131,8 @@ class ModelGateway:
     def clear_traces(self) -> None:
         """Clear all attempt traces."""
         self._attempt_traces.clear()
+        self.last_cumulative_usage = None
+        self.last_cumulative_cost = None
 
     def call(
         self,
@@ -136,8 +141,9 @@ class ModelGateway:
         messages: list[dict[str, str]],
         output_schema: type[BaseModel] | str | None = None,
         tool_specs: list[dict[str, Any]] | None = None,
-        limits: GenerationLimits | None = None,
+        limits: GenerationLimits | Any | None = None,
         *,
+        limits_override: dict[str, Any] | None = None,
         settings: Any = None,
         credentials: Any = None,
     ) -> ModelResult:
@@ -147,19 +153,63 @@ class ModelGateway:
                 max_retries=self.config.default_max_retries,
                 timeout=self.config.default_timeout,
             )
+        elif not isinstance(limits, GenerationLimits):
+            limits = GenerationLimits.model_validate(limits)
 
-        # Budget check
+        if limits_override:
+            limits_data = limits.model_dump()
+            limits_data.update({k: v for k, v in limits_override.items() if v is not None})
+            limits = GenerationLimits.model_validate(limits_data)
+
+        # Budget check before initial attempt
+        estimated_tokens = sum(len(m.get("content", "")) for m in messages) // 4
+        estimated_cost = round((estimated_tokens / 1000.0) * 0.01, 6)
         if self.budget_hook and self.config.enable_budget_hook:
-            # Estimate tokens from message length (rough estimate)
-            estimated_tokens = sum(len(m.get("content", "")) for m in messages) // 4
-            self.budget_hook.check_reservation(estimated_tokens=estimated_tokens)
+            self.budget_hook.check_reservation(
+                estimated_tokens=estimated_tokens,
+                estimated_cost_usd=estimated_cost,
+            )
 
         # Execute with retry logic
         last_error: Exception | None = None
         attempt = 0
         max_attempts = limits.max_retries + 1
 
+        cumulative_prompt_tokens = 0
+        cumulative_completion_tokens = 0
+        cumulative_total_tokens = 0
+        cumulative_cost = 0.0
+        has_estimated_usage = False
+
+        def _sync_cumulative() -> None:
+            if cumulative_total_tokens > 0 or cumulative_prompt_tokens > 0:
+                self.last_cumulative_usage = {
+                    "prompt_tokens": cumulative_prompt_tokens,
+                    "completion_tokens": cumulative_completion_tokens,
+                    "total_tokens": cumulative_total_tokens,
+                }
+            else:
+                self.last_cumulative_usage = None
+            self.last_cumulative_cost = (
+                round(cumulative_cost, 6) if cumulative_cost > 0.0 else 0.0
+            )
+
+        def _attach_cumulative(exc: Exception) -> Exception:
+            _sync_cumulative()
+            setattr(exc, "cumulative_usage", self.last_cumulative_usage)
+            setattr(exc, "cumulative_cost_usd", self.last_cumulative_cost)
+            return exc
+
         while attempt < max_attempts:
+            if attempt > 0 and self.budget_hook and self.config.enable_budget_hook:
+                try:
+                    self.budget_hook.check_reservation(
+                        estimated_tokens=estimated_tokens,
+                        estimated_cost_usd=estimated_cost,
+                    )
+                except BudgetExceededError as e:
+                    raise _attach_cumulative(e)
+
             attempt += 1
             attempt_start = time.perf_counter()
             try:
@@ -188,6 +238,31 @@ class ModelGateway:
 
                 # Record successful attempt
                 latency = time.perf_counter() - attempt_start
+                raw_total = (
+                    result.usage.get("total_tokens")
+                    if result.usage
+                    else None
+                )
+                raw_prompt = (
+                    result.usage.get("prompt_tokens")
+                    if result.usage
+                    else 0
+                )
+                raw_comp = (
+                    result.usage.get("completion_tokens")
+                    if result.usage
+                    else 0
+                )
+                raw_cost = (
+                    result.cost_actual_usd
+                    if result.cost_actual_usd is not None
+                    else (
+                        round(((raw_total or 0) / 1000.0) * 0.01, 6)
+                        if raw_total
+                        else 0.0
+                    )
+                )
+
                 self._attempt_traces.append(
                     AttemptTrace(
                         attempt_number=attempt,
@@ -195,31 +270,48 @@ class ModelGateway:
                         provider=provider,
                         model_id=result.model_id,
                         latency_seconds=latency,
-                        tokens_used=(
-                            result.usage.get("total_tokens")
-                            if result.usage
-                            else None
-                        ),
+                        tokens_used=raw_total,
+                        is_estimated=False,
                     )
                 )
 
                 # Output repair if enabled
                 if self.config.enable_output_repair and output_schema is not None:
-                    result = self._repair_output(result, output_schema, provider)
+                    try:
+                        result = self._repair_output(result, output_schema, provider)
+                    except Exception:
+                        # Output repair failed: provider processed the request and billed for it
+                        cumulative_total_tokens += (raw_total or 0)
+                        cumulative_prompt_tokens += (raw_prompt or 0)
+                        cumulative_completion_tokens += (raw_comp or 0)
+                        cumulative_cost += raw_cost
+                        if self.budget_hook and self.config.enable_budget_hook:
+                            self.budget_hook.record_usage(
+                                used_tokens=raw_total, used_cost_usd=raw_cost
+                            )
+                        _sync_cumulative()
+                        raise
 
-                # Record budget usage
+                # Successful output and validation
+                cumulative_total_tokens += (raw_total or 0)
+                cumulative_prompt_tokens += (raw_prompt or 0)
+                cumulative_completion_tokens += (raw_comp or 0)
+                cumulative_cost += raw_cost
+
                 if self.budget_hook and self.config.enable_budget_hook:
-                    total_tokens = (
-                        result.usage.get("total_tokens")
-                        if result.usage
-                        else None
-                    )
-                    cost = result.cost_actual_usd
                     self.budget_hook.record_usage(
-                        used_tokens=total_tokens, used_cost_usd=cost
+                        used_tokens=raw_total, used_cost_usd=raw_cost
                     )
 
+                _sync_cumulative()
                 result.attempts = attempt
+                result.cumulative_usage = self.last_cumulative_usage or result.usage
+                result.cumulative_cost_usd = (
+                    self.last_cumulative_cost
+                    if (self.last_cumulative_cost or 0.0) > 0.0
+                    else result.cost_actual_usd
+                )
+                result.is_estimated = has_estimated_usage
                 return result
 
             except AuthError as e:
@@ -232,7 +324,7 @@ class ModelGateway:
                         error=str(e),
                     )
                 )
-                raise
+                raise _attach_cumulative(e)
             except RateLimitError as e:
                 # Transient error - retry if attempts remain
                 self._attempt_traces.append(
@@ -244,21 +336,47 @@ class ModelGateway:
                     )
                 )
                 if attempt >= max_attempts:
-                    raise
+                    raise _attach_cumulative(e)
                 last_error = e
                 time.sleep(1 * attempt)  # Exponential backoff
             except TimeoutError as e:
-                # Transient error - retry if attempts remain
+                # Distinguish connect timeout vs read timeout
+                err_lower = str(e).lower()
+                cause_lower = str(getattr(e, "__cause__", "")).lower()
+                is_connect = any(
+                    term in err_lower or term in cause_lower
+                    for term in ("connect", "connection", "resolution")
+                )
+                if is_connect:
+                    timeout_tokens = 0
+                    timeout_cost = 0.0
+                else:
+                    timeout_tokens = estimated_tokens
+                    timeout_cost = estimated_cost
+                    has_estimated_usage = True
+
+                if timeout_tokens > 0 or timeout_cost > 0:
+                    cumulative_total_tokens += timeout_tokens
+                    cumulative_prompt_tokens += timeout_tokens
+                    cumulative_cost += timeout_cost
+                    if self.budget_hook and self.config.enable_budget_hook:
+                        self.budget_hook.record_usage(
+                            used_tokens=timeout_tokens,
+                            used_cost_usd=timeout_cost,
+                        )
+
                 self._attempt_traces.append(
                     AttemptTrace(
                         attempt_number=attempt,
                         timestamp=time.time(),
                         provider=provider,
                         error=str(e),
+                        tokens_used=timeout_tokens if timeout_tokens > 0 else None,
+                        is_estimated=not is_connect,
                     )
                 )
                 if attempt >= max_attempts:
-                    raise
+                    raise _attach_cumulative(e)
                 last_error = e
                 time.sleep(1 * attempt)
             except ContextOverflowError as e:
@@ -272,7 +390,7 @@ class ModelGateway:
                     )
                 )
                 if attempt >= max_attempts:
-                    raise
+                    raise _attach_cumulative(e)
                 last_error = e
                 # Reduce context size on retry
                 if len(messages) > 1:
@@ -288,14 +406,16 @@ class ModelGateway:
                     )
                 )
                 if attempt >= max_attempts:
-                    raise
+                    raise _attach_cumulative(e)
                 last_error = e
                 time.sleep(1 * attempt)
 
         # All retries exhausted
+        _sync_cumulative()
         if last_error:
-            raise last_error
-        raise ProviderError("MAX_RETRIES_EXCEEDED", "All retry attempts failed", provider)
+            raise _attach_cumulative(last_error)
+        err = ProviderError("MAX_RETRIES_EXCEEDED", "All retry attempts failed", provider)
+        raise _attach_cumulative(err)
 
     def _repair_output(
         self,

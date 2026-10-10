@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import type { CreateRunPayload } from '../types';
 import { X, Plus, Trash2, Sparkles, AlertCircle } from 'lucide-react';
+import { useI18n } from '../i18nContext';
 
 interface NewRunModalProps {
   isOpen: boolean;
@@ -17,6 +18,7 @@ export const NewRunModal: React.FC<NewRunModalProps> = ({
   isSubmitting,
   error,
 }) => {
+  const { t } = useI18n();
   const [goal, setGoal] = useState('Design high-throughput distributed event broker');
   const [requirements, setRequirements] = useState<string[]>([
     'Support at least 50k messages per second with sub-5ms p99 latency',
@@ -69,7 +71,7 @@ export const NewRunModal: React.FC<NewRunModalProps> = ({
         <div className="modal-header">
           <div className="modal-title-group">
             <Sparkles className="text-sky-400" size={20} />
-            <h2 id="new-run-title" className="modal-title">New Architecture Run</h2>
+            <h2 id="new-run-title" className="modal-title">{t('modal_new_run_title')}</h2>
           </div>
           <button
             onClick={onClose}
@@ -91,7 +93,7 @@ export const NewRunModal: React.FC<NewRunModalProps> = ({
 
           <div className="form-group">
             <label htmlFor="run-goal" className="form-label">
-              Goal / Architecture Objective <span className="text-rose-400">*</span>
+              {t('modal_goal_label')} <span className="text-rose-400">*</span>
             </label>
             <textarea
               id="run-goal"
@@ -99,7 +101,7 @@ export const NewRunModal: React.FC<NewRunModalProps> = ({
               onChange={(e) => setGoal(e.target.value)}
               required
               rows={3}
-              placeholder="e.g. Design a fault-tolerant payment gateway service with distributed transactions"
+              placeholder={t('modal_goal_placeholder')}
               className="form-textarea"
             />
           </div>
@@ -107,7 +109,7 @@ export const NewRunModal: React.FC<NewRunModalProps> = ({
           <div className="form-group">
             <div className="flex-between">
               <label className="form-label">
-                Architecture Requirements <span className="text-rose-400">*</span>
+                {t('modal_requirements_label')} <span className="text-rose-400">*</span>
               </label>
               <button
                 type="button"
@@ -115,7 +117,7 @@ export const NewRunModal: React.FC<NewRunModalProps> = ({
                 className="btn-text"
               >
                 <Plus size={14} />
-                <span>Add Requirement</span>
+                <span>{t('modal_add_requirement')}</span>
               </button>
             </div>
 
@@ -161,7 +163,7 @@ export const NewRunModal: React.FC<NewRunModalProps> = ({
             </div>
 
             <div className="form-group">
-              <label htmlFor="token-limit" className="form-label">Token Budget</label>
+              <label htmlFor="token-limit" className="form-label">{t('modal_token_limit')}</label>
               <input
                 id="token-limit"
                 type="number"
@@ -174,7 +176,7 @@ export const NewRunModal: React.FC<NewRunModalProps> = ({
             </div>
 
             <div className="form-group">
-              <label htmlFor="cost-limit" className="form-label">Cost Limit (USD)</label>
+              <label htmlFor="cost-limit" className="form-label">{t('modal_cost_limit')}</label>
               <input
                 id="cost-limit"
                 type="number"
@@ -187,7 +189,7 @@ export const NewRunModal: React.FC<NewRunModalProps> = ({
             </div>
 
             <div className="form-group">
-              <label htmlFor="max-rounds" className="form-label">Max Rounds</label>
+              <label htmlFor="max-rounds" className="form-label">{t('modal_max_rounds')}</label>
               <input
                 id="max-rounds"
                 type="number"
@@ -207,14 +209,14 @@ export const NewRunModal: React.FC<NewRunModalProps> = ({
               className="btn-secondary"
               disabled={isSubmitting}
             >
-              Cancel
+              {t('modal_btn_cancel')}
             </button>
             <button
               type="submit"
               className="btn-primary"
               disabled={isSubmitting}
             >
-              {isSubmitting ? 'Starting Run...' : 'Launch Architecture Run'}
+              {isSubmitting ? t('modal_btn_creating') : t('modal_btn_create')}
             </button>
           </div>
         </form>

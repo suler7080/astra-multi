@@ -272,6 +272,31 @@ def test_plan_dependency_validation():
         models.PlanRevision.model_validate(payload)
 
 
+EXPECTED_PHASES: frozenset[RunPhase] = frozenset(
+    {
+        RunPhase.INTAKE,
+        RunPhase.SNAPSHOT,
+        RunPhase.INVESTIGATE,
+        RunPhase.INDEPENDENT_ANALYSIS,
+        RunPhase.PROPOSE,
+        RunPhase.REVIEW,
+        RunPhase.VERIFY,
+        RunPhase.REVISE,
+        RunPhase.SEMANTIC_REVIEW,
+        RunPhase.QUALITY_GATE,
+        RunPhase.EXPORT,
+    }
+)
+
+
+def test_phase_transitions_match_expected_phases():
+    from astra_multi.domain import policies
+
+    assert frozenset(policies.PHASE_TRANSITIONS.keys()) == EXPECTED_PHASES
+    assert frozenset(RunPhase) == EXPECTED_PHASES
+    assert len(EXPECTED_PHASES) == 11
+
+
 @pytest.mark.parametrize("source", list(RunPhase))
 @pytest.mark.parametrize("target", list(RunPhase))
 def test_phase_transition_table(source, target):
@@ -524,7 +549,7 @@ def test_domain_import_does_not_load_framework_or_sdks():
         [
             sys.executable,
             "-c",
-            "import sys; import astra_multi.domain.models; import astra_multi.domain.policies; import astra_multi.domain.repositories; assert not any(m.split('.')[0] in {'langgraph', 'langchain_core', 'openai', 'google'} for m in sys.modules)",
+            "import sys; before = set(sys.modules.keys()); import astra_multi.domain.models; import astra_multi.domain.policies; import astra_multi.domain.repositories; new_mods = set(sys.modules.keys()) - before; assert not any(m.split('.')[0] in {'langgraph', 'langchain_core', 'openai', 'google'} for m in new_mods)",
         ],
         check=True,
     )

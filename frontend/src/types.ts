@@ -127,7 +127,9 @@ export interface FinalizeResult {
   run_id: string;
   status: string;
   can_finalize: boolean;
-  blockers: string[];
+  message?: string;
+  reason?: string;
+  blockers?: string[];
 }
 
 export interface CreateRunPayload {
@@ -156,3 +158,72 @@ export interface StreamEvent {
     stop_reason?: string;
   };
 }
+
+export interface RunLogEntry {
+  id: string;
+  timestamp: string;
+  level: 'INFO' | 'WARN' | 'ERROR' | 'DEBUG';
+  node: string;
+  message: string;
+  details?: Record<string, unknown> | null;
+}
+
+export interface AuthStatus {
+  setup_required: boolean;
+  authenticated: boolean;
+}
+
+export interface ProviderItem {
+  name: string;
+  kind: 'openai' | 'google' | 'openai-compatible';
+  base_url?: string | null;
+  model: string;
+  has_api_key: boolean;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SaveProviderPayload {
+  name: string;
+  kind: 'openai' | 'google' | 'openai-compatible';
+  base_url?: string | null;
+  model: string;
+  api_key?: string;
+  is_active?: boolean;
+}
+
+export interface TestProviderPayload {
+  name?: string;
+  kind: 'openai' | 'google' | 'openai-compatible';
+  base_url?: string | null;
+  model: string;
+  api_key?: string;
+}
+
+export interface TestProviderResult {
+  success: boolean;
+  latency_ms?: number;
+  error?: string;
+}
+
+export interface RoleAssignment {
+  provider: string;
+  model?: string | null;
+}
+
+export interface RoleMappings {
+  planner?: RoleAssignment | null;
+  reviewer?: RoleAssignment | null;
+  synthesizer?: RoleAssignment | null;
+}
+
+export interface RoleMappingsResponse {
+  mappings: Record<string, RoleAssignment>;
+  active_provider?: string | null;
+  planner?: RoleAssignment | null;
+  reviewer?: RoleAssignment | null;
+  synthesizer?: RoleAssignment | null;
+}
+
+

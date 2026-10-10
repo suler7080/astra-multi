@@ -15,22 +15,28 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
+from astra_multi.api.routes_auth_settings import (
+    apply_active_provider_to_environment,
+    create_auth_settings_router,
+)
 from astra_multi.api.schemas import (
     AnswerQuestionRequest,
     CancelRunRequest,
     CreateRunRequest,
     RunDetailResponse,
+    RunLogEntry,
     RunSummaryResponse,
 )
 from astra_multi.api.worker import RunWorker
 from astra_multi.domain.models import (
+    TERMINAL,
     Budget,
     Requirement,
     Run,
     RunStatus,
     TaskSpec,
 )
-from astra_multi.domain.policies import InvalidState, RevisionConflict
+from astra_multi.domain.policies import InvalidState, LeaseLost, RevisionConflict
 from astra_multi.exports.exporter import PlanExporter
 from astra_multi.exports.finalization import (
     FinalizationService,
@@ -41,6 +47,10 @@ from astra_multi.gateway.model_gateway import ModelGateway
 from astra_multi.orchestration.controller import WorkflowController
 from astra_multi.persistence.artifacts import FileArtifactStore
 from astra_multi.persistence.sqlite import SQLiteStore
+from astra_multi.security.crypto import (
+    ensure_auth_secret_key,
+    verify_access_token,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -53,8 +63,19 @@ def create_app(
     auto_start_worker: bool = True,
 ) -> FastAPI:
     """Factory to create and configure the FastAPI application."""
-    db_file = db_path or Path(".local/domain.sqlite")
-    art_dir = artifacts_dir or Path(".local/artifacts")
+    if db_path is not None:
+        db_file = db_path
+    elif Path("backend/.local/domain.sqlite").exists():
+        db_file = Path("backend/.local/domain.sqlite")
+    else:
+        db_file = Path(".local/domain.sqlite")
+
+    if artifacts_dir is not None:
+        art_dir = artifacts_dir
+    elif Path("backend/.local/artifacts").exists():
+        art_dir = Path("backend/.local/artifacts")
+    else:
+        art_dir = Path(".local/artifacts")
     db_file.parent.mkdir(parents=True, exist_ok=True)
     art_dir.mkdir(parents=True, exist_ok=True)
 
@@ -82,6 +103,37 @@ def create_app(
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    # Auth Middleware for protecting runs and settings when admin password is set
+    @app.middleware("http")
+    async def auth_middleware(request: Request, call_next: Any) -> Response:
+        path = request.url.path
+        if path.startswith("/api/runs"):
+            admin_hash = store.settings.get_setting("admin_password_hash")
+            if admin_hash is not None:
+                token = None
+                auth_header = request.headers.get("Authorization")
+                if auth_header and auth_header.startswith("Bearer "):
+                    token = auth_header.split("Bearer ", 1)[1].strip()
+                elif request.query_params.get("token"):
+                    token = request.query_params.get("token")
+
+                if not token:
+                    return JSONResponse(
+                        status_code=status.HTTP_401_UNAUTHORIZED,
+                        content={"error": {"code": "unauthorized", "message": "Authentication required"}},
+                    )
+                secret = ensure_auth_secret_key(store.settings)
+                if not verify_access_token(token, secret):
+                    return JSONResponse(
+                        status_code=status.HTTP_401_UNAUTHORIZED,
+                        content={"error": {"code": "unauthorized", "message": "Invalid or expired token"}},
+                    )
+        return await call_next(request)
+
+    # Mount auth and settings router
+    app.include_router(create_auth_settings_router(store))
+    apply_active_provider_to_environment(store)
 
     # Store in app state
     app.state.store = store
@@ -112,6 +164,20 @@ def create_app(
             content={
                 "error": {
                     "code": "revision_conflict",
+                    "message": str(exc),
+                    "correlation_id": correlation_id,
+                }
+            },
+        )
+
+    @app.exception_handler(LeaseLost)
+    async def lease_lost_handler(request: Request, exc: LeaseLost) -> JSONResponse:
+        correlation_id = str(uuid.uuid4())
+        return JSONResponse(
+            status_code=status.HTTP_409_CONFLICT,
+            content={
+                "error": {
+                    "code": "lease_lost",
                     "message": str(exc),
                     "correlation_id": correlation_id,
                 }
@@ -181,6 +247,18 @@ def create_app(
         )
 
         store.create(task, run, snapshot=None)
+
+        # Snapshot role mappings into run metadata
+        role_mappings = store.settings.get_role_mappings()
+        store.settings.save_run_role_mappings_snapshot(run_id, role_mappings)
+        try:
+            meta_dir = store.artifacts.root / "metadata"
+            meta_dir.mkdir(parents=True, exist_ok=True)
+            (meta_dir / f"{run_id}.json").write_text(
+                json.dumps({"role_mappings": role_mappings}), encoding="utf-8"
+            )
+        except Exception:
+            pass
 
         if idem_key:
             app.state.idempotency_records[idem_key] = (payload_repr, run_id)
@@ -296,6 +374,8 @@ def create_app(
             async for ev in worker.event_stream(run_id, last_event_id=start_id):
                 payload_json = json.dumps(ev["data"], ensure_ascii=False)
                 yield f"id: {ev['id']}\nevent: {ev['event']}\ndata: {payload_json}\n\n"
+                if ev["event"] == "transition_run":
+                    yield f"id: {ev['id']}\nevent: transition_phase\ndata: {payload_json}\n\n"
 
         return StreamingResponse(
             sse_generator(),
@@ -315,6 +395,172 @@ def create_app(
     async def get_run_evidence(run_id: str) -> list[dict[str, Any]]:
         state = store.load(run_id)
         return [e.model_dump(mode="json") for e in state.evidence]
+
+    @app.get(
+        "/api/runs/{run_id}/logs",
+        summary="Get comprehensive execution logs and error diagnostics for a run",
+        response_model=list[RunLogEntry],
+    )
+    async def get_run_logs(run_id: str) -> list[RunLogEntry]:
+        try:
+            state = store.load(run_id)
+        except Exception:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Run {run_id} not found.",
+            )
+
+        events = store.events(run_id)
+        logs: list[RunLogEntry] = []
+
+        # Map domain events to structured logs
+        for ev in events:
+            payload = ev.payload or {}
+            node = payload.get("node", "system")
+            ev_type = ev.type
+            ts = ev.timestamp.isoformat()
+            seq = ev.sequence
+
+            if ev_type == "run_created":
+                logs.append(
+                    RunLogEntry(
+                        id=f"LOG-{seq}",
+                        timestamp=ts,
+                        level="INFO",
+                        node="intake",
+                        message=f"Initialized run {run_id} (revision {ev.revision})",
+                        details=payload,
+                    )
+                )
+            elif ev_type == "transition_run":
+                res = payload.get("result", {})
+                phase = res.get("phase", "UNKNOWN")
+                run_status = res.get("status", "UNKNOWN")
+                reason = res.get("reason")
+                if run_status == "FAILED":
+                    level = "ERROR"
+                    msg = f"Run execution failed in phase {phase}: {reason or state.run.stop_reason or 'Internal error'}"
+                elif run_status in ("PARTIAL", "CANCELLED"):
+                    level = "WARN"
+                    msg = f"Run stopped in phase {phase} ({run_status}): {reason or state.run.stop_reason or ''}".strip()
+                else:
+                    level = "INFO"
+                    msg = f"Transitioned phase to {phase} (Status: {run_status})"
+                logs.append(
+                    RunLogEntry(
+                        id=f"LOG-{seq}",
+                        timestamp=ts,
+                        level=level,
+                        node=node,
+                        message=msg,
+                        details=payload,
+                    )
+                )
+            elif ev_type == "add_record":
+                res = payload.get("result", {})
+                rec_id = str(res.get("record_id", ""))
+                if "model-call" in str(payload.get("logical_operation_id", "")):
+                    logs.append(
+                        RunLogEntry(
+                            id=f"LOG-{seq}",
+                            timestamp=ts,
+                            level="INFO",
+                            node="model-gateway",
+                            message=f"Model invocation recorded: {rec_id}",
+                            details=payload,
+                        )
+                    )
+                elif rec_id.startswith("ISSUE"):
+                    logs.append(
+                        RunLogEntry(
+                            id=f"LOG-{seq}",
+                            timestamp=ts,
+                            level="WARN",
+                            node="review",
+                            message=f"Reviewer recorded issue {rec_id}",
+                            details=payload,
+                        )
+                    )
+                elif rec_id.startswith("DEC"):
+                    logs.append(
+                        RunLogEntry(
+                            id=f"LOG-{seq}",
+                            timestamp=ts,
+                            level="INFO",
+                            node="revise",
+                            message=f"Architectural decision recorded {rec_id}",
+                            details=payload,
+                        )
+                    )
+                elif rec_id.startswith("PROP"):
+                    logs.append(
+                        RunLogEntry(
+                            id=f"LOG-{seq}",
+                            timestamp=ts,
+                            level="INFO",
+                            node="propose",
+                            message=f"Planner proposal recorded {rec_id}",
+                            details=payload,
+                        )
+                    )
+                else:
+                    logs.append(
+                        RunLogEntry(
+                            id=f"LOG-{seq}",
+                            timestamp=ts,
+                            level="INFO",
+                            node=node,
+                            message=f"Record added: {rec_id}",
+                            details=payload,
+                        )
+                    )
+            elif ev_type == "commit_plan":
+                res = payload.get("result", {})
+                plan_rev = res.get("revision", 1)
+                logs.append(
+                    RunLogEntry(
+                        id=f"LOG-{seq}",
+                        timestamp=ts,
+                        level="INFO",
+                        node="revise",
+                        message=f"Synthesizer committed PlanRevision {plan_rev}",
+                        details=payload,
+                    )
+                )
+            else:
+                logs.append(
+                    RunLogEntry(
+                        id=f"LOG-{seq}",
+                        timestamp=ts,
+                        level="INFO",
+                        node=node,
+                        message=f"Event {ev_type} recorded (seq {seq})",
+                        details=payload,
+                    )
+                )
+
+        # If run has failed or has a stop_reason, ensure a dedicated ERROR log entry with stack trace
+        err_info = worker.get_run_error(run_id)
+        if state.run.status == RunStatus.FAILED or state.run.stop_reason or err_info:
+            last_ts = events[-1].timestamp.isoformat() if events else state.run.created_at.isoformat()
+            stop_reason_msg = state.run.stop_reason or (err_info.get("error") if err_info else "Execution error")
+            logs.append(
+                RunLogEntry(
+                    id=f"LOG-ERR-{run_id}",
+                    timestamp=last_ts,
+                    level="ERROR",
+                    node="worker",
+                    message=f"Stop reason: {stop_reason_msg}",
+                    details={
+                        "stop_reason": stop_reason_msg,
+                        "status": state.run.status.value,
+                        "phase": state.run.phase.value,
+                        "traceback": err_info.get("traceback") if err_info else None,
+                    },
+                )
+            )
+
+        return logs
 
     @app.get("/api/runs/{run_id}/decisions", summary="Get all architectural decisions for a run")
     async def get_run_decisions(run_id: str) -> list[dict[str, Any]]:
@@ -380,18 +626,96 @@ def create_app(
 
     @app.post("/api/runs/{run_id}/cancel", summary="Cancel an active run")
     async def cancel_run(run_id: str, body: CancelRunRequest) -> dict[str, Any]:
-        state = store.load(run_id)
-        lease = store.acquire(run_id, owner="api-user", ttl=30)
+        # Stop background worker task if active
+        if worker.is_running(run_id):
+            await worker.stop_task(run_id)
+
         try:
-            ctrl = WorkflowController(store, lease, actor="api-user")
-            ctrl.transition_phase(state.run.phase, RunStatus.CANCELLED, reason=body.reason)
+            state = store.load(run_id)
+        except Exception:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Run {run_id} not found.",
+            )
+
+        if state.run.status == RunStatus.CANCELLED:
             return {
                 "run_id": run_id,
                 "status": RunStatus.CANCELLED.value,
-                "message": f"Run cancelled: {body.reason}",
+                "message": f"Run is already cancelled: {state.run.stop_reason or ''}".strip(),
+            }
+
+        if state.run.status in TERMINAL:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Cannot cancel run in terminal status {state.run.status.value}.",
+            )
+
+        cancel_reason = (
+            body.reason.strip()
+            if body.reason and body.reason.strip()
+            else "User cancelled run via API"
+        )
+        lease = store.acquire(run_id, owner="api-user", ttl=30, force=True)
+        try:
+            ctrl = WorkflowController(store, lease, actor="api-user")
+            ctrl.transition_phase(state.run.phase, RunStatus.CANCELLED, reason=cancel_reason)
+            return {
+                "run_id": run_id,
+                "status": RunStatus.CANCELLED.value,
+                "message": f"Run cancelled: {cancel_reason}",
             }
         finally:
             store.release(lease)
+
+    @app.delete("/api/runs/{run_id}", summary="Delete a run/session permanently")
+    async def delete_run(
+        run_id: str, force: bool = Query(default=False, description="Force delete an active run")
+    ) -> dict[str, Any]:
+        try:
+            state = store.load(run_id)
+        except Exception:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Run {run_id} not found.",
+            )
+        is_active_task = worker.is_running(run_id)
+        is_active_status = state.run.status in (RunStatus.RUNNING, RunStatus.WAITING_FOR_INPUT)
+        if (is_active_task or is_active_status) and not force:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    f"Run {run_id} is active (status={state.run.status.value}). "
+                    "Cancel it first or retry with ?force=true to stop and delete."
+                ),
+            )
+        if is_active_task:
+            await worker.stop_task(run_id)
+        else:
+            worker.forget(run_id)
+        # Drop idempotency cache entries pointing at this run
+        try:
+            for key, (_, cached_run_id) in list(app.state.idempotency_records.items()):
+                if cached_run_id == run_id:
+                    del app.state.idempotency_records[key]
+        except Exception:
+            pass
+        try:
+            store.delete(run_id, force=force)
+        except LeaseLost as exc:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Run {run_id} cannot be deleted: {exc}. Retry with ?force=true.",
+            )
+        except KeyError:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Run {run_id} not found.",
+            )
+        return {
+            "run_id": run_id,
+            "message": "Run deleted permanently.",
+        }
 
     @app.get("/api/runs/{run_id}/export", summary="Export candidate plan as JSON or Markdown")
     async def export_plan(
@@ -469,16 +793,27 @@ def create_app(
                 return {
                     "run_id": run_id,
                     "status": RunStatus.FINAL.value,
+                    "can_finalize": True,
+                    "reason": decision.reason,
                     "message": "Run finalized as FINAL.",
+                    "blockers": [],
                 }
             finally:
                 store.release(lease)
         else:
+            blocker_msgs = [
+                v.message
+                for v in decision.quality_report.violations
+                if getattr(v.severity, "value", str(v.severity)).lower() == "blocker"
+            ]
+            if not blocker_msgs and decision.reason:
+                blocker_msgs = [decision.reason]
             return {
                 "run_id": run_id,
                 "status": decision.target_status.value,
                 "can_finalize": False,
                 "reason": decision.reason,
+                "blockers": blocker_msgs,
             }
 
     # Mount static files if frontend build exists

@@ -32,13 +32,14 @@ class RoundSnapshot:
     resolved_issue_count: int
     evidence_count: int
     decision_count: int
+    total_issue_count: int = 0
 
 
 class StagnationDetector:
     """Detects if repeated revise loops are not making forward progress."""
 
     def __init__(self, history_window: int = 2) -> None:
-        self.history_window = history_window
+        self.history_window = max(2, history_window)
         self.snapshots: list[RoundSnapshot] = []
 
     def record_round(self, state: RunState, round_number: int) -> None:
@@ -56,6 +57,7 @@ class StagnationDetector:
             resolved_issue_count=resolved_issues,
             evidence_count=len(state.evidence),
             decision_count=len(state.decisions),
+            total_issue_count=len(state.issues),
         )
         self.snapshots.append(snap)
 
@@ -65,11 +67,18 @@ class StagnationDetector:
             return False
 
         last = self.snapshots[-1]
-        prev = self.snapshots[-2]
+        baseline = self.snapshots[-self.history_window]
 
-        # If no issues were resolved, no new evidence was found, and no new decisions were made
-        no_issue_progress = last.resolved_issue_count <= prev.resolved_issue_count
-        no_evidence_progress = last.evidence_count <= prev.evidence_count
-        no_decision_progress = last.decision_count <= prev.decision_count
+        # Check forward progress across the configured history window:
+        # 1. More issues resolved
+        # 2. More evidence gathered
+        # 3. New decisions made
+        # 4. New issues discovered during investigation
+        has_progress = (
+            last.resolved_issue_count > baseline.resolved_issue_count
+            or last.evidence_count > baseline.evidence_count
+            or last.decision_count > baseline.decision_count
+            or last.total_issue_count > baseline.total_issue_count
+        )
 
-        return no_issue_progress and no_evidence_progress and no_decision_progress
+        return not has_progress

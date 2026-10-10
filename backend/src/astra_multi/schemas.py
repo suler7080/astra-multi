@@ -70,3 +70,6 @@ class ModelResult:
     schema_version: str | None = None
     cost_estimate_usd: float | None = None
     cost_actual_usd: float | None = None
+    cumulative_usage: dict[str, int | None] | None = None
+    cumulative_cost_usd: float | None = None
+    is_estimated: bool = False

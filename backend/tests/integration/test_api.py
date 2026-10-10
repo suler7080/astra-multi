@@ -6,8 +6,8 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from astra_multi.api.app import create_app
-from astra_multi.domain.commands import CommitPlan
-from astra_multi.domain.models import PlanRevision, PlanStep
+from astra_multi.domain.commands import CommitPlan, TransitionRun
+from astra_multi.domain.models import PlanRevision, PlanStep, RunPhase, RunStatus
 
 
 def test_api_create_run_and_idempotency():
@@ -144,6 +144,20 @@ def test_api_export_and_validate():
                 )
                 lease = store.acquire(run_id, owner="test", ttl=30)
                 store.commit(run_id, CommitPlan(expected_revision=1, node="test", logical_operation_id="op-exp", actor="test", plan=plan), lease)
+                current_phase = store.load(run_id).run.phase
+                store.commit(
+                    run_id,
+                    TransitionRun(
+                        expected_revision=2,
+                        node="export",
+                        logical_operation_id="export-partial",
+                        actor="worker",
+                        phase=current_phase,
+                        status=RunStatus.PARTIAL,
+                        reason="MVP candidate generated (awaiting P4 quality certification)",
+                    ),
+                    lease,
+                )
                 store.release(lease)
 
                 # Validate
@@ -155,6 +169,8 @@ def test_api_export_and_validate():
                 fin_res = client.post(f"/api/runs/{run_id}/finalize")
                 assert fin_res.status_code == 200
                 assert fin_res.json()["status"] == "FINAL"
+                assert fin_res.json()["can_finalize"] is True
+                assert fin_res.json()["blockers"] == []
 
                 # Export JSON
                 exp_json = client.get(f"/api/runs/{run_id}/export?format=json")
@@ -300,7 +316,8 @@ def test_api_entity_queries_and_sse():
                 assert sse_res.status_code == 200
                 assert "text/event-stream" in sse_res.headers["content-type"]
                 body_text = sse_res.text
-                assert "event: " in body_text
+                assert "event: transition_run" in body_text
+                assert "event: transition_phase" in body_text
                 assert "run_completed" in body_text
 
                 # Test SSE with Last-Event-ID header replay
@@ -324,3 +341,41 @@ def test_api_serves_frontend():
                 assert "Astra Multi" in res.text
         finally:
             app.state.store.close()
+
+
+def test_api_get_run_logs():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = Path(tmpdir) / "api.db"
+        art_path = Path(tmpdir) / "artifacts"
+        app = create_app(db_path=db_path, artifacts_dir=art_path, auto_start_worker=False)
+        try:
+            with TestClient(app) as client:
+                # 404 on non-existent run
+                res_404 = client.get("/api/runs/RUN-NONEXISTENT/logs")
+                assert res_404.status_code == 404
+
+                # Create run
+                create_res = client.post(
+                    "/api/runs",
+                    json={"goal": "Logging Test Run", "requirements": ["Log Requirement"]},
+                )
+                run_id = create_res.json()["run_id"]
+
+                # Get logs
+                logs_res = client.get(f"/api/runs/{run_id}/logs")
+                assert logs_res.status_code == 200
+                logs = logs_res.json()
+                assert len(logs) >= 1
+                assert logs[0]["level"] == "INFO"
+                assert logs[0]["node"] == "intake"
+                assert "Initialized run" in logs[0]["message"]
+
+                # Cancel run to produce terminal state with reason
+                client.post(f"/api/runs/{run_id}/cancel", json={"reason": "Test cancel reason"})
+                logs_res_after = client.get(f"/api/runs/{run_id}/logs")
+                assert logs_res_after.status_code == 200
+                logs_after = logs_res_after.json()
+                assert any("Test cancel reason" in l["message"] for l in logs_after)
+        finally:
+            app.state.store.close()
+

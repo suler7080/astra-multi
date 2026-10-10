@@ -11,19 +11,24 @@ import {
   FileText,
   CheckCircle2,
   ListTodo,
+  Trash2,
 } from 'lucide-react';
+import { useI18n } from '../i18nContext';
 
 interface RunOverviewProps {
   run: RunDetail;
   onAnswerQuestion: (questionId: string, answer: string, expectedRevision: number) => Promise<void>;
   onResumeRun: () => Promise<void>;
   onCancelRun: (reason: string) => Promise<void>;
+  onDeleteRun: () => Promise<void>;
   onValidate: () => Promise<void>;
   onFinalize: () => Promise<void>;
   onExportMarkdown: () => void;
   onExportJson: () => void;
   isProcessing: boolean;
+  isDeleting?: boolean;
   actionMessage?: string | null;
+  onViewLogs?: () => void;
 }
 
 export const RunOverview: React.FC<RunOverviewProps> = ({
@@ -31,16 +36,21 @@ export const RunOverview: React.FC<RunOverviewProps> = ({
   onAnswerQuestion,
   onResumeRun,
   onCancelRun,
+  onDeleteRun,
   onValidate,
   onFinalize,
   onExportMarkdown,
   onExportJson,
   isProcessing,
+  isDeleting,
   actionMessage,
+  onViewLogs,
 }) => {
+  const { t } = useI18n();
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [cancelReason, setCancelReason] = useState('Stopped by operator');
   const [showCancelPrompt, setShowCancelPrompt] = useState(false);
+  const [showDeletePrompt, setShowDeletePrompt] = useState(false);
 
   const handleAnswerSubmit = async (questionId: string) => {
     const text = (answers[questionId] || '').trim();
@@ -61,18 +71,52 @@ export const RunOverview: React.FC<RunOverviewProps> = ({
         </div>
       )}
 
+      {/* Prominent Failure Banner if run failed */}
+      {(run.status === 'FAILED' || (isTerminal && run.stop_reason && run.status !== 'FINAL')) && (
+        <div className="run-failure-banner">
+          <div className="flex items-start justify-between gap-4">
+            <div className="flex items-start gap-3 flex-1">
+              <span className="p-2 rounded-lg bg-rose-950/60 border border-rose-800/60 text-rose-400">
+                ⚠️
+              </span>
+              <div className="flex-1">
+                <div className="flex items-center gap-2">
+                  <h3 className="text-sm font-semibold text-rose-200">
+                    {t('overview_execution_stopped')}: {run.status === 'FAILED' ? t('overview_fatal_failure') : run.status}
+                  </h3>
+                  <span className="badge-danger text-[11px]">Phase: {run.phase}</span>
+                </div>
+                <p className="text-xs text-rose-300/90 mt-1 font-mono break-words bg-rose-950/40 p-2.5 rounded border border-rose-900/40">
+                  {run.stop_reason || 'Unknown error occurred during workflow execution.'}
+                </p>
+              </div>
+            </div>
+
+            {onViewLogs && (
+              <button
+                onClick={onViewLogs}
+                className="btn-danger-sm flex items-center gap-1.5 whitespace-nowrap self-center"
+              >
+                <span>{t('overview_view_logs')}</span>
+                <span>➔</span>
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Pending Questions Banner */}
       {run.pending_questions && run.pending_questions.length > 0 && (
         <div className="pending-questions-card">
           <div className="pending-header">
             <div className="flex-align-center gap-2">
               <HelpCircle className="text-amber-400" size={20} />
-              <h3 className="card-title text-amber-300">Clarification Needed from Operator</h3>
+              <h3 className="card-title text-amber-300">{t('overview_clarification_title')}</h3>
             </div>
-            <span className="badge-amber">{run.pending_questions.length} Question(s)</span>
+            <span className="badge-amber">{run.pending_questions.length} {t('overview_question_count')}</span>
           </div>
           <p className="card-desc">
-            The agents have paused deliberation to request specific human input or decision constraint:
+            {t('overview_clarification_desc')}
           </p>
 
           <div className="questions-list">
@@ -88,7 +132,7 @@ export const RunOverview: React.FC<RunOverviewProps> = ({
                     type="text"
                     value={answers[q.id] || ''}
                     onChange={(e) => setAnswers({ ...answers, [q.id]: e.target.value })}
-                    placeholder="Provide answer / architectural preference..."
+                    placeholder={t('overview_answer_placeholder')}
                     className="form-input flex-1"
                     disabled={isProcessing}
                     onKeyDown={(e) => {
@@ -101,7 +145,7 @@ export const RunOverview: React.FC<RunOverviewProps> = ({
                     disabled={isProcessing || !(answers[q.id] || '').trim()}
                   >
                     <Send size={14} />
-                    <span>Submit</span>
+                    <span>{t('overview_submit')}</span>
                   </button>
                 </div>
               </div>
@@ -111,7 +155,7 @@ export const RunOverview: React.FC<RunOverviewProps> = ({
           {isWaiting && (
             <div className="resume-prompt-row">
               <span className="text-sm text-slate-300">
-                All questions answered? Resume deliberation to continue planning:
+                {t('overview_all_answered')}
               </span>
               <button
                 onClick={onResumeRun}
@@ -119,7 +163,7 @@ export const RunOverview: React.FC<RunOverviewProps> = ({
                 disabled={isProcessing}
               >
                 <Play size={15} />
-                <span>Resume Run</span>
+                <span>{t('overview_resume_run')}</span>
               </button>
             </div>
           )}
@@ -129,23 +173,35 @@ export const RunOverview: React.FC<RunOverviewProps> = ({
       {/* Main Stats Grid */}
       <div className="stats-grid">
         <div className="stat-card">
-          <span className="stat-label">Goal & Objective</span>
+          <span className="stat-label">{t('overview_goal')}</span>
           <span className="stat-value text-base font-medium">{run.goal}</span>
         </div>
         <div className="stat-card">
-          <span className="stat-label">Status & Revision</span>
+          <span className="stat-label">{t('overview_status_rev')}</span>
           <div className="flex-align-center gap-2 mt-1">
             <span className="font-semibold text-lg">{run.status}</span>
             <span className="badge-subtle">Rev {run.revision}</span>
           </div>
         </div>
         <div className="stat-card">
-          <span className="stat-label">Artifacts Committed</span>
-          <div className="flex-align-center gap-3 mt-1 text-sm text-slate-300">
-            <span>Plans: <strong>{run.plans_count}</strong></span>
-            <span>Issues: <strong>{run.issues_count}</strong> ({run.blocking_issues_count} blocking)</span>
-            <span>Decisions: <strong>{run.decisions_count}</strong></span>
-            <span>Evidence: <strong>{run.evidence_count}</strong></span>
+          <span className="stat-label">{t('overview_artifacts')}</span>
+          <div className="stat-artifacts-grid">
+            <div className="stat-artifact-item">
+              <span>{t('overview_plans_count')}</span>
+              <strong>{run.plans_count}</strong>
+            </div>
+            <div className="stat-artifact-item">
+              <span>{t('overview_issues_count')}</span>
+              <strong>{run.issues_count} {run.blocking_issues_count > 0 && `(${run.blocking_issues_count})`}</strong>
+            </div>
+            <div className="stat-artifact-item">
+              <span>{t('overview_decisions_count')}</span>
+              <strong>{run.decisions_count}</strong>
+            </div>
+            <div className="stat-artifact-item">
+              <span>{t('overview_evidence_count')}</span>
+              <strong>{run.evidence_count}</strong>
+            </div>
           </div>
         </div>
       </div>
@@ -155,7 +211,7 @@ export const RunOverview: React.FC<RunOverviewProps> = ({
         <div className="flex-between mb-3">
           <div className="flex-align-center gap-2">
             <ListTodo size={18} className="text-sky-400" />
-            <h3 className="card-title">Target Requirements ({run.requirements.length})</h3>
+            <h3 className="card-title">{t('overview_target_requirements')} ({run.requirements.length})</h3>
           </div>
         </div>
         <div className="requirements-table">
@@ -164,7 +220,7 @@ export const RunOverview: React.FC<RunOverviewProps> = ({
               <span className="req-id-badge">{req.id}</span>
               <div className="flex-1">
                 <p className="text-sm font-medium text-slate-100">{req.text}</p>
-                <p className="text-xs text-slate-400 mt-1">Acceptance: {req.acceptance}</p>
+                <p className="text-xs text-slate-400 mt-1">{t('overview_acceptance')} {req.acceptance}</p>
               </div>
             </div>
           ))}
@@ -181,7 +237,7 @@ export const RunOverview: React.FC<RunOverviewProps> = ({
               disabled={isProcessing}
             >
               <Play size={15} />
-              <span>Resume Run</span>
+              <span>{t('overview_resume_run')}</span>
             </button>
           )}
 
@@ -193,7 +249,7 @@ export const RunOverview: React.FC<RunOverviewProps> = ({
                     type="text"
                     value={cancelReason}
                     onChange={(e) => setCancelReason(e.target.value)}
-                    placeholder="Reason for cancellation..."
+                    placeholder={t('overview_cancel_placeholder')}
                     className="form-input text-xs"
                   />
                   <button
@@ -204,13 +260,13 @@ export const RunOverview: React.FC<RunOverviewProps> = ({
                     className="btn-danger-sm"
                     disabled={isProcessing}
                   >
-                    Confirm Stop
+                    {t('overview_confirm_stop')}
                   </button>
                   <button
                     onClick={() => setShowCancelPrompt(false)}
                     className="btn-text-sm"
                   >
-                    Cancel
+                    {t('overview_cancel')}
                   </button>
                 </div>
               ) : (
@@ -220,7 +276,7 @@ export const RunOverview: React.FC<RunOverviewProps> = ({
                   disabled={isProcessing}
                 >
                   <StopCircle size={15} />
-                  <span>Cancel Run</span>
+                  <span>{t('overview_cancel_run')}</span>
                 </button>
               )}
             </>
@@ -233,7 +289,7 @@ export const RunOverview: React.FC<RunOverviewProps> = ({
             title="Execute P4 Quality Gate structural verification"
           >
             <ShieldCheck size={15} className="text-sky-400" />
-            <span>Validate Quality Gates</span>
+            <span>{t('overview_validate_gates')}</span>
           </button>
 
           <button
@@ -243,8 +299,42 @@ export const RunOverview: React.FC<RunOverviewProps> = ({
             title="Evaluate finalization conditions to promote to FINAL status"
           >
             <Award size={15} className="text-emerald-400" />
-            <span>Finalize Plan</span>
+            <span>{t('overview_finalize_plan')}</span>
           </button>
+
+          {showDeletePrompt ? (
+            <span className="cancel-prompt-inline">
+              <span className="text-xs text-slate-300">
+                {!isTerminal ? t('overview_confirm_delete_active') : t('overview_confirm_delete')}
+              </span>
+              <button
+                onClick={() => {
+                  onDeleteRun();
+                  setShowDeletePrompt(false);
+                }}
+                className="btn-danger-sm"
+                disabled={isProcessing || isDeleting}
+              >
+                {t('overview_confirm_stop')}
+              </button>
+              <button
+                onClick={() => setShowDeletePrompt(false)}
+                className="btn-text-sm"
+              >
+                {t('overview_cancel')}
+              </button>
+            </span>
+          ) : (
+            <button
+              onClick={() => setShowDeletePrompt(true)}
+              className="btn-danger"
+              disabled={isProcessing || isDeleting}
+              title={t('overview_delete_run')}
+            >
+              <Trash2 size={15} />
+              <span>{isDeleting ? '...' : t('overview_delete_run')}</span>
+            </button>
+          )}
         </div>
 
         <div className="toolbar-right">
@@ -254,7 +344,7 @@ export const RunOverview: React.FC<RunOverviewProps> = ({
             disabled={isProcessing}
           >
             <FileText size={15} />
-            <span>Export Markdown</span>
+            <span>{t('overview_export_md')}</span>
           </button>
           <button
             onClick={onExportJson}
@@ -262,7 +352,7 @@ export const RunOverview: React.FC<RunOverviewProps> = ({
             disabled={isProcessing}
           >
             <Download size={15} />
-            <span>Export JSON</span>
+            <span>{t('overview_export_json')}</span>
           </button>
         </div>
       </div>

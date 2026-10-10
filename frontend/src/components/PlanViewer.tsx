@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import type { PlanRevision } from '../types';
 import { GitBranch, CheckSquare, Download, FileText, ArrowRight } from 'lucide-react';
+import { useI18n } from '../i18nContext';
 
 interface PlanViewerProps {
   currentPlan?: PlanRevision | null;
@@ -17,13 +18,14 @@ export const PlanViewer: React.FC<PlanViewerProps> = ({
   onExportMarkdown,
   onExportJson,
 }) => {
+  const { t } = useI18n();
   const [selectedRev, setSelectedRev] = useState<number>(currentPlan?.revision || 1);
 
   if (!currentPlan) {
     return (
       <div className="section-card empty-state">
         <GitBranch size={32} className="text-slate-600 mb-2" />
-        <p className="text-slate-400 text-sm">No architecture plan revision has been committed yet.</p>
+        <p className="text-slate-400 text-sm">{t('plan_no_plan')}</p>
       </div>
     );
   }
@@ -35,7 +37,7 @@ export const PlanViewer: React.FC<PlanViewerProps> = ({
       <div className="flex-between mb-4">
         <div className="flex-align-center gap-2">
           <GitBranch size={18} className="text-sky-400" />
-          <h3 className="card-title">Architecture Execution Plan</h3>
+          <h3 className="card-title">{t('plan_title')}</h3>
           <span className="badge-subtle ml-2">Revision {currentPlan.revision}</span>
         </div>
 

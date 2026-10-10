@@ -13,9 +13,9 @@ Cần có một giao thức thảo luận chuẩn hóa, tránh tranh luận ch�
 
 ## Quyết định kiến trúc
 
-1. **Giao thức 10 pha chuẩn hóa:**
-   `INTAKE` -> `SNAPSHOT` -> `INVESTIGATE` -> `INDEPENDENT_ANALYSIS` -> `PROPOSE` -> `REVIEW` -> `VERIFY` -> `REVISE` -> `QUALITY_GATE` -> `EXPORT`.
-   - Vòng lặp phản biện/sửa đổi giới hạn: `QUALITY_GATE` -> `REVIEW` hoặc `EXPORT`. Tối đa 2 vòng mặc định.
+1. **Giao thức 11 pha chuẩn hóa (cập nhật theo ADR-007):**
+   `INTAKE` -> `SNAPSHOT` -> `INVESTIGATE` -> `INDEPENDENT_ANALYSIS` -> `PROPOSE` -> `REVIEW` -> `VERIFY` -> `REVISE` -> `SEMANTIC_REVIEW` -> `QUALITY_GATE` -> `EXPORT`.
+   - Vòng lặp phản biện/sửa đổi giới hạn: `QUALITY_GATE` -> `PROPOSE` (nếu còn round) hoặc `EXPORT` (FINAL/PARTIAL). Tối đa 2 vòng mặc định.
 
 2. **Cách ly ngữ cảnh (Context Isolation):**
    - Trong pha `INDEPENDENT_ANALYSIS`, Planner và Reviewer chỉ nhận baseline gồm `TaskSpec`, metadata của repo snapshot, repo map và essential sources.

@@ -1,5 +1,6 @@
 import React from 'react';
 import { Check, CircleDot, AlertTriangle, XCircle, CheckCircle2 } from 'lucide-react';
+import { useI18n, type TranslationKey } from '../i18nContext';
 
 const PHASES = [
   'INTAKE',
@@ -10,6 +11,7 @@ const PHASES = [
   'REVIEW',
   'VERIFY',
   'REVISE',
+  'SEMANTIC_REVIEW',
   'QUALITY_GATE',
   'EXPORT',
 ] as const;
@@ -25,22 +27,28 @@ export const PhaseTracker: React.FC<PhaseTrackerProps> = ({
   status,
   stopReason,
 }) => {
+  const { t } = useI18n();
   const currentIndex = PHASES.indexOf(currentPhase as (typeof PHASES)[number]);
+
+  const getPhaseName = (phase: string) => {
+    const key = `phase_${phase.toLowerCase()}` as TranslationKey;
+    return t(key, phase.replace('_', ' '));
+  };
 
   const getStatusBadge = () => {
     switch (status) {
       case 'FINAL':
-        return <span className="status-badge badge-final"><CheckCircle2 size={14} /> FINAL</span>;
+        return <span className="status-badge badge-final"><CheckCircle2 size={14} /> {t('status_final')}</span>;
       case 'RUNNING':
-        return <span className="status-badge badge-running"><CircleDot size={14} className="animate-pulse" /> RUNNING</span>;
+        return <span className="status-badge badge-running"><CircleDot size={14} className="animate-pulse" /> {t('status_running')}</span>;
       case 'WAITING_FOR_INPUT':
-        return <span className="status-badge badge-waiting"><AlertTriangle size={14} /> WAITING FOR INPUT</span>;
+        return <span className="status-badge badge-waiting"><AlertTriangle size={14} /> {t('status_waiting')}</span>;
       case 'PARTIAL':
-        return <span className="status-badge badge-partial"><AlertTriangle size={14} /> PARTIAL</span>;
+        return <span className="status-badge badge-partial"><AlertTriangle size={14} /> {t('status_partial')}</span>;
       case 'CANCELLED':
-        return <span className="status-badge badge-cancelled"><XCircle size={14} /> CANCELLED</span>;
+        return <span className="status-badge badge-cancelled"><XCircle size={14} /> {t('status_cancelled')}</span>;
       case 'FAILED':
-        return <span className="status-badge badge-failed"><XCircle size={14} /> FAILED</span>;
+        return <span className="status-badge badge-failed"><XCircle size={14} /> {t('status_failed')}</span>;
       default:
         return <span className="status-badge badge-default">{status}</span>;
     }
@@ -50,12 +58,15 @@ export const PhaseTracker: React.FC<PhaseTrackerProps> = ({
     <div className="phase-tracker-card">
       <div className="phase-header">
         <div className="phase-title-group">
-          <span className="section-title">Workflow Lifecycle</span>
+          <span className="section-title">{t('phase_workflow_lifecycle')}</span>
           {getStatusBadge()}
         </div>
         {stopReason && (
-          <div className="stop-reason-box">
-            <strong>Stop reason:</strong> {stopReason}
+          <div className="stop-reason-box" title={stopReason}>
+            <strong>{t('phase_stop_reason')}</strong>
+            <span className="stop-reason-truncate">
+              {stopReason.length > 80 ? stopReason.slice(0, 80) + '...' : stopReason}
+            </span>
           </div>
         )}
       </div>
@@ -83,7 +94,7 @@ export const PhaseTracker: React.FC<PhaseTrackerProps> = ({
                 )}
               </div>
               <span className="step-label">
-                {phase.replace('_', ' ')}
+                {getPhaseName(phase)}
               </span>
               {idx < PHASES.length - 1 && <div className="step-connector" />}
             </div>

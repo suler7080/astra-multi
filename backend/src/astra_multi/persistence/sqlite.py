@@ -38,6 +38,7 @@ from astra_multi.domain.repositories import ArtifactStore
 
 from .artifacts import FileArtifactStore
 from .migrations import migrate
+from .settings_store import SettingsStore
 
 mutation_adapter: TypeAdapter[Mutation] = TypeAdapter(Mutation)
 
@@ -77,6 +78,7 @@ class SQLiteStore:
                 with closing(self.connection.execute(statement)) as cursor:
                     cursor.fetchall()
             migrate(self.connection)
+            self.settings = SettingsStore(lambda: self.connection)
         except BaseException:
             self.connection.close()
             raise
@@ -147,6 +149,18 @@ class SQLiteStore:
         if row is None:
             raise KeyError(run_id)
         return RunState.model_validate_json(row[0])
+
+    def get_run_status_info(self, run_id: str) -> tuple[str, str, str | None] | None:
+        row = self.connection.execute(
+            "SELECT json_extract(state_json, '$.run.status'), "
+            "json_extract(state_json, '$.run.phase'), "
+            "json_extract(state_json, '$.run.stop_reason') "
+            "FROM runs WHERE id=?",
+            (run_id,),
+        ).fetchone()
+        if row is None or row[0] is None:
+            return None
+        return (str(row[0]), str(row[1]) if row[1] is not None else "", row[2])
 
     def operation(
         self, run_id: str, node: str, logical_operation_id: str
@@ -278,16 +292,23 @@ class SQLiteStore:
         if not math.isfinite(ttl) or ttl <= 0:
             raise ValueError("ttl must be finite and positive")
 
-    def acquire(self, run_id: str, owner: str, ttl: float = 30) -> Lease:
+    def acquire(
+        self, run_id: str, owner: str, ttl: float = 30, force: bool = False
+    ) -> Lease:
         self._ttl(ttl)
         with self._transaction():
-            if self.load(run_id).run.status in TERMINAL:
-                raise InvalidState("cannot acquire a terminal run")
+            status = self.load(run_id).run.status
+            if status in TERMINAL:
+                if not (
+                    status == RunStatus.PARTIAL
+                    and owner in ("quality-service", "P4-quality-service")
+                ):
+                    raise InvalidState("cannot acquire a terminal run")
             now = self.clock()
             row = self.connection.execute(
                 "SELECT epoch, expires_at FROM leases WHERE run_id=?", (run_id,)
             ).fetchone()
-            if row and datetime.fromisoformat(row[1]) > now:
+            if row and datetime.fromisoformat(row[1]) > now and not force:
                 raise LeaseLost("run already leased")
             lease = Lease(
                 run_id=run_id,
@@ -325,3 +346,49 @@ class SQLiteStore:
                 "UPDATE leases SET expires_at=? WHERE run_id=?",
                 (self.clock().isoformat(), lease.run_id),
             )
+
+    def delete(
+        self, run_id: str, lease: Lease | None = None, force: bool = False
+    ) -> None:
+        """Permanently removes a run and all its child rows.
+
+        Child tables reference ``runs(id)`` with foreign keys, so they must
+        be deleted first. Content-addressed artifacts under ``artifacts.root``
+        are shared between runs and are intentionally kept; only the
+        per-run error log (``errors/{run_id}.log``) is removed.
+
+        Guarded by lease fencing:
+        - If ``lease`` is provided, it must be the valid, unexpired lease for ``run_id``.
+        - If ``lease`` is None and ``force`` is False, raises ``LeaseLost`` if an active,
+          unexpired lease is currently held by any worker.
+        - If ``force`` is True, allows deletion even if an active lease exists.
+        """
+        with self._transaction():
+            row = self.connection.execute(
+                "SELECT id FROM runs WHERE id=?", (run_id,)
+            ).fetchone()
+            if row is None:
+                raise KeyError(run_id)
+
+            if lease is not None:
+                self._check_lease(run_id, lease)
+            elif not force:
+                now = self.clock()
+                lease_row = self.connection.execute(
+                    "SELECT owner, expires_at FROM leases WHERE run_id=?", (run_id,)
+                ).fetchone()
+                if lease_row and datetime.fromisoformat(lease_row[1]) > now:
+                    raise LeaseLost(
+                        f"run {run_id} is currently leased by owner '{lease_row[0]}'"
+                    )
+
+            self.connection.execute("DELETE FROM operations WHERE run_id=?", (run_id,))
+            self.connection.execute("DELETE FROM events WHERE run_id=?", (run_id,))
+            self.connection.execute("DELETE FROM leases WHERE run_id=?", (run_id,))
+            self.connection.execute("DELETE FROM runs WHERE id=?", (run_id,))
+        try:
+            err_file = self.artifacts.root / "errors" / f"{run_id}.log"
+            if err_file.exists():
+                err_file.unlink()
+        except Exception:
+            pass

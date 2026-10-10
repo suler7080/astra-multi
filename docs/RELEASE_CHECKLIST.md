@@ -35,7 +35,7 @@ Theo báo cáo [PILOT_REPORT.md](PILOT_REPORT.md):
 - **Tỷ lệ loại trừ lỗi bỏ sót nghiêm trọng (Critical Omissions):** Triệt tiêu hoàn toàn 6 lỗi bỏ sót (Astra Multi 0 lỗi vs Baseline 6 lỗi).
 - **Tỷ lệ phải lập lại kế hoạch (Re-plan Rate):** Giảm từ 50.0% xuống còn **0.0%**.
 - **Tính thực thi được (Executability Score):** Tăng từ 3.10 lên **3.85 / 4.0**.
-- **Ngân sách tiêu thụ:** Nằm trong hạn mức cấu hình (trung bình ~6.5k tokens/run cho toàn bộ 10 phase thảo luận chuyên sâu).
+- **Ngân sách tiêu thụ:** Nằm trong hạn mức cấu hình (trung bình ~6.5k tokens/run cho toàn bộ 11 phase thảo luận chuyên sâu).
 
 ---
 

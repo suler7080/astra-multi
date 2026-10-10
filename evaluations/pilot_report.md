@@ -58,9 +58,9 @@ Theo yêu cầu P6.3, thực thi độc lập 4 kế hoạch đại diện trong
 
 | Mã Task | Kế hoạch thực thi | Thời gian (s) | Mã thoát (Exit Code) | Kết quả kiểm chứng | Cần Re-plan? |
 |---|---|---|---|---|---|
-| `TASK-01` | Bug Fix: SQLite retry mechanism | 0.054s | 0 | **PASS** | Không |
-| `TASK-03` | Feature: JWT validation check | 0.054s | 0 | **PASS** | Không |
-| `TASK-05` | Refactor: Hexagonal Domain Event Dispatcher | 0.047s | 0 | **PASS** | Không |
-| `TASK-11` | Greenfield: Sliding Window Rate Limiter | 0.054s | 0 | **PASS** | Không |
+| `TASK-01` | Bug Fix: SQLite retry mechanism | 0.056s | 0 | **PASS** | Không |
+| `TASK-03` | Feature: JWT validation check | 0.073s | 0 | **PASS** | Không |
+| `TASK-05` | Refactor: Hexagonal Domain Event Dispatcher | 0.054s | 0 | **PASS** | Không |
+| `TASK-11` | Greenfield: Sliding Window Rate Limiter | 0.074s | 0 | **PASS** | Không |
 
 **Kết luận thực thi:** 100% các kế hoạch mẫu (4/4) đều thực thi thành công, exit code 0, không phát sinh lỗi cú pháp hay thiếu sót phụ thuộc.

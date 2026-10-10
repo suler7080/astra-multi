@@ -9,3 +9,7 @@ backend/.pytest_cache/
 backend/.local/
 frontend/node_modules/
 frontend/dist/
+.vs/
+*.zip
+repro_tests/
+need_fix.md

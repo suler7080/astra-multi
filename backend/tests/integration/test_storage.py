@@ -259,6 +259,59 @@ def test_terminal_acquire_resume_and_final_are_rejected(tmp_path):
             store.acquire(state.run.id, "new")
 
 
+def test_partial_run_can_be_acquired_by_quality_service_and_finalized(tmp_path):
+    with SQLiteStore(tmp_path / "domain.sqlite") as store:
+        state, lease = create(store)
+        # Transition run to PARTIAL in current phase
+        store.commit(
+            state.run.id,
+            TransitionRun(
+                expected_revision=1,
+                node="export",
+                logical_operation_id="export-partial",
+                actor="worker",
+                phase=state.run.phase,
+                status=RunStatus.PARTIAL,
+                reason="MVP candidate generated (awaiting P4 quality certification)",
+            ),
+            lease,
+        )
+        store.release(lease)
+
+        # Non-quality owner is rejected
+        with pytest.raises(InvalidState, match="cannot acquire a terminal run"):
+            store.acquire(state.run.id, "worker")
+
+        # quality-service is allowed to acquire PARTIAL run
+        quality_lease = store.acquire(state.run.id, "quality-service", ttl=30)
+        assert quality_lease.owner == "quality-service"
+
+        # P4 quality service can transition PARTIAL run to FINAL
+        loaded = store.load(state.run.id)
+        store.commit(
+            state.run.id,
+            TransitionRun(
+                expected_revision=loaded.run.revision,
+                node="gate",
+                logical_operation_id="finalize",
+                actor="P4-quality-service",
+                phase=loaded.run.phase,
+                status=RunStatus.FINAL,
+                reason="Certified final plan",
+            ),
+            quality_lease,
+        )
+        store.release(quality_lease)
+
+        final_state = store.load(state.run.id)
+        assert final_state.run.status == RunStatus.FINAL
+        assert final_state.run.phase == state.run.phase
+
+        # Once FINAL, even quality-service cannot re-acquire
+        with pytest.raises(InvalidState, match="cannot acquire a terminal run"):
+            store.acquire(state.run.id, "quality-service")
+
+
 def test_sample_client_uses_repository_protocol_and_reopens(tmp_path):
     path = tmp_path / "domain.sqlite"
     with SQLiteStore(path) as store:

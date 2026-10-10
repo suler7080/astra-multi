@@ -13,6 +13,7 @@ from astra_multi.domain.models import (
     RunStatus,
     TaskSpec,
 )
+from astra_multi.domain.policies import LeaseLost
 from astra_multi.orchestration.controller import WorkflowController
 from astra_multi.persistence.sqlite import SQLiteStore
 
@@ -22,16 +23,26 @@ def build_parser() -> argparse.ArgumentParser:
         prog="astra-multi",
         description="Astra Multi — Multi-agent software architecture design CLI",
     )
+    default_db = (
+        Path("backend/.local/domain.sqlite")
+        if Path("backend/.local/domain.sqlite").exists()
+        else Path(".local/domain.sqlite")
+    )
+    default_artifacts = (
+        Path("backend/.local/artifacts")
+        if Path("backend/.local/artifacts").exists()
+        else Path(".local/artifacts")
+    )
     parser.add_argument(
         "--db",
         type=Path,
-        default=Path(".local/domain.sqlite"),
+        default=default_db,
         help="Path to SQLite persistence database",
     )
     parser.add_argument(
         "--artifacts",
         type=Path,
-        default=Path(".local/artifacts"),
+        default=default_artifacts,
         help="Path to artifact storage root",
     )
 
@@ -70,6 +81,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="Cancellation reason",
     )
 
+    # delete
+    delete_p = subparsers.add_parser("delete", help="Permanently delete a run/session")
+    delete_p.add_argument("run_id", help="Target run ID")
+    delete_p.add_argument(
+        "--force",
+        action="store_true",
+        help="Also delete runs that are still active",
+    )
+
     # artifacts
     art_p = subparsers.add_parser("artifacts", help="Export or view candidate artifacts")
     art_p.add_argument("run_id", help="Target run ID")
@@ -87,6 +107,21 @@ def build_parser() -> argparse.ArgumentParser:
     # finalize
     fin_p = subparsers.add_parser("finalize", help="Evaluate quality and finalize run status")
     fin_p.add_argument("run_id", help="Target run ID")
+
+    # logs
+    logs_p = subparsers.add_parser("logs", help="View execution logs and errors for a run")
+    logs_p.add_argument("run_id", help="Target run ID")
+    logs_p.add_argument(
+        "--level",
+        choices=["ALL", "INFO", "WARN", "ERROR"],
+        default="ALL",
+        help="Filter by minimum log level (default: ALL)",
+    )
+    logs_p.add_argument(
+        "--json",
+        action="store_true",
+        help="Output raw JSON logs",
+    )
 
     # serve
     serve_p = subparsers.add_parser("serve", help="Start FastAPI web backend and UI")
@@ -168,7 +203,7 @@ def cmd_answer(store: SQLiteStore, args: argparse.Namespace) -> int:
 
 def cmd_cancel(store: SQLiteStore, args: argparse.Namespace) -> int:
     state = store.load(args.run_id)
-    lease = store.acquire(args.run_id, owner="cli-user", ttl=30)
+    lease = store.acquire(args.run_id, owner="cli-user", ttl=30, force=True)
     controller = WorkflowController(store, lease, actor="cli-user")
     controller.transition_phase(
         new_phase=state.run.phase,
@@ -177,6 +212,31 @@ def cmd_cancel(store: SQLiteStore, args: argparse.Namespace) -> int:
     )
     store.release(lease)
     print(f"Cancelled run {args.run_id}")
+    return 0
+
+
+def cmd_delete(store: SQLiteStore, args: argparse.Namespace) -> int:
+    try:
+        state = store.load(args.run_id)
+    except Exception:
+        print(f"Error: Run {args.run_id} not found.", file=sys.stderr)
+        return 1
+    if state.run.status.value in ("RUNNING", "WAITING_FOR_INPUT") and not args.force:
+        print(
+            f"Error: Run {args.run_id} is active ({state.run.status.value}). "
+            "Cancel it first or retry with --force.",
+            file=sys.stderr,
+        )
+        return 1
+    try:
+        store.delete(args.run_id, force=args.force)
+    except LeaseLost as exc:
+        print(f"Error: Cannot delete run: {exc}. Retry with --force.", file=sys.stderr)
+        return 1
+    except KeyError:
+        print(f"Error: Run {args.run_id} not found.", file=sys.stderr)
+        return 1
+    print(f"Deleted run {args.run_id}")
     return 0
 
 
@@ -253,18 +313,87 @@ def cmd_finalize(store: SQLiteStore, args: argparse.Namespace) -> int:
     decision = service.evaluate(state, assessment)
     if decision.can_finalize:
         lease = store.acquire(args.run_id, owner="quality-service", ttl=30)
-        controller = WorkflowController(store, lease, actor="P4-quality-service")
-        controller.transition_phase(
-            new_phase=state.run.phase,
-            new_status=RunStatus.FINAL,
-            reason=decision.reason,
-        )
-        store.release(lease)
+        try:
+            controller = WorkflowController(store, lease, actor="P4-quality-service")
+            controller.transition_phase(
+                new_phase=state.run.phase,
+                new_status=RunStatus.FINAL,
+                reason=decision.reason,
+            )
+        finally:
+            store.release(lease)
         print(f"Run {args.run_id} finalized as FINAL.")
         return 0
     else:
         print(f"Run {args.run_id} cannot be finalized as FINAL. Status: {decision.target_status.value}. Reason: {decision.reason}")
         return 1
+
+
+def cmd_logs(store: SQLiteStore, args: argparse.Namespace) -> int:
+    try:
+        state = store.load(args.run_id)
+    except Exception:
+        print(f"Error: Run {args.run_id} not found.", file=sys.stderr)
+        return 1
+
+    events = store.events(args.run_id)
+    if args.json:
+        entries = [ev.model_dump(mode="json") for ev in events]
+        if state.run.stop_reason:
+            entries.append({"type": "stop_reason", "error": state.run.stop_reason})
+        print(json.dumps(entries, indent=2))
+        return 0
+
+    print("=" * 70)
+    print(f"EXECUTION LOGS: {args.run_id} | Status: {state.run.status.value} | Phase: {state.run.phase.value}")
+    print("=" * 70)
+
+    for ev in events:
+        ts = ev.timestamp.strftime("%H:%M:%S")
+        payload = ev.payload or {}
+        res = payload.get("result", {})
+        node = payload.get("node", "system")
+        ev_type = ev.type
+
+        level = "INFO"
+        msg = ""
+        if ev_type == "transition_run":
+            status_val = res.get("status", "")
+            phase_val = res.get("phase", "")
+            if status_val == "FAILED":
+                level = "ERROR"
+                msg = f"Phase {phase_val} FAILED: {res.get('reason') or state.run.stop_reason or ''}"
+            elif status_val in ("PARTIAL", "CANCELLED"):
+                level = "WARN"
+                msg = f"Phase {phase_val} {status_val}: {res.get('reason') or ''}"
+            else:
+                msg = f"Transition -> {phase_val} ({status_val})"
+        elif ev_type == "add_record":
+            rec_id = str(res.get("record_id", ""))
+            if "model-call" in str(payload.get("logical_operation_id", "")):
+                msg = f"Model call completed: {rec_id}"
+            else:
+                msg = f"Record committed: {rec_id}"
+        elif ev_type == "commit_plan":
+            msg = f"PlanRevision committed: rev {res.get('revision')}"
+        elif ev_type == "run_created":
+            msg = f"Run created for goal: {state.task.goal[:60]}"
+        else:
+            msg = f"{ev_type}: {payload}"
+
+        if args.level != "ALL" and level != args.level:
+            continue
+
+        prefix = f"[{ts}] [{level:5s}] [{node}]"
+        print(f"{prefix} {msg}")
+
+    if state.run.status.value == "FAILED" or state.run.stop_reason:
+        print("\n" + "!" * 70)
+        print("CRITICAL FAILURE / STOP REASON:")
+        print(f"  {state.run.stop_reason}")
+        print("!" * 70)
+
+    return 0
 
 
 def cmd_serve(args: argparse.Namespace) -> int:
@@ -279,6 +408,17 @@ def cmd_serve(args: argparse.Namespace) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    if hasattr(sys.stdout, "reconfigure"):
+        try:
+            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+    if hasattr(sys.stderr, "reconfigure"):
+        try:
+            sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
     parser = build_parser()
     args = parser.parse_args(argv)
 
@@ -294,12 +434,16 @@ def main(argv: list[str] | None = None) -> int:
             return cmd_answer(store, args)
         elif args.command == "cancel":
             return cmd_cancel(store, args)
+        elif args.command == "delete":
+            return cmd_delete(store, args)
         elif args.command == "artifacts":
             return cmd_artifacts(store, args)
         elif args.command == "validate":
             return cmd_validate(store, args)
         elif args.command == "finalize":
             return cmd_finalize(store, args)
+        elif args.command == "logs":
+            return cmd_logs(store, args)
         else:
             parser.print_help()
             return 1
