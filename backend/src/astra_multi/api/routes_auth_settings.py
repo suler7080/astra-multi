@@ -9,7 +9,7 @@ from typing import Any
 
 import httpx
 from fastapi import APIRouter, Depends, Header, HTTPException, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from astra_multi.persistence.sqlite import SQLiteStore
 from astra_multi.provider_config import (
@@ -85,57 +85,90 @@ class TestProviderResponse(BaseModel):
     error: str | None = None
 
 
+class RoleAssignmentItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    provider: str
+    model: str | None = None
+
+
+class RoleMappingsPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    planner: RoleAssignmentItem | None = None
+    reviewer: RoleAssignmentItem | None = None
+    synthesizer: RoleAssignmentItem | None = None
+
+
+class RoleMappingsResponse(BaseModel):
+    mappings: dict[str, RoleAssignmentItem]
+    active_provider: str | None = None
+    planner: RoleAssignmentItem | None = None
+    reviewer: RoleAssignmentItem | None = None
+    synthesizer: RoleAssignmentItem | None = None
+
+
+def apply_all_providers_to_environment(store: SQLiteStore) -> None:
+    """Synchronizes all configured providers and their decrypted API keys into environment and providers.json."""
+    providers = store.settings.list_providers()
+    if not providers:
+        return
+
+    master_key = ensure_master_encryption_key(store.settings)
+    try:
+        from pydantic import HttpUrl
+
+        repo = ProviderSettingsRepository()
+        mgr = ProviderManager(repo)
+    except Exception as exc:
+        logger.warning("Could not initialize ProviderSettingsRepository: %s", exc)
+        return
+
+    for prov in providers:
+        name = prov["name"]
+        kind = prov["kind"]
+        model = prov["model"]
+        base_url = prov.get("base_url")
+        api_key_enc = prov.get("api_key_enc")
+
+        api_key = decrypt_secret(api_key_enc, master_key) if api_key_enc else None
+        api_key_env = (
+            "XKIRO_API_KEY"
+            if "xkiro" in name.lower()
+            else (
+                "OPENAI_API_KEY"
+                if kind == "openai"
+                else (
+                    "GOOGLE_API_KEY"
+                    if kind == "google"
+                    else f"{name.upper().replace('-', '_')}_API_KEY"
+                )
+            )
+        )
+        if api_key:
+            os.environ[api_key_env] = api_key
+
+        try:
+            prof = ProviderProfile(
+                name=name,
+                kind=kind,  # type: ignore[arg-type]
+                model=model,
+                base_url=HttpUrl(base_url) if base_url else None,
+                credential_source="environment",
+                api_key_env=api_key_env,
+            )
+            mgr.configure(prof)
+        except Exception as exc:
+            logger.warning("Could not sync provider '%s' to providers.json: %s", name, exc)
+
+
 def apply_active_provider_to_environment(store: SQLiteStore) -> None:
-    """Synchronizes active provider and its decrypted API key into environment variables and providers.json."""
+    """Synchronizes active provider and all configured provider keys into environment variables and providers.json."""
+    apply_all_providers_to_environment(store)
     active = store.settings.get_active_provider()
     if not active:
         return
 
     name = active["name"]
-    kind = active["kind"]
-    model = active["model"]
-    base_url = active.get("base_url")
-    api_key_enc = active.get("api_key_enc")
-
-    master_key = ensure_master_encryption_key(store.settings)
-    api_key = decrypt_secret(api_key_enc, master_key) if api_key_enc else None
-
-    # 1. Update active provider name in environment
     os.environ["ASTRA_MULTI_PROVIDER"] = name
-
-    # 2. Update specific key environment variable
-    if api_key:
-        if "xkiro" in name.lower():
-            os.environ["XKIRO_API_KEY"] = api_key
-        elif kind == "openai":
-            os.environ["OPENAI_API_KEY"] = api_key
-        elif kind == "google":
-            os.environ["GOOGLE_API_KEY"] = api_key
-        else:
-            env_var = f"{name.upper().replace('-', '_')}_API_KEY"
-            os.environ[env_var] = api_key
-
-    # 3. Synchronize to ProviderSettingsRepository / providers.json
-    try:
-        from pydantic import HttpUrl
-
-        repo = ProviderSettingsRepository()
-        prof = ProviderProfile(
-            name=name,
-            kind=kind,  # type: ignore[arg-type]
-            model=model,
-            base_url=HttpUrl(base_url) if base_url else None,
-            credential_source="environment",
-            api_key_env="XKIRO_API_KEY" if "xkiro" in name.lower() else (
-                "OPENAI_API_KEY" if kind == "openai" else (
-                    "GOOGLE_API_KEY" if kind == "google" else f"{name.upper().replace('-', '_')}_API_KEY"
-                )
-            ),
-        )
-        mgr = ProviderManager(repo)
-        mgr.configure(prof)
-    except Exception as exc:
-        logger.warning("Could not sync active provider to providers.json: %s", exc)
 
 
 def seed_initial_providers_if_empty(store: SQLiteStore) -> None:
@@ -416,15 +449,19 @@ def create_auth_settings_router(store: SQLiteStore) -> APIRouter:
                 # Google Gemini generateContent probe
                 endpoint = req.base_url or "https://generativelanguage.googleapis.com/v1beta"
                 endpoint = endpoint.rstrip("/")
-                test_url = f"{endpoint}/models/{req.model}:generateContent?key={api_key}"
+                test_url = f"{endpoint}/models/{req.model}:generateContent"
 
                 payload = {
                     "contents": [{"parts": [{"text": "ping"}]}],
                     "generationConfig": {"maxOutputTokens": 5},
                 }
+                headers = {
+                    "x-goog-api-key": api_key,
+                    "Content-Type": "application/json",
+                }
 
                 async with httpx.AsyncClient(timeout=15.0) as client:
-                    resp = await client.post(test_url, json=payload)
+                    resp = await client.post(test_url, json=payload, headers=headers)
                     if resp.status_code >= 400:
                         return TestProviderResponse(
                             success=False,
@@ -436,5 +473,100 @@ def create_auth_settings_router(store: SQLiteStore) -> APIRouter:
 
         except Exception as exc:
             return TestProviderResponse(success=False, error=str(exc))
+
+    # Role Mappings Endpoints
+    @router.get("/settings/roles", response_model=RoleMappingsResponse)
+    async def get_role_mappings(_auth: Any = Depends(require_admin)) -> RoleMappingsResponse:
+        active_info = store.settings.get_active_provider()
+        active_provider_name = active_info["name"] if active_info else None
+
+        raw_mappings = store.settings.get_role_mappings()
+        mappings: dict[str, RoleAssignmentItem] = {}
+        for role_name in ("planner", "reviewer", "synthesizer"):
+            item_data = raw_mappings.get(role_name)
+            if item_data and item_data.get("provider"):
+                mappings[role_name] = RoleAssignmentItem(
+                    provider=item_data["provider"],
+                    model=item_data.get("model"),
+                )
+
+        return RoleMappingsResponse(
+            mappings=mappings,
+            active_provider=active_provider_name,
+            planner=mappings.get("planner"),
+            reviewer=mappings.get("reviewer"),
+            synthesizer=mappings.get("synthesizer"),
+        )
+
+    @router.put("/settings/roles", response_model=RoleMappingsResponse)
+    async def update_role_mappings(
+        payload: RoleMappingsPayload,
+        _auth: Any = Depends(require_admin),
+    ) -> RoleMappingsResponse:
+        active_info = store.settings.get_active_provider()
+        active_provider_name = active_info["name"] if active_info else None
+
+        requested: dict[str, RoleAssignmentItem | None] = {
+            "planner": payload.planner,
+            "reviewer": payload.reviewer,
+            "synthesizer": payload.synthesizer,
+        }
+
+        new_mappings: dict[str, dict[str, str | None]] = {}
+
+        for role_name, item in requested.items():
+            if item is None:
+                continue
+
+            provider_name = item.provider.strip()
+            if not provider_name:
+                continue
+
+            prov_config = store.settings.get_provider(provider_name)
+            if not prov_config:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Provider '{provider_name}' assigned to role '{role_name}' does not exist.",
+                )
+
+            has_key = bool(prov_config.get("api_key_enc"))
+            is_active = bool(prov_config.get("is_active"))
+            has_env_key = False
+            if "xkiro" in provider_name.lower():
+                has_env_key = bool(os.environ.get("XKIRO_API_KEY"))
+            elif prov_config.get("kind") == "openai":
+                has_env_key = bool(os.environ.get("OPENAI_API_KEY"))
+            elif prov_config.get("kind") == "google":
+                has_env_key = bool(os.environ.get("GOOGLE_API_KEY"))
+
+            if not (has_key or is_active or has_env_key):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Provider '{provider_name}' assigned to role '{role_name}' is disabled or has no API key configured.",
+                )
+
+            model_val = item.model.strip() if item.model else None
+            if model_val == "":
+                model_val = None
+
+            new_mappings[role_name] = {
+                "provider": provider_name,
+                "model": model_val,
+            }
+
+        store.settings.save_role_mappings(new_mappings)
+
+        resp_mappings: dict[str, RoleAssignmentItem] = {
+            k: RoleAssignmentItem(provider=v["provider"], model=v["model"])
+            for k, v in new_mappings.items()
+        }
+
+        return RoleMappingsResponse(
+            mappings=resp_mappings,
+            active_provider=active_provider_name,
+            planner=resp_mappings.get("planner"),
+            reviewer=resp_mappings.get("reviewer"),
+            synthesizer=resp_mappings.get("synthesizer"),
+        )
 
     return router

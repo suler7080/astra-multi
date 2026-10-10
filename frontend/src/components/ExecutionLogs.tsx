@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import type { RunDetail, RunLogEntry } from '../types';
 import { api } from '../api';
 import {
@@ -14,7 +14,7 @@ import {
   Search,
   CheckCircle2,
 } from 'lucide-react';
-import { useI18n } from '../i18n';
+import { useI18n } from '../i18nContext';
 
 interface ExecutionLogsProps {
   run: RunDetail;
@@ -30,20 +30,34 @@ export const ExecutionLogs: React.FC<ExecutionLogsProps> = ({ run }) => {
   const [copiedText, setCopiedText] = useState<string | null>(null);
   const [autoRefresh, setAutoRefresh] = useState(!['FINAL', 'PARTIAL', 'FAILED', 'CANCELLED'].includes(run.status));
 
-  const fetchLogs = async () => {
-    try {
-      setIsLoading(true);
-      const data = await api.getRunLogs(run.run_id);
-      setLogs(data);
-    } catch (err) {
-      console.error('Failed to fetch execution logs', err);
-    } finally {
-      setIsLoading(false);
-    }
-  };
+  const fetchLogs = useCallback(
+    async (showLoading = false) => {
+      if (showLoading) setIsLoading(true);
+      try {
+        const data = await api.getRunLogs(run.run_id);
+        setLogs(data);
+      } catch (err) {
+        console.error('Failed to fetch execution logs', err);
+      } finally {
+        if (showLoading) setIsLoading(false);
+      }
+    },
+    [run.run_id]
+  );
 
   useEffect(() => {
-    fetchLogs();
+    let ignore = false;
+    api
+      .getRunLogs(run.run_id)
+      .then((data) => {
+        if (!ignore) setLogs(data);
+      })
+      .catch((err) => {
+        console.error('Failed to fetch execution logs', err);
+      });
+    return () => {
+      ignore = true;
+    };
   }, [run.run_id]);
 
   useEffect(() => {
@@ -51,10 +65,10 @@ export const ExecutionLogs: React.FC<ExecutionLogsProps> = ({ run }) => {
       return;
     }
     const interval = setInterval(() => {
-      fetchLogs();
+      void fetchLogs(false);
     }, 3000);
     return () => clearInterval(interval);
-  }, [run.run_id, autoRefresh, run.status]);
+  }, [run.run_id, autoRefresh, run.status, fetchLogs]);
 
   const copyToClipboard = (text: string, label: string) => {
     navigator.clipboard.writeText(text);
@@ -202,7 +216,7 @@ export const ExecutionLogs: React.FC<ExecutionLogsProps> = ({ run }) => {
 
           {/* Refresh button */}
           <button
-            onClick={fetchLogs}
+            onClick={() => void fetchLogs(true)}
             disabled={isLoading}
             className="btn-secondary text-xs px-2.5 py-1.5 flex items-center gap-1.5"
             title={t('logs_refresh')}

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import uuid
@@ -16,6 +15,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
+from astra_multi.api.routes_auth_settings import (
+    apply_active_provider_to_environment,
+    create_auth_settings_router,
+)
 from astra_multi.api.schemas import (
     AnswerQuestionRequest,
     CancelRunRequest,
@@ -26,13 +29,14 @@ from astra_multi.api.schemas import (
 )
 from astra_multi.api.worker import RunWorker
 from astra_multi.domain.models import (
+    TERMINAL,
     Budget,
     Requirement,
     Run,
     RunStatus,
     TaskSpec,
 )
-from astra_multi.domain.policies import InvalidState, RevisionConflict
+from astra_multi.domain.policies import InvalidState, LeaseLost, RevisionConflict
 from astra_multi.exports.exporter import PlanExporter
 from astra_multi.exports.finalization import (
     FinalizationService,
@@ -43,10 +47,6 @@ from astra_multi.gateway.model_gateway import ModelGateway
 from astra_multi.orchestration.controller import WorkflowController
 from astra_multi.persistence.artifacts import FileArtifactStore
 from astra_multi.persistence.sqlite import SQLiteStore
-from astra_multi.api.routes_auth_settings import (
-    apply_active_provider_to_environment,
-    create_auth_settings_router,
-)
 from astra_multi.security.crypto import (
     ensure_auth_secret_key,
     verify_access_token,
@@ -170,6 +170,20 @@ def create_app(
             },
         )
 
+    @app.exception_handler(LeaseLost)
+    async def lease_lost_handler(request: Request, exc: LeaseLost) -> JSONResponse:
+        correlation_id = str(uuid.uuid4())
+        return JSONResponse(
+            status_code=status.HTTP_409_CONFLICT,
+            content={
+                "error": {
+                    "code": "lease_lost",
+                    "message": str(exc),
+                    "correlation_id": correlation_id,
+                }
+            },
+        )
+
     # API Endpoints
     @app.post(
         "/api/runs",
@@ -233,6 +247,18 @@ def create_app(
         )
 
         store.create(task, run, snapshot=None)
+
+        # Snapshot role mappings into run metadata
+        role_mappings = store.settings.get_role_mappings()
+        store.settings.save_run_role_mappings_snapshot(run_id, role_mappings)
+        try:
+            meta_dir = store.artifacts.root / "metadata"
+            meta_dir.mkdir(parents=True, exist_ok=True)
+            (meta_dir / f"{run_id}.json").write_text(
+                json.dumps({"role_mappings": role_mappings}), encoding="utf-8"
+            )
+        except Exception:
+            pass
 
         if idem_key:
             app.state.idempotency_records[idem_key] = (payload_repr, run_id)
@@ -600,15 +626,44 @@ def create_app(
 
     @app.post("/api/runs/{run_id}/cancel", summary="Cancel an active run")
     async def cancel_run(run_id: str, body: CancelRunRequest) -> dict[str, Any]:
-        state = store.load(run_id)
-        lease = store.acquire(run_id, owner="api-user", ttl=30)
+        # Stop background worker task if active
+        if worker.is_running(run_id):
+            await worker.stop_task(run_id)
+
         try:
-            ctrl = WorkflowController(store, lease, actor="api-user")
-            ctrl.transition_phase(state.run.phase, RunStatus.CANCELLED, reason=body.reason)
+            state = store.load(run_id)
+        except Exception:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Run {run_id} not found.",
+            )
+
+        if state.run.status == RunStatus.CANCELLED:
             return {
                 "run_id": run_id,
                 "status": RunStatus.CANCELLED.value,
-                "message": f"Run cancelled: {body.reason}",
+                "message": f"Run is already cancelled: {state.run.stop_reason or ''}".strip(),
+            }
+
+        if state.run.status in TERMINAL:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Cannot cancel run in terminal status {state.run.status.value}.",
+            )
+
+        cancel_reason = (
+            body.reason.strip()
+            if body.reason and body.reason.strip()
+            else "User cancelled run via API"
+        )
+        lease = store.acquire(run_id, owner="api-user", ttl=30, force=True)
+        try:
+            ctrl = WorkflowController(store, lease, actor="api-user")
+            ctrl.transition_phase(state.run.phase, RunStatus.CANCELLED, reason=cancel_reason)
+            return {
+                "run_id": run_id,
+                "status": RunStatus.CANCELLED.value,
+                "message": f"Run cancelled: {cancel_reason}",
             }
         finally:
             store.release(lease)
@@ -646,7 +701,12 @@ def create_app(
         except Exception:
             pass
         try:
-            store.delete(run_id)
+            store.delete(run_id, force=force)
+        except LeaseLost as exc:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Run {run_id} cannot be deleted: {exc}. Retry with ?force=true.",
+            )
         except KeyError:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -733,16 +793,27 @@ def create_app(
                 return {
                     "run_id": run_id,
                     "status": RunStatus.FINAL.value,
+                    "can_finalize": True,
+                    "reason": decision.reason,
                     "message": "Run finalized as FINAL.",
+                    "blockers": [],
                 }
             finally:
                 store.release(lease)
         else:
+            blocker_msgs = [
+                v.message
+                for v in decision.quality_report.violations
+                if getattr(v.severity, "value", str(v.severity)).lower() == "blocker"
+            ]
+            if not blocker_msgs and decision.reason:
+                blocker_msgs = [decision.reason]
             return {
                 "run_id": run_id,
                 "status": decision.target_status.value,
                 "can_finalize": False,
                 "reason": decision.reason,
+                "blockers": blocker_msgs,
             }
 
     # Mount static files if frontend build exists

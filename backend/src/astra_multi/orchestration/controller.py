@@ -9,12 +9,10 @@ P3.3 Controller and State Transitions:
 from __future__ import annotations
 
 import hashlib
+import logging
 import threading
 import time
-from typing import Literal
-import uuid
-
-from astra_multi.domain.policies import RevisionConflict
+from typing import Any, Literal
 
 from astra_multi.domain.commands import (
     AddRecord,
@@ -28,7 +26,6 @@ from astra_multi.domain.models import (
     Decision,
     Issue,
     IssueResolution,
-    IssueSeverity,
     IssueStatus,
     Lease,
     ModelCall,
@@ -40,7 +37,10 @@ from astra_multi.domain.models import (
     RunStatus,
     TaskSpec,
 )
+from astra_multi.domain.policies import RevisionConflict
 from astra_multi.domain.repositories import RunRepository
+
+logger = logging.getLogger(__name__)
 
 
 class WorkflowController:
@@ -55,7 +55,7 @@ class WorkflowController:
         self.repository = repository
         self.lease = lease
         self.actor = actor
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
 
     def get_state(self) -> RunState:
         return self.repository.load(self.lease.run_id)
@@ -114,72 +114,175 @@ class WorkflowController:
         evidence_ids: list[str] | None = None,
         node: str = "review",
     ) -> RunState:
-        state = self.get_state()
-        issue = next((i for i in state.issues if i.id == issue_id), None)
-        if not issue:
-            return state
-        if issue.status == IssueStatus.RESOLVED:
-            return state
+        with self._lock:
+            for attempt in range(15):
+                state = self.get_state()
+                issue = next((i for i in state.issues if i.id == issue_id), None)
+                if not issue:
+                    return state
+                if issue.status == IssueStatus.RESOLVED:
+                    return state
 
-        # Step 1: OPEN -> INVESTIGATING
-        if issue.status == IssueStatus.OPEN:
-            cmd = ChangeIssue(
-                expected_revision=state.run.revision,
-                node=node,
-                logical_operation_id=f"issue-{issue_id}-investigating",
-                actor=self.actor,
-                issue_id=issue_id,
-                status=IssueStatus.INVESTIGATING,
-                reason="Investigating issue during review",
-            )
-            self.repository.commit(self.lease.run_id, cmd, self.lease)
-            state = self.get_state()
-            issue = next((i for i in state.issues if i.id == issue_id), None)
-            if not issue:
-                return state
+                current_rev = state.run.revision
+                current_status = issue.status
+                plan_revision = state.plan.revision if state.plan else None
 
-        # Step 2: INVESTIGATING -> PROPOSED_RESOLUTION
-        if issue.status == IssueStatus.INVESTIGATING:
-            cmd = ChangeIssue(
-                expected_revision=state.run.revision,
-                node=node,
-                logical_operation_id=f"issue-{issue_id}-proposed",
-                actor=self.actor,
-                issue_id=issue_id,
-                status=IssueStatus.PROPOSED_RESOLUTION,
-                reason="Proposed resolution",
-                resolution=IssueResolution(text=resolution_text),
-            )
-            self.repository.commit(self.lease.run_id, cmd, self.lease)
-            state = self.get_state()
-            issue = next((i for i in state.issues if i.id == issue_id), None)
-            if not issue:
-                return state
+                try:
+                    # Step 1: OPEN -> INVESTIGATING
+                    if current_status == IssueStatus.OPEN:
+                        cmd = ChangeIssue(
+                            expected_revision=current_rev,
+                            node=node,
+                            logical_operation_id=f"issue-{issue_id}-investigating",
+                            actor=self.actor,
+                            issue_id=issue_id,
+                            status=IssueStatus.INVESTIGATING,
+                            reason="Investigating issue during review",
+                        )
+                        op = self.repository.commit(self.lease.run_id, cmd, self.lease)
+                        current_rev = op.revision
+                        current_status = IssueStatus.INVESTIGATING
 
-        # Step 3: PROPOSED_RESOLUTION -> RESOLVED (only if review_result == PASS)
-        if issue.status == IssueStatus.PROPOSED_RESOLUTION and review_result == "PASS":
-            resolution = IssueResolution(
-                text=resolution_text,
-                evidence_ids=evidence_ids or [],
-                reviewed_revision=state.plan.revision if state.plan else None,
-                reviewer=reviewer,
-                review_result=review_result,
-                review_note=review_note,
-            )
-            cmd = ChangeIssue(
-                expected_revision=state.run.revision,
-                node=node,
-                logical_operation_id=f"issue-{issue_id}-resolved",
-                actor=self.actor,
-                issue_id=issue_id,
-                status=IssueStatus.RESOLVED,
-                reason=review_note,
-                resolution=resolution,
-            )
-            self.repository.commit(self.lease.run_id, cmd, self.lease)
-            return self.get_state()
+                    # Step 2: INVESTIGATING -> PROPOSED_RESOLUTION
+                    if current_status == IssueStatus.INVESTIGATING:
+                        cmd = ChangeIssue(
+                            expected_revision=current_rev,
+                            node=node,
+                            logical_operation_id=f"issue-{issue_id}-proposed",
+                            actor=self.actor,
+                            issue_id=issue_id,
+                            status=IssueStatus.PROPOSED_RESOLUTION,
+                            reason="Proposed resolution",
+                            resolution=IssueResolution(text=resolution_text),
+                        )
+                        op = self.repository.commit(self.lease.run_id, cmd, self.lease)
+                        current_rev = op.revision
+                        current_status = IssueStatus.PROPOSED_RESOLUTION
 
-        return state
+                    # Step 3: PROPOSED_RESOLUTION -> RESOLVED (only if review_result == PASS)
+                    if current_status == IssueStatus.PROPOSED_RESOLUTION and review_result == "PASS":
+                        resolution = IssueResolution(
+                            text=resolution_text,
+                            evidence_ids=evidence_ids or [],
+                            reviewed_revision=plan_revision,
+                            reviewer=reviewer,
+                            review_result=review_result,
+                            review_note=review_note,
+                        )
+                        cmd = ChangeIssue(
+                            expected_revision=current_rev,
+                            node=node,
+                            logical_operation_id=f"issue-{issue_id}-resolved",
+                            actor=self.actor,
+                            issue_id=issue_id,
+                            status=IssueStatus.RESOLVED,
+                            reason=review_note,
+                            resolution=resolution,
+                        )
+                        self.repository.commit(self.lease.run_id, cmd, self.lease)
+
+                    return self.get_state()
+                except RevisionConflict:
+                    time.sleep(0.005 * (attempt + 1))
+            raise RuntimeError(f"Failed to resolve issue {issue_id} due to revision conflicts")
+
+    def resolve_issues_batch(
+        self,
+        resolutions: list[dict[str, Any] | Any],
+        node: str = "review",
+    ) -> RunState:
+        with self._lock:
+            for attempt in range(15):
+                state = self.get_state()
+                current_rev = state.run.revision
+                plan_revision = state.plan.revision if state.plan else None
+                issues_by_id = {i.id: i for i in state.issues}
+
+                try:
+                    for res in resolutions:
+                        if isinstance(res, dict):
+                            issue_id = res.get("issue_id")
+                            reviewer = res.get("reviewer", "reviewer")
+                            review_result = res.get("review_result", "PASS")
+                            review_note = res.get("review_note", "")
+                            resolution_text = res.get("resolution_text", "Resolved based on plan revision")
+                            evidence_ids = res.get("evidence_ids")
+                        else:
+                            issue_id = getattr(res, "issue_id", None)
+                            reviewer = getattr(res, "reviewer", "reviewer")
+                            review_result = getattr(res, "review_result", "PASS")
+                            review_note = getattr(res, "review_note", "")
+                            resolution_text = getattr(res, "resolution_text", "Resolved based on plan revision")
+                            evidence_ids = getattr(res, "evidence_ids", None)
+
+                        if not issue_id:
+                            continue
+                        issue = issues_by_id.get(issue_id)
+                        if not issue:
+                            continue
+                        if issue.status == IssueStatus.RESOLVED:
+                            continue
+
+                        current_status = issue.status
+
+                        # Step 1: OPEN -> INVESTIGATING
+                        if current_status == IssueStatus.OPEN:
+                            cmd = ChangeIssue(
+                                expected_revision=current_rev,
+                                node=node,
+                                logical_operation_id=f"issue-{issue_id}-investigating",
+                                actor=self.actor,
+                                issue_id=issue_id,
+                                status=IssueStatus.INVESTIGATING,
+                                reason="Investigating issue during review",
+                            )
+                            op = self.repository.commit(self.lease.run_id, cmd, self.lease)
+                            current_rev = op.revision
+                            current_status = IssueStatus.INVESTIGATING
+
+                        # Step 2: INVESTIGATING -> PROPOSED_RESOLUTION
+                        if current_status == IssueStatus.INVESTIGATING:
+                            cmd = ChangeIssue(
+                                expected_revision=current_rev,
+                                node=node,
+                                logical_operation_id=f"issue-{issue_id}-proposed",
+                                actor=self.actor,
+                                issue_id=issue_id,
+                                status=IssueStatus.PROPOSED_RESOLUTION,
+                                reason="Proposed resolution",
+                                resolution=IssueResolution(text=resolution_text),
+                            )
+                            op = self.repository.commit(self.lease.run_id, cmd, self.lease)
+                            current_rev = op.revision
+                            current_status = IssueStatus.PROPOSED_RESOLUTION
+
+                        # Step 3: PROPOSED_RESOLUTION -> RESOLVED (only if review_result == PASS)
+                        if current_status == IssueStatus.PROPOSED_RESOLUTION and review_result == "PASS":
+                            resolution_obj = IssueResolution(
+                                text=resolution_text,
+                                evidence_ids=evidence_ids or [],
+                                reviewed_revision=plan_revision,
+                                reviewer=reviewer,
+                                review_result=review_result,
+                                review_note=review_note,
+                            )
+                            cmd = ChangeIssue(
+                                expected_revision=current_rev,
+                                node=node,
+                                logical_operation_id=f"issue-{issue_id}-resolved",
+                                actor=self.actor,
+                                issue_id=issue_id,
+                                status=IssueStatus.RESOLVED,
+                                reason=review_note,
+                                resolution=resolution_obj,
+                            )
+                            op = self.repository.commit(self.lease.run_id, cmd, self.lease)
+                            current_rev = op.revision
+
+                    return self.get_state()
+                except RevisionConflict:
+                    time.sleep(0.005 * (attempt + 1))
+            raise RuntimeError("Failed to resolve issues batch due to revision conflicts")
 
     def commit_plan_revision(self, plan: PlanRevision) -> RunState:
         state = self.get_state()

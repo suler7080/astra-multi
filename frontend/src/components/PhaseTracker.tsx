@@ -1,6 +1,6 @@
 import React from 'react';
 import { Check, CircleDot, AlertTriangle, XCircle, CheckCircle2 } from 'lucide-react';
-import { useI18n, type TranslationKey } from '../i18n';
+import { useI18n, type TranslationKey } from '../i18nContext';
 
 const PHASES = [
   'INTAKE',

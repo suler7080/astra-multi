@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Lock, ShieldCheck, AlertCircle, Eye, EyeOff } from 'lucide-react';
 import { api, ApiError } from '../api';
-import { useI18n } from '../i18n';
+import { useI18n } from '../i18nContext';
 
 interface AuthModalProps {
   mode: 'setup' | 'login';

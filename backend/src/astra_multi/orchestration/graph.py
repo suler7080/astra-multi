@@ -11,6 +11,7 @@ P3.3 Production multi-agent discussion workflow graph:
 from __future__ import annotations
 
 import hashlib
+import logging
 import operator
 import os
 import re
@@ -23,6 +24,7 @@ from astra_multi.agents.roles import (
     PROMPT_VERSION_V1,
     AnalysisOutput,
     IssueReport,
+    IssueResolutionReport,
     ProposalOutput,
     ReviewOutput,
     SynthesizerOutput,
@@ -45,11 +47,17 @@ from astra_multi.domain.models import (
     RunPhase,
     RunStatus,
 )
-from astra_multi.exports.quality_validator import StructuralQualityValidator, ViolationSeverity
+from astra_multi.exports.quality_validator import (
+    StructuralQualityValidator,
+    ViolationSeverity,
+)
 from astra_multi.gateway.model_gateway import ModelGateway
 from astra_multi.orchestration.budget import BudgetService
 from astra_multi.orchestration.controller import WorkflowController
+from astra_multi.orchestration.roles import ROLE_GROUP
 from astra_multi.orchestration.termination import StagnationDetector, StopReason
+
+logger = logging.getLogger(__name__)
 
 
 def _merge_analyses(
@@ -177,6 +185,7 @@ class WorkflowContext:
         evidence_ledger: EvidenceLedger | None = None,
         budget_service: BudgetService | None = None,
         provider: str | None = None,
+        role_assignments: dict[str, dict[str, str | None]] | None = None,
     ) -> None:
         self.controller = controller
         self.gateway = gateway
@@ -185,6 +194,27 @@ class WorkflowContext:
         self.budget_service = budget_service
         self.stagnation_detector = StagnationDetector()
         self.provider = provider or os.environ.get("ASTRA_MULTI_PROVIDER", "fake")
+        self.role_assignments: dict[str, dict[str, str | None]] = role_assignments or {}
+
+    def get_assignment_for_role(self, node_role: str) -> tuple[str, str | None]:
+        """Resolve (provider, model) assignment for a given node or role.
+
+        Falls back to active provider with model=None if not configured or unrecognized.
+        """
+        group = ROLE_GROUP.get(node_role)
+        if not group:
+            logger.warning(
+                "Unrecognized node role '%s', falling back to default provider '%s'",
+                node_role,
+                self.provider,
+            )
+            return (self.provider, None)
+
+        group_config = self.role_assignments.get(group)
+        if group_config and group_config.get("provider"):
+            return (str(group_config["provider"]), group_config.get("model"))
+
+        return (self.provider, None)
 
 
 def create_workflow_graph(wf_ctx: WorkflowContext) -> StateGraph:
@@ -204,7 +234,12 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> StateGraph:
         estimated_cost: float | None = None,
         safety_factor: float | None = None,
         max_output_tokens: int | None = None,
+        node_name: str | None = None,
     ) -> Any:
+        lookup_target = node_name or role
+        role_provider, role_model = wf_ctx.get_assignment_for_role(lookup_target)
+        limits_override = {"model": role_model} if role_model else None
+
         # Dynamically estimate tokens and cost if not provided explicitly
         if estimated_tokens is None or estimated_cost is None:
             dyn_tokens, dyn_cost = estimate_call_tokens_and_cost(
@@ -227,26 +262,77 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> StateGraph:
             )
         settled = False
         try:
-            res = gateway.call(
-                provider=wf_ctx.provider,
-                role=role,
-                messages=messages,
-                output_schema=output_schema,
-            )
-            actual_tokens = res.usage.get("total_tokens", 0) if res.usage else 0
-            if getattr(res, "cost_actual_usd", None) is None:
-                if actual_tokens > 0:
-                    res.cost_actual_usd = round((actual_tokens / 1000.0) * 0.01, 6)
+            try:
+                res = gateway.call(
+                    provider=role_provider,
+                    role=role,
+                    messages=messages,
+                    output_schema=output_schema,
+                    limits_override=limits_override,
+                )
+            except Exception as primary_exc:
+                is_override = (role_provider != wf_ctx.provider) or (role_model is not None)
+                if is_override:
+                    logger.warning(
+                        "Call failed for role '%s' using role provider '%s' (model: %s): %s. "
+                        "Falling back to active provider '%s'",
+                        role,
+                        role_provider,
+                        role_model,
+                        primary_exc,
+                        wf_ctx.provider,
+                    )
+                    res = gateway.call(
+                        provider=wf_ctx.provider,
+                        role=role,
+                        messages=messages,
+                        output_schema=output_schema,
+                    )
                 else:
-                    res.cost_actual_usd = estimated_cost if estimated_cost is not None else 0.0
+                    raise primary_exc
+            effective_usage = getattr(res, "cumulative_usage", None) or res.usage or {}
+            actual_tokens = int(effective_usage.get("total_tokens") or 0)
+            effective_cost = getattr(res, "cumulative_cost_usd", None)
+            if effective_cost is not None:
+                actual_cost = effective_cost
+            elif getattr(res, "cost_actual_usd", None) is not None:
+                actual_cost = res.cost_actual_usd
+            elif actual_tokens > 0:
+                actual_cost = round((actual_tokens / 1000.0) * 0.01, 6)
+            else:
+                actual_cost = estimated_cost if estimated_cost is not None else 0.0
+
+            res.cost_actual_usd = actual_cost
             if budget and reservation_id:
                 budget.settle(
                     operation_id=reservation_id,
                     actual_tokens=actual_tokens,
-                    actual_cost=res.cost_actual_usd,
+                    actual_cost=actual_cost,
                 )
                 settled = True
             return res
+        except Exception as exc:
+            if budget and reservation_id and not settled:
+                partial_usage = (
+                    getattr(exc, "cumulative_usage", None)
+                    or getattr(gateway, "last_cumulative_usage", None)
+                )
+                partial_tokens = (
+                    int(partial_usage.get("total_tokens") or 0) if partial_usage else 0
+                )
+                partial_cost = (
+                    getattr(exc, "cumulative_cost_usd", None)
+                    or getattr(gateway, "last_cumulative_cost", None)
+                    or 0.0
+                )
+                if partial_tokens > 0 or partial_cost > 0.0:
+                    budget.settle(
+                        operation_id=reservation_id,
+                        actual_tokens=partial_tokens,
+                        actual_cost=partial_cost,
+                    )
+                    settled = True
+            raise
         finally:
             if budget and reservation_id and not settled:
                 budget.release(reservation_id)
@@ -286,6 +372,7 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> StateGraph:
             messages=messages,
             output_schema=AnalysisOutput,
             call_id=call_id,
+            node_name="planner_analysis",
         )
         output = AnalysisOutput.model_validate(res.content)
         ctrl.record_model_call(
@@ -295,8 +382,9 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> StateGraph:
             model_id=res.model_id,
             prompt_version=PROMPT_VERSION_V1,
             input_data=bundle.content,
-            usage=res.usage,
+            usage=getattr(res, "cumulative_usage", None) or res.usage,
             estimated_cost=res.cost_actual_usd if res.cost_actual_usd is not None else 0.0,
+            attempts=getattr(res, "attempts", 1) or 1,
         )
         return {
             "analyses": [output.model_dump(mode="json")],
@@ -322,6 +410,7 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> StateGraph:
             messages=messages,
             output_schema=AnalysisOutput,
             call_id=call_id,
+            node_name="reviewer_analysis",
         )
         output = AnalysisOutput.model_validate(res.content)
         ctrl.record_model_call(
@@ -331,8 +420,9 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> StateGraph:
             model_id=res.model_id,
             prompt_version=PROMPT_VERSION_V1,
             input_data=bundle.content,
-            usage=res.usage,
+            usage=getattr(res, "cumulative_usage", None) or res.usage,
             estimated_cost=res.cost_actual_usd if res.cost_actual_usd is not None else 0.0,
+            attempts=getattr(res, "attempts", 1) or 1,
         )
         return {
             "analyses": [output.model_dump(mode="json")],
@@ -360,6 +450,7 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> StateGraph:
             messages=messages,
             output_schema=ProposalOutput,
             call_id=call_id,
+            node_name="propose",
         )
         proposal_out = ProposalOutput.model_validate(res.content)
         ctrl.record_model_call(
@@ -369,8 +460,9 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> StateGraph:
             model_id=res.model_id,
             prompt_version=PROMPT_VERSION_V1,
             input_data=bundle.content,
-            usage=res.usage,
+            usage=getattr(res, "cumulative_usage", None) or res.usage,
             estimated_cost=res.cost_actual_usd if res.cost_actual_usd is not None else 0.0,
+            attempts=getattr(res, "attempts", 1) or 1,
         )
 
         valid_claims = {c.id for c in curr_state.claims}
@@ -426,6 +518,7 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> StateGraph:
             messages=messages,
             output_schema=ReviewOutput,
             call_id=call_id,
+            node_name="review",
         )
         review_out = ReviewOutput.model_validate(res.content)
         ctrl.record_model_call(
@@ -435,8 +528,9 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> StateGraph:
             model_id=res.model_id,
             prompt_version=PROMPT_VERSION_V1,
             input_data=bundle.content,
-            usage=res.usage,
+            usage=getattr(res, "cumulative_usage", None) or res.usage,
             estimated_cost=res.cost_actual_usd if res.cost_actual_usd is not None else 0.0,
+            attempts=getattr(res, "attempts", 1) or 1,
         )
 
         # Commit domain issues
@@ -444,6 +538,7 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> StateGraph:
         valid_evidence = {e.id for e in curr_state.evidence}
         existing_issue_ids = {i.id for i in curr_state.issues}
         issue_round = state.get("round", 0)
+        enriched_issues: list[IssueReport] = []
         for idx, ir in enumerate(review_out.issues):
             filtered_req_ids = [rid for rid in ir.requirement_ids if rid in valid_reqs]
             filtered_evi_ids = [eid for eid in ir.evidence_ids if eid in valid_evidence]
@@ -451,6 +546,7 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> StateGraph:
             if not filtered_evi_ids and not verif_req:
                 verif_req = f"Verification required: {ir.claim[:100]}"
             issue_id = derive_issue_id(curr_state.run.id, issue_round, "review", ir)
+            enriched_issues.append(ir.model_copy(update={"id": issue_id}))
             if issue_id in existing_issue_ids:
                 continue
             existing_issue_ids.add(issue_id)
@@ -468,11 +564,32 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> StateGraph:
             )
             ctrl.record_issue(domain_issue)
 
+        # Build issue alias map for resolutions
+        res_alias_map: dict[str, str] = {}
+        for idx, iss in enumerate(curr_state.issues):
+            res_alias_map[iss.id] = iss.id
+            res_alias_map[iss.id.lower()] = iss.id
+            res_alias_map[iss.id.upper()] = iss.id
+            res_alias_map[f"ISSUE-{idx + 1}"] = iss.id
+            res_alias_map[f"issue-{idx + 1}"] = iss.id
+            res_alias_map[f"ISSUE-{idx + 1:02d}"] = iss.id
+            res_alias_map[str(idx + 1)] = iss.id
+            res_alias_map[f"#{idx + 1}"] = iss.id
+
         # Apply resolutions
+        mapped_resolutions: list[IssueResolutionReport] = []
         for res_report in review_out.resolutions:
+            raw_id = res_report.issue_id.strip() if isinstance(res_report.issue_id, str) else str(res_report.issue_id)
+            target_id = (
+                res_alias_map.get(raw_id)
+                or res_alias_map.get(raw_id.upper())
+                or res_alias_map.get(raw_id.lower())
+                or raw_id
+            )
+            mapped_resolutions.append(res_report.model_copy(update={"issue_id": target_id}))
             try:
                 ctrl.resolve_issue(
-                    issue_id=res_report.issue_id,
+                    issue_id=target_id,
                     reviewer="reviewer",
                     review_result=res_report.review_result,
                     review_note=res_report.review_note,
@@ -480,8 +597,12 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> StateGraph:
                     evidence_ids=res_report.evidence_ids,
                     node="review",
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("Failed to resolve issue %s in review_node: %s", target_id, e)
+
+        review_out = review_out.model_copy(
+            update={"issues": enriched_issues, "resolutions": mapped_resolutions}
+        )
 
         return {
             "review": review_out.model_dump(mode="json"),
@@ -515,6 +636,7 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> StateGraph:
             messages=messages,
             output_schema=SynthesizerOutput,
             call_id=call_id,
+            node_name="revise",
         )
         synth_out = SynthesizerOutput.model_validate(res.content)
         ctrl.record_model_call(
@@ -524,8 +646,9 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> StateGraph:
             model_id=res.model_id,
             prompt_version=PROMPT_VERSION_V1,
             input_data=bundle.content,
-            usage=res.usage,
+            usage=getattr(res, "cumulative_usage", None) or res.usage,
             estimated_cost=res.cost_actual_usd if res.cost_actual_usd is not None else 0.0,
+            attempts=getattr(res, "attempts", 1) or 1,
         )
 
         # Build PlanRevision
@@ -593,9 +716,49 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> StateGraph:
 
         plan_decisions = list(plan_decisions_by_q.values())
 
-        filtered_issues_addressed = [
-            iid for iid in synth_out.issues_addressed if iid in valid_issues
-        ]
+        # Build issue alias mapping for Synthesizer's issues_addressed:
+        # Supports:
+        # - Exact domain issue IDs (e.g. 'ISSUE-3a8c1f0d')
+        # - Positional/index aliases from rev.issues (e.g. 'ISSUE-1', '1', '#1', 'issue-1')
+        # - Positional/index aliases from curr_state.issues
+        issue_alias_map: dict[str, str] = {}
+        for idx, ir in enumerate(rev.issues):
+            actual_id = ir.id
+            if not actual_id:
+                issue_round = state.get("round", 0)
+                actual_id = derive_issue_id(curr_state.run.id, issue_round, "review", ir)
+            if actual_id and actual_id in valid_issues:
+                issue_alias_map[actual_id] = actual_id
+                issue_alias_map[actual_id.lower()] = actual_id
+                issue_alias_map[actual_id.upper()] = actual_id
+                issue_alias_map[f"ISSUE-{idx + 1}"] = actual_id
+                issue_alias_map[f"issue-{idx + 1}"] = actual_id
+                issue_alias_map[f"ISSUE-{idx + 1:02d}"] = actual_id
+                issue_alias_map[str(idx + 1)] = actual_id
+                issue_alias_map[f"#{idx + 1}"] = actual_id
+
+        for idx, iss in enumerate(curr_state.issues):
+            issue_alias_map.setdefault(iss.id, iss.id)
+            issue_alias_map.setdefault(iss.id.lower(), iss.id)
+            issue_alias_map.setdefault(iss.id.upper(), iss.id)
+            issue_alias_map.setdefault(f"ISSUE-{idx + 1}", iss.id)
+            issue_alias_map.setdefault(f"issue-{idx + 1}", iss.id)
+            issue_alias_map.setdefault(f"ISSUE-{idx + 1:02d}", iss.id)
+            issue_alias_map.setdefault(str(idx + 1), iss.id)
+            issue_alias_map.setdefault(f"#{idx + 1}", iss.id)
+
+        resolved_ids: list[str] = []
+        for raw_id in synth_out.issues_addressed:
+            raw_stripped = raw_id.strip() if isinstance(raw_id, str) else str(raw_id)
+            target_id = (
+                issue_alias_map.get(raw_stripped)
+                or issue_alias_map.get(raw_stripped.upper())
+                or issue_alias_map.get(raw_stripped.lower())
+            )
+            if target_id and target_id in valid_issues and target_id not in resolved_ids:
+                resolved_ids.append(target_id)
+
+        filtered_issues_addressed = resolved_ids
 
         new_plan = PlanRevision(
             id=f"PLAN-{base_rev + 1}",
@@ -646,6 +809,7 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> StateGraph:
             messages=messages,
             output_schema=ReviewOutput,
             call_id=call_id,
+            node_name="semantic_review",
         )
         review_out = ReviewOutput.model_validate(res.content)
         ctrl.record_model_call(
@@ -655,15 +819,47 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> StateGraph:
             model_id=res.model_id,
             prompt_version=PROMPT_VERSION_V1,
             input_data=bundle.content,
-            usage=res.usage,
+            usage=getattr(res, "cumulative_usage", None) or res.usage,
             estimated_cost=res.cost_actual_usd if res.cost_actual_usd is not None else 0.0,
+            attempts=getattr(res, "attempts", 1) or 1,
         )
 
+        # Build issue alias map for resolutions
+        res_alias_map: dict[str, str] = {}
+        for idx, iss in enumerate(open_issues):
+            res_alias_map[iss.id] = iss.id
+            res_alias_map[iss.id.lower()] = iss.id
+            res_alias_map[iss.id.upper()] = iss.id
+            res_alias_map[f"ISSUE-{idx + 1}"] = iss.id
+            res_alias_map[f"issue-{idx + 1}"] = iss.id
+            res_alias_map[f"ISSUE-{idx + 1:02d}"] = iss.id
+            res_alias_map[str(idx + 1)] = iss.id
+            res_alias_map[f"#{idx + 1}"] = iss.id
+
+        for idx, iss in enumerate(curr_state.issues):
+            res_alias_map.setdefault(iss.id, iss.id)
+            res_alias_map.setdefault(iss.id.lower(), iss.id)
+            res_alias_map.setdefault(iss.id.upper(), iss.id)
+            res_alias_map.setdefault(f"ISSUE-{idx + 1}", iss.id)
+            res_alias_map.setdefault(f"issue-{idx + 1}", iss.id)
+            res_alias_map.setdefault(f"ISSUE-{idx + 1:02d}", iss.id)
+            res_alias_map.setdefault(str(idx + 1), iss.id)
+            res_alias_map.setdefault(f"#{idx + 1}", iss.id)
+
         # Apply resolutions
+        mapped_resolutions: list[IssueResolutionReport] = []
         for res_report in review_out.resolutions:
+            raw_id = res_report.issue_id.strip() if isinstance(res_report.issue_id, str) else str(res_report.issue_id)
+            target_id = (
+                res_alias_map.get(raw_id)
+                or res_alias_map.get(raw_id.upper())
+                or res_alias_map.get(raw_id.lower())
+                or raw_id
+            )
+            mapped_resolutions.append(res_report.model_copy(update={"issue_id": target_id}))
             try:
                 ctrl.resolve_issue(
-                    issue_id=res_report.issue_id,
+                    issue_id=target_id,
                     reviewer="reviewer",
                     review_result=res_report.review_result,
                     review_note=res_report.review_note,
@@ -671,14 +867,15 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> StateGraph:
                     evidence_ids=res_report.evidence_ids,
                     node="semantic_review",
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("Failed to resolve issue %s in semantic_review_node: %s", target_id, e)
 
         # If any new issues are found during semantic review
         valid_reqs = {r.id for r in curr_state.task.requirements}
         valid_evidence = {e.id for e in curr_state.evidence}
         existing_issue_ids = {i.id for i in curr_state.issues}
         issue_round = state.get("round", 0)
+        enriched_semantic_issues: list[IssueReport] = []
         for idx, ir in enumerate(review_out.issues):
             filtered_req_ids = [rid for rid in ir.requirement_ids if rid in valid_reqs]
             filtered_evi_ids = [eid for eid in ir.evidence_ids if eid in valid_evidence]
@@ -686,6 +883,7 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> StateGraph:
             if not filtered_evi_ids and not verif_req:
                 verif_req = f"Verification required: {ir.claim[:100]}"
             issue_id = derive_issue_id(curr_state.run.id, issue_round, "semantic_review", ir)
+            enriched_semantic_issues.append(ir.model_copy(update={"id": issue_id}))
             if issue_id in existing_issue_ids:
                 continue
             existing_issue_ids.add(issue_id)
@@ -702,6 +900,10 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> StateGraph:
                 evidence_ids=filtered_evi_ids,
             )
             ctrl.record_issue(domain_issue)
+
+        review_out = review_out.model_copy(
+            update={"issues": enriched_semantic_issues, "resolutions": mapped_resolutions}
+        )
 
         # Check stagnation after resolutions are evaluated
         detector.record_round(ctrl.get_state(), state.get("round", 0))

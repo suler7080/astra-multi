@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import type { Evidence } from '../types';
 import { FileSearch, CheckCircle, XCircle, Clock } from 'lucide-react';
-import { useI18n } from '../i18n';
+import { useI18n } from '../i18nContext';
 
 interface EvidenceLedgerProps {
   evidence: Evidence[];

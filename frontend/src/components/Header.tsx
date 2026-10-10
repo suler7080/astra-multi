@@ -1,7 +1,8 @@
 import React from 'react';
 import type { RunSummary } from '../types';
 import { Layers, Plus, RefreshCw, Settings, LogOut } from 'lucide-react';
-import { useI18n, LanguageSwitcher } from '../i18n';
+import { LanguageSwitcher } from '../i18n';
+import { useI18n } from '../i18nContext';
 
 interface HeaderProps {
   runs: RunSummary[];

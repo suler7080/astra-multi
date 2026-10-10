@@ -127,7 +127,9 @@ export interface FinalizeResult {
   run_id: string;
   status: string;
   can_finalize: boolean;
-  blockers: string[];
+  message?: string;
+  reason?: string;
+  blockers?: string[];
 }
 
 export interface CreateRunPayload {
@@ -203,6 +205,25 @@ export interface TestProviderResult {
   success: boolean;
   latency_ms?: number;
   error?: string;
+}
+
+export interface RoleAssignment {
+  provider: string;
+  model?: string | null;
+}
+
+export interface RoleMappings {
+  planner?: RoleAssignment | null;
+  reviewer?: RoleAssignment | null;
+  synthesizer?: RoleAssignment | null;
+}
+
+export interface RoleMappingsResponse {
+  mappings: Record<string, RoleAssignment>;
+  active_provider?: string | null;
+  planner?: RoleAssignment | null;
+  reviewer?: RoleAssignment | null;
+  synthesizer?: RoleAssignment | null;
 }
 
 

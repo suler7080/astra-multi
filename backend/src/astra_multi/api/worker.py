@@ -116,12 +116,27 @@ class RunWorker:
             active_p = self.store.settings.get_active_provider()
             active_provider_name = active_p["name"] if active_p else None
 
+            # Read role_mappings snapshot for this run
+            role_mappings = self.store.settings.get_run_role_mappings_snapshot(run_id)
+            if role_mappings is None:
+                try:
+                    meta_file = self.store.artifacts.root / "metadata" / f"{run_id}.json"
+                    if meta_file.exists():
+                        import json
+                        meta_data = json.loads(meta_file.read_text(encoding="utf-8"))
+                        role_mappings = meta_data.get("role_mappings")
+                except Exception:
+                    pass
+            if role_mappings is None:
+                role_mappings = self.store.settings.get_role_mappings()
+
             wf_ctx = WorkflowContext(
                 controller=controller,
                 gateway=self.gateway,
                 context_builder=context_builder,
                 budget_service=budget_service,
                 provider=active_provider_name,
+                role_assignments=role_mappings,
             )
 
             graph = create_workflow_graph(wf_ctx)
@@ -281,10 +296,27 @@ class RunWorker:
                     },
                 }
 
-            # Check if run reached terminal status
+            # Check if run reached terminal status using lightweight query
             try:
-                state = self.store.load(run_id)
-                if state.run.status in (RunStatus.FINAL, RunStatus.PARTIAL, RunStatus.FAILED, RunStatus.CANCELLED):
+                if hasattr(self.store, "get_run_status_info"):
+                    status_info = self.store.get_run_status_info(run_id)
+                    if status_info is None:
+                        break
+                    raw_status, raw_phase, stop_reason = status_info
+                    status_str = str(raw_status).upper()
+                    phase_str = str(raw_phase).upper() if raw_phase else ""
+                else:
+                    state = self.store.load(run_id)
+                    status_str = state.run.status.value.upper()
+                    phase_str = state.run.phase.value.upper()
+                    stop_reason = state.run.stop_reason
+
+                if status_str in (
+                    RunStatus.FINAL.value,
+                    RunStatus.PARTIAL.value,
+                    RunStatus.FAILED.value,
+                    RunStatus.CANCELLED.value,
+                ):
                     # Check one last time for any remaining events
                     final_events = self.store.events(run_id, after=current_seq)
                     for ev in final_events:
@@ -306,9 +338,9 @@ class RunWorker:
                         "id": current_seq + 1,
                         "event": "run_completed",
                         "data": {
-                            "status": state.run.status.value,
-                            "phase": state.run.phase.value,
-                            "stop_reason": state.run.stop_reason,
+                            "status": status_str,
+                            "phase": phase_str,
+                            "stop_reason": stop_reason,
                         },
                     }
                     break

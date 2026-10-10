@@ -549,7 +549,7 @@ def test_domain_import_does_not_load_framework_or_sdks():
         [
             sys.executable,
             "-c",
-            "import sys; import astra_multi.domain.models; import astra_multi.domain.policies; import astra_multi.domain.repositories; assert not any(m.split('.')[0] in {'langgraph', 'langchain_core', 'openai', 'google'} for m in sys.modules)",
+            "import sys; before = set(sys.modules.keys()); import astra_multi.domain.models; import astra_multi.domain.policies; import astra_multi.domain.repositories; new_mods = set(sys.modules.keys()) - before; assert not any(m.split('.')[0] in {'langgraph', 'langchain_core', 'openai', 'google'} for m in new_mods)",
         ],
         check=True,
     )

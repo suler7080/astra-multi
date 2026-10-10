@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import type { PlanRevision } from '../types';
 import { GitBranch, CheckSquare, Download, FileText, ArrowRight } from 'lucide-react';
-import { useI18n } from '../i18n';
+import { useI18n } from '../i18nContext';
 
 interface PlanViewerProps {
   currentPlan?: PlanRevision | null;

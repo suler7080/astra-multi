@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 from collections.abc import Callable
 from datetime import datetime, timezone
@@ -155,3 +156,44 @@ class SettingsStore:
         conn = self._get_connection()
         conn.execute("DELETE FROM provider_configs WHERE name = ?", (name,))
         conn.commit()
+
+    def get_role_mappings(self) -> dict[str, dict[str, str | None]]:
+        """Reads role-to-provider mappings from app_settings ('role_mappings').
+
+        Returns an empty dict if not configured or empty.
+        """
+        raw = self.get_setting("role_mappings")
+        if not raw:
+            return {}
+        try:
+            parsed = json.loads(raw)
+            if isinstance(parsed, dict):
+                return parsed
+            return {}
+        except Exception:
+            return {}
+
+    def save_role_mappings(self, mappings: dict[str, dict[str, str | None]]) -> None:
+        """Serializes and saves role-to-provider mappings to app_settings."""
+        self.set_setting("role_mappings", json.dumps(mappings))
+
+    def save_run_role_mappings_snapshot(
+        self, run_id: str, mappings: dict[str, dict[str, str | None]]
+    ) -> None:
+        """Saves immutable snapshot of role mappings for a specific run."""
+        self.set_setting(f"run_role_mappings:{run_id}", json.dumps(mappings))
+
+    def get_run_role_mappings_snapshot(
+        self, run_id: str
+    ) -> dict[str, dict[str, str | None]] | None:
+        """Loads snapshot of role mappings for a run if present."""
+        raw = self.get_setting(f"run_role_mappings:{run_id}")
+        if not raw:
+            return None
+        try:
+            parsed = json.loads(raw)
+            if isinstance(parsed, dict):
+                return parsed
+            return None
+        except Exception:
+            return None

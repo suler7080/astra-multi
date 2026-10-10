@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import type { StreamEvent } from '../types';
 import { MessageSquare, Radio, User, Bot, Shield, CheckCircle, Code } from 'lucide-react';
-import { useI18n } from '../i18n';
+import { useI18n } from '../i18nContext';
 
 interface DiscussionTimelineProps {
   events: StreamEvent[];

@@ -7,7 +7,7 @@ import tempfile
 import threading
 import time
 from pathlib import Path
-from typing import Annotated, Literal, Self
+from typing import Annotated, Any, Literal, Self
 from uuid import uuid4
 
 from pydantic import Field, JsonValue, TypeAdapter, model_validator
@@ -95,6 +95,39 @@ class JobResult(Contract):
         if self.status == "failed":
             return ValidationStatus.FAIL
         return ValidationStatus.NOT_RUN
+
+
+def _terminate_process_tree(process: subprocess.Popen[Any]) -> None:
+    """Terminates a process and all its descendant child processes.
+
+    On Windows, TerminateProcess only kills the root process, leaving
+    orphaned descendant processes running in the background and holding
+    directory/file locks. Using taskkill /F /T terminates the entire tree.
+    """
+    if process.poll() is not None:
+        return
+    if os.name == "nt":
+        try:
+            subprocess.run(
+                ["taskkill", "/F", "/T", "/PID", str(process.pid)],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+                timeout=10,
+            )
+        except Exception:
+            pass
+    try:
+        process.terminate()
+        process.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        try:
+            process.kill()
+            process.wait(timeout=5)
+        except Exception:
+            pass
+    except Exception:
+        pass
 
 
 class WindowsRunner:
@@ -227,21 +260,11 @@ class WindowsRunner:
                 while process.poll() is None:
                     if cancel is not None and cancel.is_set():
                         status, reason = "cancelled", "job cancelled"
-                        process.terminate()
-                        try:
-                            process.wait(timeout=5)
-                        except subprocess.TimeoutExpired:
-                            process.kill()
-                            process.wait()
+                        _terminate_process_tree(process)
                         break
                     if time.monotonic() >= deadline:
                         status, reason = "timeout", "job exceeded wall-clock limit"
-                        process.terminate()
-                        try:
-                            process.wait(timeout=5)
-                        except subprocess.TimeoutExpired:
-                            process.kill()
-                            process.wait()
+                        _terminate_process_tree(process)
                         break
                     time.sleep(0.05)
 
@@ -257,13 +280,8 @@ class WindowsRunner:
                     status, reason = "unavailable", f"Windows job execution failed: {e}"
                 cleanup = False
             finally:
-                if 'process' in locals() and process.poll() is None:
-                    try:
-                        process.terminate()
-                        process.wait(timeout=5)
-                    except subprocess.TimeoutExpired:
-                        process.kill()
-                        process.wait(timeout=5)
+                if "process" in locals() and process.poll() is None:
+                    _terminate_process_tree(process)
 
         content = self._redact(bytes(output).decode("utf-8", errors="replace")).encode()[:self.profile.output_bytes]
         return JobResult(

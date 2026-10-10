@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import type { CreateRunPayload } from '../types';
 import { X, Plus, Trash2, Sparkles, AlertCircle } from 'lucide-react';
-import { useI18n } from '../i18n';
+import { useI18n } from '../i18nContext';
 
 interface NewRunModalProps {
   isOpen: boolean;

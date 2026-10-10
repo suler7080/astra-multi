@@ -13,6 +13,7 @@ from astra_multi.domain.models import (
     RunStatus,
     TaskSpec,
 )
+from astra_multi.domain.policies import LeaseLost
 from astra_multi.orchestration.controller import WorkflowController
 from astra_multi.persistence.sqlite import SQLiteStore
 
@@ -202,7 +203,7 @@ def cmd_answer(store: SQLiteStore, args: argparse.Namespace) -> int:
 
 def cmd_cancel(store: SQLiteStore, args: argparse.Namespace) -> int:
     state = store.load(args.run_id)
-    lease = store.acquire(args.run_id, owner="cli-user", ttl=30)
+    lease = store.acquire(args.run_id, owner="cli-user", ttl=30, force=True)
     controller = WorkflowController(store, lease, actor="cli-user")
     controller.transition_phase(
         new_phase=state.run.phase,
@@ -228,7 +229,10 @@ def cmd_delete(store: SQLiteStore, args: argparse.Namespace) -> int:
         )
         return 1
     try:
-        store.delete(args.run_id)
+        store.delete(args.run_id, force=args.force)
+    except LeaseLost as exc:
+        print(f"Error: Cannot delete run: {exc}. Retry with --force.", file=sys.stderr)
+        return 1
     except KeyError:
         print(f"Error: Run {args.run_id} not found.", file=sys.stderr)
         return 1
@@ -309,13 +313,15 @@ def cmd_finalize(store: SQLiteStore, args: argparse.Namespace) -> int:
     decision = service.evaluate(state, assessment)
     if decision.can_finalize:
         lease = store.acquire(args.run_id, owner="quality-service", ttl=30)
-        controller = WorkflowController(store, lease, actor="P4-quality-service")
-        controller.transition_phase(
-            new_phase=state.run.phase,
-            new_status=RunStatus.FINAL,
-            reason=decision.reason,
-        )
-        store.release(lease)
+        try:
+            controller = WorkflowController(store, lease, actor="P4-quality-service")
+            controller.transition_phase(
+                new_phase=state.run.phase,
+                new_status=RunStatus.FINAL,
+                reason=decision.reason,
+            )
+        finally:
+            store.release(lease)
         print(f"Run {args.run_id} finalized as FINAL.")
         return 0
     else:

@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import type { Issue } from '../types';
 import { AlertOctagon, AlertTriangle, Info, CheckCircle2, Filter } from 'lucide-react';
-import { useI18n } from '../i18n';
+import { useI18n } from '../i18nContext';
 
 interface IssuesTableProps {
   issues: Issue[];

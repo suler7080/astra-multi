@@ -1,7 +1,7 @@
 import React from 'react';
 import type { FinalizeResult, ValidationReport } from '../types';
 import { X, ShieldCheck, AlertTriangle, CheckCircle, Award } from 'lucide-react';
-import { useI18n } from '../i18n';
+import { useI18n } from '../i18nContext';
 
 interface QualityGateModalProps {
   isOpen: boolean;
@@ -109,7 +109,7 @@ export const QualityGateModal: React.FC<QualityGateModalProps> = ({
                     <div>
                       <h4 className="font-semibold text-emerald-300">Run Successfully Finalized</h4>
                       <p className="text-xs text-emerald-200">
-                        Promoted to FINAL status. Plan is ready for export and execution handover.
+                        {finalizeResult.message || 'Promoted to FINAL status. Plan is ready for export and execution handover.'}
                       </p>
                     </div>
                   </>
@@ -119,14 +119,14 @@ export const QualityGateModal: React.FC<QualityGateModalProps> = ({
                     <div>
                       <h4 className="font-semibold text-amber-300">Finalization Blocked</h4>
                       <p className="text-xs text-amber-200">
-                        Run status: {finalizeResult.status}. Remaining blockers must be resolved first.
+                        {finalizeResult.reason || `Run status: ${finalizeResult.status}. Remaining blockers must be resolved first.`}
                       </p>
                     </div>
                   </>
                 )}
               </div>
 
-              {finalizeResult.blockers.length > 0 && (
+              {((finalizeResult.blockers && finalizeResult.blockers.length > 0) || false) && (
                 <div className="blockers-list mt-4">
                   <h4 className="text-sm font-semibold text-slate-200 mb-2">{t('qg_unresolved_issues')}:</h4>
                   <ul className="list-disc pl-5 space-y-1">

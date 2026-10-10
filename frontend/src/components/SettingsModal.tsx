@@ -1,12 +1,13 @@
-import React, { useState, useEffect } from 'react';
-import type { ProviderItem, SaveProviderPayload } from '../types';
+import React, { useState, useEffect, useCallback } from 'react';
+import type { ProviderItem, SaveProviderPayload, RoleMappings, RoleMappingsResponse } from '../types';
 import { api, ApiError } from '../api';
-import { useI18n } from '../i18n';
+import { useI18n } from '../i18nContext';
 import {
   X,
   Settings,
   Cpu,
   Lock,
+  Users,
   Plus,
   Trash2,
   CheckCircle,
@@ -32,11 +33,20 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onProviderChanged,
 }) => {
   const { t } = useI18n();
-  const [activeTab, setActiveTab] = useState<'providers' | 'security'>('providers');
+  const [activeTab, setActiveTab] = useState<'providers' | 'roles' | 'security'>('providers');
   const [providers, setProviders] = useState<ProviderItem[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
+
+  // Role Mappings State
+  const [roleMappings, setRoleMappings] = useState<RoleMappings>({
+    planner: null,
+    reviewer: null,
+    synthesizer: null,
+  });
+  const [activeProviderName, setActiveProviderName] = useState<string>('');
+  const [isSavingRoles, setIsSavingRoles] = useState(false);
 
   // Provider Form State
   const [isEditing, setIsEditing] = useState(false);
@@ -64,16 +74,17 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [confirmNewPassword, setConfirmNewPassword] = useState('');
   const [isChangingPass, setIsChangingPass] = useState(false);
 
-  useEffect(() => {
-    if (isOpen) {
-      loadProviders();
-      setError(null);
-      setSuccessMsg(null);
-      setIsEditing(false);
+  const handleError = useCallback((err: unknown, fallback: string) => {
+    if (err instanceof ApiError) {
+      setError(err.message);
+    } else if (err instanceof Error) {
+      setError(err.message);
+    } else {
+      setError(fallback);
     }
-  }, [isOpen]);
+  }, []);
 
-  const loadProviders = async () => {
+  const loadProviders = useCallback(async () => {
     try {
       setIsLoading(true);
       const data = await api.listProviders();
@@ -83,15 +94,120 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     } finally {
       setIsLoading(false);
     }
+  }, [handleError]);
+
+  const extractRoleMappings = (res: RoleMappingsResponse): RoleMappings => ({
+    planner: res.planner ?? res.mappings?.planner ?? null,
+    reviewer: res.reviewer ?? res.mappings?.reviewer ?? null,
+    synthesizer: res.synthesizer ?? res.mappings?.synthesizer ?? null,
+  });
+
+  const loadRoleMappings = useCallback(async () => {
+    try {
+      const res = await api.getRoleMappings();
+      setRoleMappings(extractRoleMappings(res));
+      setActiveProviderName(res.active_provider || '');
+    } catch (err: unknown) {
+      handleError(err, 'Failed to load role assignments');
+    }
+  }, [handleError]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    let ignore = false;
+    api.listProviders()
+      .then((data) => {
+        if (!ignore) {
+          setProviders(data);
+        }
+      })
+      .catch((err: unknown) => {
+        if (!ignore) {
+          handleError(err, 'Failed to load provider settings');
+        }
+      });
+    api.getRoleMappings()
+      .then((res) => {
+        if (!ignore) {
+          setRoleMappings(extractRoleMappings(res));
+          setActiveProviderName(res.active_provider || '');
+        }
+      })
+      .catch((err: unknown) => {
+        if (!ignore) {
+          handleError(err, 'Failed to load role assignments');
+        }
+      });
+    return () => {
+      ignore = true;
+    };
+  }, [isOpen, handleError]);
+
+  const handleRoleProviderChange = (
+    roleKey: 'planner' | 'reviewer' | 'synthesizer',
+    providerName: string
+  ) => {
+    setRoleMappings((prev) => {
+      if (!providerName) {
+        return {
+          ...prev,
+          [roleKey]: null,
+        };
+      }
+      return {
+        ...prev,
+        [roleKey]: {
+          provider: providerName,
+          model: prev[roleKey]?.model || '',
+        },
+      };
+    });
   };
 
-  const handleError = (err: unknown, fallback: string) => {
-    if (err instanceof ApiError) {
-      setError(err.message);
-    } else if (err instanceof Error) {
-      setError(err.message);
-    } else {
-      setError(fallback);
+  const handleRoleModelChange = (
+    roleKey: 'planner' | 'reviewer' | 'synthesizer',
+    modelName: string
+  ) => {
+    setRoleMappings((prev) => {
+      const currentProvider = prev[roleKey]?.provider || activeProviderName;
+      return {
+        ...prev,
+        [roleKey]: {
+          provider: currentProvider,
+          model: modelName,
+        },
+      };
+    });
+  };
+
+  const handleSaveRoleMappings = async () => {
+    setError(null);
+    setSuccessMsg(null);
+    try {
+      setIsSavingRoles(true);
+      const payload: RoleMappings = {
+        planner: roleMappings.planner?.provider ? {
+          provider: roleMappings.planner.provider,
+          model: roleMappings.planner.model?.trim() || null,
+        } : null,
+        reviewer: roleMappings.reviewer?.provider ? {
+          provider: roleMappings.reviewer.provider,
+          model: roleMappings.reviewer.model?.trim() || null,
+        } : null,
+        synthesizer: roleMappings.synthesizer?.provider ? {
+          provider: roleMappings.synthesizer.provider,
+          model: roleMappings.synthesizer.model?.trim() || null,
+        } : null,
+      };
+      const res = await api.saveRoleMappings(payload);
+      setRoleMappings(extractRoleMappings(res));
+      setActiveProviderName(res.active_provider || '');
+      setSuccessMsg(t('role_save_success'));
+      setTimeout(() => setSuccessMsg(null), 4000);
+    } catch (err: unknown) {
+      handleError(err, 'Failed to save role assignments');
+    } finally {
+      setIsSavingRoles(false);
     }
   };
 
@@ -262,6 +378,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           >
             <Cpu size={15} />
             <span>{t('settings_tab_providers')}</span>
+          </button>
+          <button
+            onClick={() => { setActiveTab('roles'); setError(null); void loadRoleMappings(); }}
+            className={`settings-tab-btn ${activeTab === 'roles' ? 'settings-tab-btn-active' : ''}`}
+          >
+            <Users size={15} />
+            <span>{t('settings_tab_roles')}</span>
           </button>
           <button
             onClick={() => { setActiveTab('security'); setError(null); }}
@@ -531,6 +654,165 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               )}
             </div>
           )}
+
+          {/* TAB: ROLE ASSIGNMENTS */}
+          {activeTab === 'roles' && (() => {
+            const availableProviders = providers.filter((p) => p.has_api_key || p.is_active);
+            const plannerProv = roleMappings.planner?.provider || activeProviderName;
+            const synthProv = roleMappings.synthesizer?.provider || activeProviderName;
+            const plannerDefaultModel = providers.find((p) => p.name.toLowerCase() === plannerProv.toLowerCase())?.model || '';
+            const synthDefaultModel = providers.find((p) => p.name.toLowerCase() === synthProv.toLowerCase())?.model || '';
+            const plannerEffectiveModel = roleMappings.planner?.model?.trim() || plannerDefaultModel;
+            const synthEffectiveModel = roleMappings.synthesizer?.model?.trim() || synthDefaultModel;
+
+            const isSamePlannerSynthesizer = Boolean(
+              plannerProv &&
+              synthProv &&
+              plannerProv.toLowerCase() === synthProv.toLowerCase() &&
+              plannerEffectiveModel &&
+              synthEffectiveModel &&
+              plannerEffectiveModel.toLowerCase() === synthEffectiveModel.toLowerCase()
+            );
+
+            const roleCards = [
+              {
+                key: 'planner' as const,
+                title: t('role_planner_title'),
+                desc: t('role_planner_desc'),
+                badgeClass: 'badge-planner',
+              },
+              {
+                key: 'reviewer' as const,
+                title: t('role_reviewer_title'),
+                desc: t('role_reviewer_desc'),
+                badgeClass: 'badge-reviewer',
+              },
+              {
+                key: 'synthesizer' as const,
+                title: t('role_synthesizer_title'),
+                desc: t('role_synthesizer_desc'),
+                badgeClass: 'badge-synthesizer',
+              },
+            ];
+
+            return (
+              <div className="space-y-4">
+                <div className="settings-section-header">
+                  <span className="text-xs text-slate-400">
+                    {t('settings_roles_desc')}
+                  </span>
+                </div>
+
+                {isSamePlannerSynthesizer && (
+                  <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-md text-amber-300 text-xs flex items-center gap-2 mb-3">
+                    <AlertTriangle size={16} className="flex-shrink-0 text-amber-400" />
+                    <span>{t('role_same_model_warning')}</span>
+                  </div>
+                )}
+
+                <div className="space-y-3">
+                  {roleCards.map((r) => {
+                    const assignment = roleMappings[r.key];
+                    const currentProviderName = assignment?.provider || '';
+                    const matchedProvider = providers.find(
+                      (p) => p.name.toLowerCase() === currentProviderName.toLowerCase()
+                    );
+                    const defaultModelHint = matchedProvider?.model;
+
+                    return (
+                      <div
+                        key={r.key}
+                        className="p-4 bg-slate-900/60 border border-slate-800 rounded-lg space-y-3"
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <span className={`actor-badge ${r.badgeClass}`}>
+                              {r.key.toUpperCase()}
+                            </span>
+                            <span className="text-sm font-semibold text-slate-200">
+                              {r.title}
+                            </span>
+                          </div>
+                          {currentProviderName ? (
+                            <span className="badge-subtle text-[10px] uppercase font-mono">
+                              Custom: {currentProviderName}
+                            </span>
+                          ) : (
+                            <span className="badge-emerald text-[10px] uppercase font-semibold">
+                              Default
+                            </span>
+                          )}
+                        </div>
+
+                        <p className="text-xs text-slate-400">
+                          {r.desc}
+                        </p>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
+                          <div className="form-group">
+                            <label className="form-label">{t('role_provider_label')}</label>
+                            <select
+                              value={currentProviderName}
+                              onChange={(e) => handleRoleProviderChange(r.key, e.target.value)}
+                              className="form-select"
+                            >
+                              <option value="">
+                                {t('role_provider_default').replace('{provider}', activeProviderName || 'Active')}
+                              </option>
+                              {availableProviders.map((p) => (
+                                <option key={p.name} value={p.name}>
+                                  {p.name} ({p.kind})
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+
+                          <div className="form-group">
+                            <label className="form-label">{t('role_model_label')}</label>
+                            <input
+                              type="text"
+                              list={`model-suggestions-${r.key}`}
+                              value={assignment?.model ?? ''}
+                              onChange={(e) => handleRoleModelChange(r.key, e.target.value)}
+                              placeholder={
+                                currentProviderName
+                                  ? (defaultModelHint
+                                      ? `Default: ${defaultModelHint}`
+                                      : t('role_model_placeholder'))
+                                  : t('role_model_placeholder')
+                              }
+                              disabled={!currentProviderName}
+                              className="form-input"
+                            />
+                            <datalist id={`model-suggestions-${r.key}`}>
+                              {defaultModelHint && <option value={defaultModelHint} />}
+                              <option value="qwen/qwen3.7-flash:free" />
+                              <option value="gpt-4o-mini" />
+                              <option value="gpt-4o" />
+                              <option value="gemini-2.0-flash" />
+                              <option value="claude-3-5-sonnet" />
+                            </datalist>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                <div className="modal-actions pt-4 mt-2">
+                  <button
+                    type="button"
+                    onClick={handleSaveRoleMappings}
+                    disabled={isSavingRoles}
+                    className="btn-primary btn-sm flex items-center gap-1.5"
+                  >
+                    <CheckCircle size={14} />
+                    <span>{isSavingRoles ? t('role_saving') : t('role_btn_save')}</span>
+                  </button>
+                </div>
+              </div>
+            );
+          })()}
 
           {/* TAB 2: ADMIN SECURITY */}
           {activeTab === 'security' && (

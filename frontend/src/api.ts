@@ -10,6 +10,8 @@ import type {
   RunDetail,
   RunLogEntry,
   RunSummary,
+  RoleMappings,
+  RoleMappingsResponse,
   SaveProviderPayload,
   TestProviderPayload,
   TestProviderResult,
@@ -148,6 +150,22 @@ export const api = {
       body: JSON.stringify(payload),
     });
     return handleResponse<TestProviderResult>(res);
+  },
+
+  async getRoleMappings(): Promise<RoleMappingsResponse> {
+    const res = await fetch(`${BASE_URL}/settings/roles`, {
+      headers: getAuthHeaders(),
+    });
+    return handleResponse<RoleMappingsResponse>(res);
+  },
+
+  async saveRoleMappings(data: RoleMappings): Promise<RoleMappingsResponse> {
+    const res = await fetch(`${BASE_URL}/settings/roles`, {
+      method: 'PUT',
+      headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify(data),
+    });
+    return handleResponse<RoleMappingsResponse>(res);
   },
 
   // Runs APIs

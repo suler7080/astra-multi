@@ -542,7 +542,7 @@
       "name": "Bug Fix: SQLite retry mechanism",
       "exit_code": 0,
       "stdout": "TASK-01 VERIFICATION SUCCESS",
-      "duration_seconds": 0.054,
+      "duration_seconds": 0.056,
       "status": "PASS",
       "re_plan_needed": false
     },
@@ -551,7 +551,7 @@
       "name": "Feature: JWT validation check",
       "exit_code": 0,
       "stdout": "TASK-03 VERIFICATION SUCCESS",
-      "duration_seconds": 0.054,
+      "duration_seconds": 0.073,
       "status": "PASS",
       "re_plan_needed": false
     },
@@ -560,7 +560,7 @@
       "name": "Refactor: Hexagonal Domain Event Dispatcher",
       "exit_code": 0,
       "stdout": "TASK-05 VERIFICATION SUCCESS",
-      "duration_seconds": 0.047,
+      "duration_seconds": 0.054,
       "status": "PASS",
       "re_plan_needed": false
     },
@@ -569,7 +569,7 @@
       "name": "Greenfield: Sliding Window Rate Limiter",
       "exit_code": 0,
       "stdout": "TASK-11 VERIFICATION SUCCESS",
-      "duration_seconds": 0.054,
+      "duration_seconds": 0.074,
       "status": "PASS",
       "re_plan_needed": false
     }

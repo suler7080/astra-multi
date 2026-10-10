@@ -69,6 +69,10 @@ class ProposalOutput(AgentContract):
 class IssueReport(AgentContract):
     """An issue raised by Reviewer in REVIEW phase."""
 
+    id: ID | None = Field(
+        default=None,
+        description="Deterministic issue ID (e.g. 'ISSUE-3a8c1f0d') when assigned",
+    )
     claim: Text
     impact: Text
     severity: IssueSeverity = IssueSeverity.WARNING
@@ -167,9 +171,13 @@ class SynthesizerOutput(AgentContract):
                 continue
             s = item.strip()
             if re.match(r"^[A-Za-z0-9][A-Za-z0-9_.:-]*$", s):
-                cleaned.append(s)
+                cleaned.append(s.rstrip(":.,; "))
             else:
-                cleaned.append(f"ISSUE-{idx + 1}")
+                m = re.search(r"(ISSUE-[A-Za-z0-9_-]+)", s, re.IGNORECASE)
+                if m:
+                    cleaned.append(m.group(1).rstrip(":.,; "))
+                else:
+                    cleaned.append(f"ISSUE-{idx + 1}")
         return cleaned
 
 
@@ -273,7 +281,7 @@ def format_synthesize_prompt(
         "1. Combine proposal, review feedback, and resolved issues into an actionable, step-by-step plan.\n"
         "2. Step dependencies must form a strict Directed Acyclic Graph (DAG).\n"
         "3. Every step must have objective, requirement_ids, validation, deliverables, and completion_criteria.\n"
-        "4. In issues_addressed, list only issue IDs (e.g. ['ISSUE-1', 'ISSUE-2'] or []). Do NOT put sentences or descriptions into issues_addressed.\n"
+        "4. In issues_addressed, list the exact issue IDs from Review Issues that this plan revision resolves (e.g. ['ISSUE-3a8c1f0d'] or []). Do NOT put sentences or descriptions into issues_addressed.\n"
         "5. Output strictly according to SynthesizerOutput schema."
     )
     user_message = (
@@ -302,7 +310,7 @@ def format_semantic_review_prompt(
         "Phase: SEMANTIC_REVIEW\n"
         "Rules:\n"
         "1. Rigorously evaluate the newly synthesized plan revision against previous issues and task requirements.\n"
-        "2. If an existing issue is adequately addressed in the plan, produce a resolution with review_result='PASS' and review_note.\n"
+        "2. If an existing issue is adequately addressed in the plan, produce a resolution specifying its exact issue_id from Open Issues (e.g. 'ISSUE-3a8c1f0d'), review_result='PASS' and review_note.\n"
         "3. If new problems remain or are introduced, identify them as issues.\n"
         "4. Output strictly according to ReviewOutput schema."
     )

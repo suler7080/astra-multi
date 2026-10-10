@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { api, ApiError } from './api';
 import type {
   CreateRunPayload,
@@ -26,7 +26,7 @@ import { ExecutionLogs } from './components/ExecutionLogs';
 import { AuthModal } from './components/AuthModal';
 import { SettingsModal } from './components/SettingsModal';
 import { DashboardHome } from './components/DashboardHome';
-import { useI18n } from './i18n';
+import { useI18n } from './i18nContext';
 import {
   LayoutDashboard,
   MessageSquare,
@@ -67,33 +67,20 @@ export const App: React.FC = () => {
 
   const eventSourceRef = useRef<EventSource | null>(null);
 
-  // Check auth status on mount and load runs if authenticated
-  useEffect(() => {
-    checkAuthAndInit();
-  }, []);
-
-  const checkAuthAndInit = async () => {
-    try {
-      const status = await api.getAuthStatus();
-      if (status.setup_required) {
-        setAuthMode('setup');
+  const handleError = useCallback((err: unknown, defaultMsg: string) => {
+    let msg = defaultMsg;
+    if (err instanceof ApiError) {
+      msg = `${err.code}: ${err.message}`;
+      if (err.status === 401) {
         setIsAuthModalOpen(true);
-        return;
-      }
-      if (!status.authenticated) {
         setAuthMode('login');
-        setIsAuthModalOpen(true);
-        return;
       }
-      const params = new URLSearchParams(window.location.search);
-      const runParam = params.get('run');
-      loadRuns(runParam);
-    } catch {
-      const params = new URLSearchParams(window.location.search);
-      const runParam = params.get('run');
-      loadRuns(runParam);
+    } else if (err instanceof Error) {
+      msg = err.message;
     }
-  };
+    setErrorMessage(msg);
+    setTimeout(() => setErrorMessage(null), 6000);
+  }, []);
 
   // Sync runParam into window URL without reload
   const updateUrlParam = (runId: string) => {
@@ -106,92 +93,131 @@ export const App: React.FC = () => {
     window.history.replaceState({}, '', url.toString());
   };
 
-  const loadRuns = async (initialRunId?: string | null, silent = false) => {
-    try {
-      if (!silent) setIsLoading(true);
-      const list = await api.listRuns();
-      setRuns(list);
+  const loadRunDetails = useCallback(
+    async (runId: string, silent = false) => {
+      try {
+        if (!silent) setIsLoading(true);
+        const detail = await api.getRun(runId);
+        setCurrentRun(detail);
 
-      if (initialRunId && list.some((r) => r.run_id === initialRunId)) {
-        setSelectedRunId(initialRunId);
-        updateUrlParam(initialRunId);
-        await loadRunDetails(initialRunId, silent);
-      } else if (initialRunId === undefined && selectedRunId) {
-        // Sync selected run if present in updated list
-        const inList = list.find((r) => r.run_id === selectedRunId);
-        if (inList && currentRun) {
-          if (inList.phase !== currentRun.phase || inList.status !== currentRun.status) {
-            setCurrentRun((prev) =>
-              prev
-                ? {
-                    ...prev,
-                    phase: inList.phase,
-                    status: inList.status,
-                    stop_reason: inList.stop_reason,
-                  }
-                : null
-            );
+        // Keep runs list in sync with current run phase and status
+        setRuns((prev) =>
+          prev.map((r) =>
+            r.run_id === detail.run_id
+              ? {
+                  ...r,
+                  phase: detail.phase,
+                  status: detail.status,
+                  revision: detail.revision,
+                  stop_reason: detail.stop_reason,
+                }
+              : r
+          )
+        );
+
+        // Concurrently fetch entities
+        const [iss, dec, ev] = await Promise.all([
+          api.getIssues(runId).catch(() => []),
+          api.getDecisions(runId).catch(() => []),
+          api.getEvidence(runId).catch(() => []),
+        ]);
+        setIssues(iss);
+        setDecisions(dec);
+        setEvidence(ev);
+
+        if (detail.plan_revision) {
+          try {
+            const plan = await api.getPlan(runId, detail.plan_revision);
+            setCurrentPlan(plan);
+          } catch {
+            setCurrentPlan(null);
           }
-        }
-      } else if (initialRunId === null) {
-        setSelectedRunId(null);
-        setCurrentRun(null);
-        updateUrlParam('');
-      }
-    } catch (err: unknown) {
-      if (!silent) handleError(err, 'Failed to load runs');
-    } finally {
-      if (!silent) setIsLoading(false);
-    }
-  };
-
-  const loadRunDetails = async (runId: string, silent = false) => {
-    try {
-      if (!silent) setIsLoading(true);
-      const detail = await api.getRun(runId);
-      setCurrentRun(detail);
-
-      // Keep runs list in sync with current run phase and status
-      setRuns((prev) =>
-        prev.map((r) =>
-          r.run_id === detail.run_id
-            ? {
-                ...r,
-                phase: detail.phase,
-                status: detail.status,
-                revision: detail.revision,
-                stop_reason: detail.stop_reason,
-              }
-            : r
-        )
-      );
-
-      // Concurrently fetch entities
-      const [iss, dec, ev] = await Promise.all([
-        api.getIssues(runId).catch(() => []),
-        api.getDecisions(runId).catch(() => []),
-        api.getEvidence(runId).catch(() => []),
-      ]);
-      setIssues(iss);
-      setDecisions(dec);
-      setEvidence(ev);
-
-      if (detail.plan_revision) {
-        try {
-          const plan = await api.getPlan(runId, detail.plan_revision);
-          setCurrentPlan(plan);
-        } catch {
+        } else {
           setCurrentPlan(null);
         }
-      } else {
-        setCurrentPlan(null);
+      } catch (err: unknown) {
+        if (!silent) handleError(err, `Failed to load run ${runId}`);
+      } finally {
+        if (!silent) setIsLoading(false);
       }
-    } catch (err: unknown) {
-      if (!silent) handleError(err, `Failed to load run ${runId}`);
-    } finally {
-      if (!silent) setIsLoading(false);
-    }
-  };
+    },
+    [handleError]
+  );
+
+  const loadRuns = useCallback(
+    async (initialRunId?: string | null, silent = false) => {
+      try {
+        if (!silent) setIsLoading(true);
+        const list = await api.listRuns();
+        setRuns(list);
+
+        if (initialRunId && list.some((r) => r.run_id === initialRunId)) {
+          setSelectedRunId(initialRunId);
+          updateUrlParam(initialRunId);
+          await loadRunDetails(initialRunId, silent);
+        } else if (initialRunId === undefined && selectedRunId) {
+          // Sync selected run if present in updated list
+          const inList = list.find((r) => r.run_id === selectedRunId);
+          if (inList) {
+            setCurrentRun((prev) => {
+              if (!prev) return null;
+              if (inList.phase !== prev.phase || inList.status !== prev.status) {
+                return {
+                  ...prev,
+                  phase: inList.phase,
+                  status: inList.status,
+                  stop_reason: inList.stop_reason,
+                };
+              }
+              return prev;
+            });
+          }
+        } else if (initialRunId === null) {
+          setSelectedRunId(null);
+          setCurrentRun(null);
+          updateUrlParam('');
+        }
+      } catch (err: unknown) {
+        if (!silent) handleError(err, 'Failed to load runs');
+      } finally {
+        if (!silent) setIsLoading(false);
+      }
+    },
+    [selectedRunId, loadRunDetails, handleError]
+  );
+
+  // Check auth status on mount and load runs if authenticated
+  useEffect(() => {
+    let ignore = false;
+    api
+      .getAuthStatus()
+      .then((status) => {
+        if (ignore) return;
+        if (status.setup_required) {
+          setAuthMode('setup');
+          setIsAuthModalOpen(true);
+          return;
+        }
+        if (!status.authenticated) {
+          setAuthMode('login');
+          setIsAuthModalOpen(true);
+          return;
+        }
+        const params = new URLSearchParams(window.location.search);
+        const runParam = params.get('run');
+        void loadRuns(runParam);
+      })
+      .catch(() => {
+        if (ignore) return;
+        const params = new URLSearchParams(window.location.search);
+        const runParam = params.get('run');
+        void loadRuns(runParam);
+      });
+
+    return () => {
+      ignore = true;
+    };
+  }, [loadRuns]);
 
   // Setup SSE stream for selected run
   useEffect(() => {
@@ -201,9 +227,6 @@ export const App: React.FC = () => {
       eventSourceRef.current.close();
       eventSourceRef.current = null;
     }
-
-    setEvents([]);
-    setIsSseConnected(false);
 
     const sseUrl = api.getEventSourceUrl(selectedRunId);
     const es = new EventSource(sseUrl);
@@ -324,7 +347,7 @@ export const App: React.FC = () => {
       es.close();
       eventSourceRef.current = null;
     };
-  }, [selectedRunId]);
+  }, [selectedRunId, loadRunDetails]);
 
   // Periodic background safety-net polling for the selected run
   useEffect(() => {
@@ -339,12 +362,12 @@ export const App: React.FC = () => {
 
     const timer = setInterval(() => {
       if (document.visibilityState === 'visible') {
-        loadRunDetails(selectedRunId, true);
+        void loadRunDetails(selectedRunId, true);
       }
     }, pollInterval);
 
     return () => clearInterval(timer);
-  }, [selectedRunId, currentRun?.status, isSseConnected]);
+  }, [selectedRunId, currentRun?.status, isSseConnected, loadRunDetails]);
 
   // Periodic background auto-refresh for runs list (dashboard / header)
   useEffect(() => {
@@ -356,29 +379,31 @@ export const App: React.FC = () => {
 
     const timer = setInterval(() => {
       if (document.visibilityState === 'visible') {
-        loadRuns(undefined, true);
+        void loadRuns(undefined, true);
       }
     }, intervalTime);
 
     return () => clearInterval(timer);
-  }, [selectedRunId, runs]);
+  }, [selectedRunId, runs, loadRuns]);
 
   // Immediately refresh on tab visibility / focus change
   useEffect(() => {
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
         if (selectedRunId) {
-          loadRunDetails(selectedRunId, true);
+          void loadRunDetails(selectedRunId, true);
         } else {
-          loadRuns(undefined, true);
+          void loadRuns(undefined, true);
         }
       }
     };
     document.addEventListener('visibilitychange', handleVisibilityChange);
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
-  }, [selectedRunId]);
+  }, [selectedRunId, loadRuns, loadRunDetails]);
 
   const handleSelectRun = (runId: string) => {
+    setEvents([]);
+    setIsSseConnected(false);
     if (!runId) {
       setSelectedRunId(null);
       setCurrentRun(null);
@@ -387,7 +412,7 @@ export const App: React.FC = () => {
     }
     setSelectedRunId(runId);
     updateUrlParam(runId);
-    loadRunDetails(runId);
+    void loadRunDetails(runId);
   };
 
   const handleCreateRun = async (payload: CreateRunPayload, idempotencyKey: string) => {
@@ -502,6 +527,7 @@ export const App: React.FC = () => {
       setQualityModalMode('finalize');
       setIsQualityModalOpen(true);
       await loadRunDetails(selectedRunId);
+      await loadRuns(selectedRunId);
     } catch (err: unknown) {
       handleError(err, 'Finalization failed');
     } finally {
@@ -556,20 +582,6 @@ export const App: React.FC = () => {
     setTimeout(() => setActionMessage(null), 4000);
   };
 
-  const handleError = (err: unknown, defaultMsg: string) => {
-    let msg = defaultMsg;
-    if (err instanceof ApiError) {
-      msg = `${err.code}: ${err.message}`;
-      if (err.status === 401) {
-        setIsAuthModalOpen(true);
-        setAuthMode('login');
-      }
-    } else if (err instanceof Error) {
-      msg = err.message;
-    }
-    setErrorMessage(msg);
-    setTimeout(() => setErrorMessage(null), 6000);
-  };
 
   return (
     <div className="app-container">
