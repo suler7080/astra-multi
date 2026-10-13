@@ -108,10 +108,11 @@ class WorkflowController:
         self,
         issue_id: str,
         reviewer: str,
-        review_result: Literal["PASS", "FAIL"],
+        review_result: Literal["PASS", "FAIL", "DUPLICATE"],
         review_note: str,
         resolution_text: str = "Resolved based on plan revision",
         evidence_ids: list[str] | None = None,
+        duplicate_of: str | None = None,
         node: str = "review",
     ) -> RunState:
         with self._lock:
@@ -120,7 +121,7 @@ class WorkflowController:
                 issue = next((i for i in state.issues if i.id == issue_id), None)
                 if not issue:
                     return state
-                if issue.status == IssueStatus.RESOLVED:
+                if issue.status in (IssueStatus.RESOLVED, IssueStatus.DUPLICATE, IssueStatus.REJECTED):
                     return state
 
                 current_rev = state.run.revision
@@ -128,6 +129,34 @@ class WorkflowController:
                 plan_revision = state.plan.revision if state.plan else None
 
                 try:
+                    if review_result == "DUPLICATE" and duplicate_of:
+                        if current_status == IssueStatus.PROPOSED_RESOLUTION:
+                            cmd = ChangeIssue(
+                                expected_revision=current_rev,
+                                node=node,
+                                logical_operation_id=f"issue-{issue_id}-reopen",
+                                actor=self.actor,
+                                issue_id=issue_id,
+                                status=IssueStatus.INVESTIGATING,
+                                reason="Reverting to investigating for duplicate mark",
+                            )
+                            op = self.repository.commit(self.lease.run_id, cmd, self.lease)
+                            current_rev = op.revision
+                            current_status = IssueStatus.INVESTIGATING
+
+                        cmd = ChangeIssue(
+                            expected_revision=current_rev,
+                            node=node,
+                            logical_operation_id=f"issue-{issue_id}-duplicate",
+                            actor=self.actor,
+                            issue_id=issue_id,
+                            status=IssueStatus.DUPLICATE,
+                            reason=review_note or f"Duplicate of {duplicate_of}",
+                            duplicate_of=duplicate_of,
+                        )
+                        self.repository.commit(self.lease.run_id, cmd, self.lease)
+                        return self.get_state()
+
                     # Step 1: OPEN -> INVESTIGATING
                     if current_status == IssueStatus.OPEN:
                         cmd = ChangeIssue(
@@ -207,6 +236,7 @@ class WorkflowController:
                             review_note = res.get("review_note", "")
                             resolution_text = res.get("resolution_text", "Resolved based on plan revision")
                             evidence_ids = res.get("evidence_ids")
+                            duplicate_of = res.get("duplicate_of")
                         else:
                             issue_id = getattr(res, "issue_id", None)
                             reviewer = getattr(res, "reviewer", "reviewer")
@@ -214,16 +244,46 @@ class WorkflowController:
                             review_note = getattr(res, "review_note", "")
                             resolution_text = getattr(res, "resolution_text", "Resolved based on plan revision")
                             evidence_ids = getattr(res, "evidence_ids", None)
+                            duplicate_of = getattr(res, "duplicate_of", None)
 
                         if not issue_id:
                             continue
                         issue = issues_by_id.get(issue_id)
                         if not issue:
                             continue
-                        if issue.status == IssueStatus.RESOLVED:
+                        if issue.status in (IssueStatus.RESOLVED, IssueStatus.DUPLICATE, IssueStatus.REJECTED):
                             continue
 
                         current_status = issue.status
+
+                        if review_result == "DUPLICATE" and duplicate_of:
+                            if current_status == IssueStatus.PROPOSED_RESOLUTION:
+                                cmd = ChangeIssue(
+                                    expected_revision=current_rev,
+                                    node=node,
+                                    logical_operation_id=f"issue-{issue_id}-reopen",
+                                    actor=self.actor,
+                                    issue_id=issue_id,
+                                    status=IssueStatus.INVESTIGATING,
+                                    reason="Reverting to investigating for duplicate mark",
+                                )
+                                op = self.repository.commit(self.lease.run_id, cmd, self.lease)
+                                current_rev = op.revision
+                                current_status = IssueStatus.INVESTIGATING
+
+                            cmd = ChangeIssue(
+                                expected_revision=current_rev,
+                                node=node,
+                                logical_operation_id=f"issue-{issue_id}-duplicate",
+                                actor=self.actor,
+                                issue_id=issue_id,
+                                status=IssueStatus.DUPLICATE,
+                                reason=review_note or f"Duplicate of {duplicate_of}",
+                                duplicate_of=duplicate_of,
+                            )
+                            op = self.repository.commit(self.lease.run_id, cmd, self.lease)
+                            current_rev = op.revision
+                            continue
 
                         # Step 1: OPEN -> INVESTIGATING
                         if current_status == IssueStatus.OPEN:

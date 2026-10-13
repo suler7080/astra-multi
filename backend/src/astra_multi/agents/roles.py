@@ -11,9 +11,9 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any, Literal
+from typing import Any, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator, ValidationInfo
 
 from astra_multi.context.bundle import ContextBundle
 from astra_multi.domain.models import (
@@ -87,9 +87,18 @@ class IssueResolutionReport(AgentContract):
 
     issue_id: ID
     resolution_text: Text = "Resolved based on current plan revision"
-    review_result: Literal["PASS", "FAIL"] = "PASS"
+    review_result: Literal["PASS", "FAIL", "DUPLICATE"] = "PASS"
+    duplicate_of: ID | None = None
     review_note: Text = "Verified in plan revision"
     evidence_ids: list[ID] = Field(default_factory=list)
+
+
+class RequirementVerdict(AgentContract):
+    requirement_id: ID
+    restated: Text
+    mechanism: Text
+    verdict: Literal["PASS", "PARTIAL", "FAIL"]
+    gap: Text | None = None
 
 
 class ReviewOutput(AgentContract):
@@ -99,6 +108,25 @@ class ReviewOutput(AgentContract):
     summary: Text
     reviewed_evidence_ids: list[ID] = Field(default_factory=list)
     resolutions: list[IssueResolutionReport] = Field(default_factory=list)
+    requirement_verdicts: list[RequirementVerdict] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_requirement_verdicts_coverage(self, info: ValidationInfo) -> Self:
+        if info.context:
+            expected_reqs = (
+                info.context.get("expected_requirements")
+                or info.context.get("requirements")
+                or info.context.get("task_requirements")
+            )
+            if expected_reqs:
+                expected_set = set(expected_reqs)
+                provided_set = {v.requirement_id for v in self.requirement_verdicts}
+                missing = expected_set - provided_set
+                if missing:
+                    raise ValueError(
+                        f"ReviewOutput missing requirement verdicts for: {sorted(missing)}"
+                    )
+        return self
 
 
 class StepDraft(AgentContract):
@@ -267,9 +295,9 @@ def format_propose_prompt(bundle: ContextBundle, analyses: list[AnalysisOutput])
         "Phase: PROPOSE\n"
         "Rules:\n"
         "1. Formulate a cohesive technical proposal covering all task requirements.\n"
-        "2. Với mỗi requirement, nêu rõ cơ chế cụ thể và vì sao cơ chế đó giải quyết đúng vấn đề của requirement (For each requirement, specify the concrete mechanism and justify why it solves the exact problem).\n"
+        "2. Với mỗi requirement, nêu rõ cơ chế và vì sao cơ chế đó giải quyết đúng vấn đề của requirement.\n"
         "3. Synthesize findings, risks, and assumptions from earlier analyses.\n"
-        "4. Output strictly according to ProposalOutput schema, including requirement_coverage.\n"
+        "4. Output strictly according to ProposalOutput schema.\n"
         "5. Do not alter canonical run status or budget."
     )
     user_message = (
@@ -294,17 +322,16 @@ def format_review_prompt(
         f"Prompt Version: {PROMPT_VERSION_V1}\n"
         "Phase: REVIEW\n"
         "Rules:\n"
-        "1. Rigorously critique the proposal and/or plan for technical feasibility, edge cases, and missing requirements.\n"
-        "2. For each identified issue, provide a claim, impact, severity (blocking/warning/info), and suggested resolution.\n"
-        "3. Issues must link to evidence or request verification.\n"
-        "4. Output strictly according to ReviewOutput schema."
+        "1. Critique proposal/plan for feasibility, edge cases, and missing requirements.\n"
+        "2. Với mỗi requirement, diễn đạt lại yêu cầu, chỉ ra cơ chế trong plan, rồi phán xét. Nếu cơ chế giải quyết vấn đề khác với requirement, kết luận FAIL và chỉ ra gap.\n"
+        "3. For each issue, provide claim, impact, severity, and suggested resolution.\n"
+        "4. Kiểm tra issue đã tồn tại trước khi tạo mới (tránh duplicate); nếu trùng, dùng review_result='DUPLICATE' và duplicate_of.\n"
+        "5. Output strictly according to ReviewOutput schema, including requirement_verdicts."
     )
     user_message = (
         f"Context:\n{bundle.content}\n\n"
         f"Proposal under review:\n{json.dumps(proposal.model_dump(mode='json'), ensure_ascii=False, separators=(',', ': '))}\n\n"
     )
-    if proposal.requirement_coverage:
-        user_message += f"Proposed Requirement Coverage Mechanisms:\n{json.dumps(proposal.requirement_coverage, ensure_ascii=False, separators=(',', ': '))}\n\n"
     if current_plan and '"plan":' not in bundle.content:
         user_message += f"Current Plan:\n{json.dumps(current_plan, ensure_ascii=False, separators=(',', ': '))}\n\n"
     user_message += "Please provide your review and issues."
@@ -367,10 +394,12 @@ def format_semantic_review_prompt(
         f"Prompt Version: {PROMPT_VERSION_V1}\n"
         "Phase: SEMANTIC_REVIEW\n"
         "Rules:\n"
-        "1. Rigorously evaluate the newly synthesized plan revision against previous issues and task requirements.\n"
-        "2. If an existing issue is adequately addressed in the plan, produce a resolution specifying its exact issue_id from Open Issues (e.g. 'ISSUE-3a8c1f0d'), review_result='PASS' and review_note.\n"
-        "3. If new problems remain or are introduced, identify them as issues.\n"
-        "4. Output strictly according to ReviewOutput schema."
+        "1. Evaluate synthesized plan revision against previous issues and task requirements.\n"
+        "2. Với mỗi requirement, diễn đạt lại yêu cầu, chỉ ra cơ chế trong plan, rồi phán xét. Nếu cơ chế giải quyết vấn đề khác với requirement, kết luận FAIL và chỉ ra gap.\n"
+        "3. If an issue is addressed, produce a resolution with exact issue_id, review_result='PASS', review_note.\n"
+        "4. Kiểm tra issue đã tồn tại trước khi tạo mới; nếu trùng (duplicate), dùng review_result='DUPLICATE' và duplicate_of.\n"
+        "5. If new problems remain, report them as issues.\n"
+        "6. Output strictly according to ReviewOutput schema, including requirement_verdicts."
     )
     user_message = (
         f"Context:\n{bundle.content}\n\n"

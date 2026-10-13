@@ -609,6 +609,7 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> StateGraph:
                     review_note=res_report.review_note,
                     resolution_text=res_report.resolution_text,
                     evidence_ids=res_report.evidence_ids,
+                    duplicate_of=res_report.duplicate_of,
                     node="review",
                 )
             except Exception as e:
@@ -901,6 +902,7 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> StateGraph:
                     review_note=res_report.review_note,
                     resolution_text=res_report.resolution_text,
                     evidence_ids=res_report.evidence_ids,
+                    duplicate_of=res_report.duplicate_of,
                     node="semantic_review",
                 )
             except Exception as e:
@@ -950,15 +952,27 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> StateGraph:
         open_warning_or_blocker = [
             i for i in latest_state.issues
             if i.severity in (IssueSeverity.BLOCKING, IssueSeverity.WARNING)
-            and i.status != IssueStatus.RESOLVED
+            and i.status not in (IssueStatus.RESOLVED, IssueStatus.DUPLICATE, IssueStatus.REJECTED)
         ]
-        assessment_passed = (len(open_warning_or_blocker) == 0)
+        failed_verdicts = [
+            v for v in review_out.requirement_verdicts
+            if v.verdict != "PASS"
+        ]
+        assessment_passed = (len(open_warning_or_blocker) == 0) and (len(failed_verdicts) == 0)
         concerns = [f"[{i.id}] {i.claim}" for i in open_warning_or_blocker]
-        feedback = review_out.summary or (
-            "Tất cả issue mức warning trở lên đã được giải quyết"
-            if assessment_passed
-            else f"Còn {len(open_warning_or_blocker)} issue mức warning trở lên chưa giải quyết"
-        )
+        for v in failed_verdicts:
+            concerns.append(f"[{v.requirement_id}] Verdict {v.verdict}: {v.gap or v.mechanism}")
+        if assessment_passed:
+            feedback = review_out.summary or (
+                "Tất cả issue mức warning trở lên đã được giải quyết và mọi requirement đạt PASS"
+            )
+        else:
+            reasons = []
+            if open_warning_or_blocker:
+                reasons.append(f"Còn {len(open_warning_or_blocker)} issue mức warning trở lên chưa giải quyết")
+            if failed_verdicts:
+                reasons.append(f"Có {len(failed_verdicts)} requirement chưa đạt PASS ({', '.join(v.requirement_id for v in failed_verdicts)})")
+            feedback = review_out.summary or "; ".join(reasons)
         assessment = SemanticReviewAssessment(
             passed=assessment_passed,
             reviewed_plan_revision=plan_rev,

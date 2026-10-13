@@ -34,11 +34,11 @@ def test_get_assignment_for_role_configured():
     assert wf_ctx.get_assignment_for_role("reviewer") == ("openai", "gpt-4o")
     assert wf_ctx.get_assignment_for_role("reviewer_analysis") == ("openai", "gpt-4o")
     assert wf_ctx.get_assignment_for_role("review") == ("openai", "gpt-4o")
+    assert wf_ctx.get_assignment_for_role("semantic_review") == ("openai", "gpt-4o")
 
     # Synthesizer group
     assert wf_ctx.get_assignment_for_role("synthesizer") == ("xkiro", "qwen/qwen3.7-flash:free")
     assert wf_ctx.get_assignment_for_role("revise") == ("xkiro", "qwen/qwen3.7-flash:free")
-    assert wf_ctx.get_assignment_for_role("semantic_review") == ("xkiro", "qwen/qwen3.7-flash:free")
 
 
 def test_get_assignment_for_role_missing_and_partial():

@@ -118,3 +118,6 @@ class FinalizationService:
             quality_report=quality_report,
             can_finalize=True,
         )
+
+
+FinalizationEvaluator = FinalizationService
