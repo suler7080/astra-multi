@@ -20,6 +20,18 @@ import type {
 
 const BASE_URL = import.meta.env.VITE_API_BASE || '/api';
 
+export type ErrorCategory = 'backend_offline' | 'unauthorized' | 'generic';
+
+export interface ClassifiedError {
+  category: ErrorCategory;
+  userMessage: string;
+  status?: number;
+  code?: string;
+  details?: string;
+  correlationId?: string;
+  originalError: unknown;
+}
+
 export class ApiError extends Error {
   code: string;
   status: number;
@@ -34,6 +46,107 @@ export class ApiError extends Error {
   }
 }
 
+export function isBackendOfflineError(err: unknown): boolean {
+  if (err instanceof ApiError) {
+    if (
+      err.status === 502 ||
+      err.status === 503 ||
+      err.status === 504 ||
+      err.status === 0 ||
+      err.code === 'backend_offline'
+    ) {
+      return true;
+    }
+    const lowerMsg = (err.message || '').toLowerCase();
+    if (
+      lowerMsg.includes('bad gateway') ||
+      lowerMsg.includes('gateway timeout') ||
+      lowerMsg.includes('service unavailable') ||
+      lowerMsg.includes('network error') ||
+      lowerMsg.includes('failed to fetch')
+    ) {
+      return true;
+    }
+  }
+  if (err instanceof TypeError) {
+    const lowerMsg = (err.message || '').toLowerCase();
+    if (
+      lowerMsg.includes('failed to fetch') ||
+      lowerMsg.includes('network error') ||
+      lowerMsg.includes('networkrequestfailed') ||
+      lowerMsg.includes('load failed')
+    ) {
+      return true;
+    }
+  }
+  if (err instanceof Error) {
+    const lowerMsg = (err.message || '').toLowerCase();
+    if (
+      lowerMsg.includes('bad gateway') ||
+      lowerMsg.includes('gateway timeout') ||
+      lowerMsg.includes('service unavailable') ||
+      lowerMsg.includes('econnrefused') ||
+      lowerMsg.includes('network error') ||
+      lowerMsg.includes('failed to fetch')
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+export function classifyApiError(err: unknown, fallbackMessage?: string): ClassifiedError {
+  if (isBackendOfflineError(err)) {
+    return {
+      category: 'backend_offline',
+      userMessage: 'Backend offline',
+      status: err instanceof ApiError ? err.status : 0,
+      code: err instanceof ApiError ? err.code : 'backend_offline',
+      details: err instanceof Error ? err.message : String(err),
+      correlationId: err instanceof ApiError ? err.correlationId : undefined,
+      originalError: err,
+    };
+  }
+
+  if (err instanceof ApiError && (err.status === 401 || err.status === 403)) {
+    return {
+      category: 'unauthorized',
+      userMessage: err.message || 'Unauthorized',
+      status: err.status,
+      code: err.code || 'unauthorized',
+      details: err.message,
+      correlationId: err.correlationId,
+      originalError: err,
+    };
+  }
+
+  let status: number | undefined;
+  let code = 'generic_error';
+  let details = '';
+  let correlationId: string | undefined;
+
+  if (err instanceof ApiError) {
+    status = err.status;
+    code = err.code;
+    details = `[${err.status}] ${err.code}: ${err.message}`;
+    correlationId = err.correlationId;
+  } else if (err instanceof Error) {
+    details = err.message;
+  } else {
+    details = String(err);
+  }
+
+  return {
+    category: 'generic',
+    userMessage: fallbackMessage || (err instanceof Error ? err.message : String(err)),
+    status,
+    code,
+    details,
+    correlationId,
+    originalError: err,
+  };
+}
+
 function getAuthHeaders(extraHeaders: Record<string, string> = {}): Record<string, string> {
   const token = localStorage.getItem('astra_auth_token');
   const headers: Record<string, string> = { ...extraHeaders };
@@ -45,7 +158,9 @@ function getAuthHeaders(extraHeaders: Record<string, string> = {}): Record<strin
 
 async function handleResponse<T>(res: Response): Promise<T> {
   if (!res.ok) {
-    let errCode = 'unknown_error';
+    let errCode = (res.status === 502 || res.status === 503 || res.status === 504)
+      ? 'backend_offline'
+      : 'unknown_error';
     let errMsg = res.statusText;
     let correlationId: string | undefined;
 
@@ -150,6 +265,24 @@ export const api = {
       body: JSON.stringify(payload),
     });
     return handleResponse<TestProviderResult>(res);
+  },
+
+  async getProviderModels(name: string): Promise<string[]> {
+    const res = await fetch(`${BASE_URL}/settings/providers/${encodeURIComponent(name)}/models`, {
+      headers: getAuthHeaders(),
+    });
+    const data = await handleResponse<{ provider: string; models: string[]; count: number }>(res);
+    return data.models;
+  },
+
+  async discoverModels(payload: { name?: string; kind?: string; base_url?: string; api_key?: string }): Promise<string[]> {
+    const res = await fetch(`${BASE_URL}/settings/providers/models`, {
+      method: 'POST',
+      headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify(payload),
+    });
+    const data = await handleResponse<{ provider: string; models: string[]; count: number }>(res);
+    return data.models;
   },
 
   async getRoleMappings(): Promise<RoleMappingsResponse> {

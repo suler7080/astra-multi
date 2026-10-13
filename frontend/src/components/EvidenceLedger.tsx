@@ -31,13 +31,13 @@ export const EvidenceLedger: React.FC<EvidenceLedgerProps> = ({ evidence }) => {
   const getSourceBadge = (source: string) => {
     switch (source) {
       case 'repo':
-        return <span className="badge-subtle text-xs">Repo Code</span>;
+        return <span className="badge-subtle text-xs">{t('evidence_source_repo')}</span>;
       case 'tool':
-        return <span className="badge-subtle text-xs">Tool Exec</span>;
+        return <span className="badge-subtle text-xs">{t('evidence_source_tool')}</span>;
       case 'document':
-        return <span className="badge-subtle text-xs">Doc</span>;
+        return <span className="badge-subtle text-xs">{t('evidence_source_doc')}</span>;
       case 'user':
-        return <span className="badge-subtle text-xs">Operator</span>;
+        return <span className="badge-subtle text-xs">{t('evidence_source_operator')}</span>;
       default:
         return <span className="badge-subtle text-xs">{source}</span>;
     }
@@ -56,11 +56,11 @@ export const EvidenceLedger: React.FC<EvidenceLedgerProps> = ({ evidence }) => {
           onChange={(e) => setSourceFilter(e.target.value)}
           className="form-select-sm"
         >
-          <option value="all">All Sources</option>
-          <option value="repo">Repo Code</option>
-          <option value="tool">Tool Exec</option>
-          <option value="document">Document</option>
-          <option value="user">Operator</option>
+          <option value="all">{t('evidence_filter_all_sources')}</option>
+          <option value="repo">{t('evidence_source_repo')}</option>
+          <option value="tool">{t('evidence_source_tool')}</option>
+          <option value="document">{t('evidence_source_doc')}</option>
+          <option value="user">{t('evidence_source_operator')}</option>
         </select>
       </div>
 
@@ -74,11 +74,11 @@ export const EvidenceLedger: React.FC<EvidenceLedgerProps> = ({ evidence }) => {
             <thead>
               <tr>
                 <th>ID</th>
-                <th>Source Type</th>
-                <th>Verification Status</th>
-                <th>Locator / Path</th>
-                <th>Content Hash (SHA-256)</th>
-                <th>Captured At</th>
+                <th>{t('evidence_col_source_type')}</th>
+                <th>{t('evidence_col_status')}</th>
+                <th>{t('evidence_col_locator')}</th>
+                <th>{t('evidence_col_hash')}</th>
+                <th>{t('evidence_col_captured_at')}</th>
               </tr>
             </thead>
             <tbody>

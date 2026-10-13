@@ -219,3 +219,67 @@ def test_roles_response_contains_no_secrets():
             assert "api_key_enc" not in raw_text
             assert "secret" not in raw_text
             assert "password" not in raw_text
+
+
+def test_role_custom_api_key_lifecycle():
+    """Verify setting, preserving, and resetting custom API key for specific roles."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = Path(tmpdir) / "test.db"
+        art_path = Path(tmpdir) / "artifacts"
+        app = create_app(db_path=db_path, artifacts_dir=art_path, auto_start_worker=False)
+
+        with TestClient(app) as client:
+            secret_key = "sk-custom-secret-for-reviewer"
+            # 1. Set custom API key for reviewer
+            put_res = client.put(
+                "/api/settings/roles",
+                json={
+                    "planner": {"provider": "xkiro", "model": "qwen"},
+                    "reviewer": {
+                        "provider": "xkiro",
+                        "model": "deepseek-r1",
+                        "api_key": secret_key,
+                    },
+                },
+            )
+            assert put_res.status_code == 200
+            data = put_res.json()
+            assert data["mappings"]["planner"]["has_custom_key"] is False
+            assert data["mappings"]["reviewer"]["has_custom_key"] is True
+            assert secret_key not in put_res.text
+
+            # 2. GET returns has_custom_key=True without exposing secret
+            get_res = client.get("/api/settings/roles")
+            assert get_res.status_code == 200
+            assert get_res.json()["mappings"]["reviewer"]["has_custom_key"] is True
+            assert secret_key not in get_res.text
+
+            # 3. Update only model without api_key preserves custom key
+            put_preserve = client.put(
+                "/api/settings/roles",
+                json={
+                    "planner": {"provider": "xkiro", "model": "qwen"},
+                    "reviewer": {
+                        "provider": "xkiro",
+                        "model": "deepseek-r1-v2",
+                    },
+                },
+            )
+            assert put_preserve.status_code == 200
+            assert put_preserve.json()["mappings"]["reviewer"]["model"] == "deepseek-r1-v2"
+            assert put_preserve.json()["mappings"]["reviewer"]["has_custom_key"] is True
+
+            # 4. Explicit reset with empty string clears custom key
+            put_reset = client.put(
+                "/api/settings/roles",
+                json={
+                    "planner": {"provider": "xkiro", "model": "qwen"},
+                    "reviewer": {
+                        "provider": "xkiro",
+                        "model": "deepseek-r1-v2",
+                        "api_key": "",
+                    },
+                },
+            )
+            assert put_reset.status_code == 200
+            assert put_reset.json()["mappings"]["reviewer"]["has_custom_key"] is False

@@ -130,7 +130,7 @@ export const ExecutionLogs: React.FC<ExecutionLogsProps> = ({ run }) => {
             <div className="flex-1">
               <div className="flex items-center justify-between">
                 <h3 className="text-sm font-semibold text-rose-200">
-                  {run.status === 'FAILED' ? t('logs_stopped_fatal') : `${run.status}: Execution Stopped`}
+                  {run.status === 'FAILED' ? t('logs_stopped_fatal') : t('logs_status_stopped').replace('{status}', run.status)}
                 </h3>
                 <button
                   onClick={() => copyToClipboard(run.stop_reason || '', 'stop_reason')}
@@ -149,7 +149,7 @@ export const ExecutionLogs: React.FC<ExecutionLogsProps> = ({ run }) => {
                   )}
                 </button>
               </div>
-              <pre className="error-stop-reason-box">{run.stop_reason || 'Unknown execution error'}</pre>
+              <pre className="error-stop-reason-box">{run.stop_reason || t('logs_unknown_error')}</pre>
             </div>
           </div>
         </div>

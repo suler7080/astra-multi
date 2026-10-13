@@ -254,8 +254,17 @@ def create_app(
         try:
             meta_dir = store.artifacts.root / "metadata"
             meta_dir.mkdir(parents=True, exist_ok=True)
+            sanitized_meta = {
+                k: {
+                    "provider": v.get("provider"),
+                    "model": v.get("model"),
+                    "has_custom_api_key": bool(v.get("api_key_enc")),
+                }
+                for k, v in role_mappings.items()
+                if isinstance(v, dict)
+            }
             (meta_dir / f"{run_id}.json").write_text(
-                json.dumps({"role_mappings": role_mappings}), encoding="utf-8"
+                json.dumps({"role_mappings": sanitized_meta}), encoding="utf-8"
             )
         except Exception:
             pass

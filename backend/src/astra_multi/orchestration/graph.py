@@ -216,6 +216,16 @@ class WorkflowContext:
 
         return (self.provider, None)
 
+    def get_api_key_override_for_role(self, node_role: str) -> str | None:
+        """Resolve optional custom API key override for a given node or role."""
+        group = ROLE_GROUP.get(node_role)
+        if not group:
+            return None
+        group_config = self.role_assignments.get(group)
+        if group_config:
+            return group_config.get("api_key") or group_config.get("api_key_override")
+        return None
+
 
 def create_workflow_graph(wf_ctx: WorkflowContext) -> StateGraph:
     """Builds the full multi-agent discussion workflow graph."""
@@ -238,6 +248,7 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> StateGraph:
     ) -> Any:
         lookup_target = node_name or role
         role_provider, role_model = wf_ctx.get_assignment_for_role(lookup_target)
+        role_key_override = wf_ctx.get_api_key_override_for_role(lookup_target)
         limits_override = {"model": role_model} if role_model else None
 
         # Dynamically estimate tokens and cost if not provided explicitly
@@ -269,6 +280,7 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> StateGraph:
                     messages=messages,
                     output_schema=output_schema,
                     limits_override=limits_override,
+                    api_key_override=role_key_override,
                 )
             except Exception as primary_exc:
                 is_override = (role_provider != wf_ctx.provider) or (role_model is not None)

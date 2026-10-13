@@ -144,6 +144,7 @@ class ModelGateway:
         limits: GenerationLimits | Any | None = None,
         *,
         limits_override: dict[str, Any] | None = None,
+        api_key_override: str | None = None,
         settings: Any = None,
         credentials: Any = None,
     ) -> ModelResult:
@@ -214,16 +215,29 @@ class ModelGateway:
             attempt_start = time.perf_counter()
             try:
                 if self.provider_adapter is not None:
-                    result = self.provider_adapter(
-                        provider=provider,
-                        role=role,
-                        messages=messages,
-                        output_schema=output_schema,
-                        tool_specs=tool_specs,
-                        limits=limits,
-                        settings=settings,
-                        credentials=credentials,
-                    )
+                    try:
+                        result = self.provider_adapter(
+                            provider=provider,
+                            role=role,
+                            messages=messages,
+                            output_schema=output_schema,
+                            tool_specs=tool_specs,
+                            limits=limits,
+                            settings=settings,
+                            credentials=credentials,
+                            api_key_override=api_key_override,
+                        )
+                    except TypeError:
+                        result = self.provider_adapter(
+                            provider=provider,
+                            role=role,
+                            messages=messages,
+                            output_schema=output_schema,
+                            tool_specs=tool_specs,
+                            limits=limits,
+                            settings=settings,
+                            credentials=credentials,
+                        )
                 else:
                     result = generate(
                         provider=provider,
@@ -234,6 +248,7 @@ class ModelGateway:
                         limits=limits,
                         settings=settings,
                         credentials=credentials,
+                        api_key_override=api_key_override,
                     )
 
                 # Record successful attempt

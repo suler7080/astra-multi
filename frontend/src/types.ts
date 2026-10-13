@@ -210,6 +210,8 @@ export interface TestProviderResult {
 export interface RoleAssignment {
   provider: string;
   model?: string | null;
+  api_key?: string | null;
+  has_custom_key?: boolean;
 }
 
 export interface RoleMappings {

@@ -202,6 +202,18 @@ export const translations = {
     role_saving: 'Saving...',
     role_save_success: 'Role assignments saved successfully.',
     role_same_model_warning: 'Warning: Planner and Synthesizer share the same provider and model. Using identical models across roles may reduce dialectical critique independence.',
+    settings_scan_models: 'Scan Available Models',
+    settings_scanning_models: 'Scanning models from API key...',
+    settings_models_count: '{count} models found',
+    settings_free_models_group: 'Free Models (:free)',
+    settings_all_models_group: 'All Available Models',
+    settings_select_model_placeholder: 'Select from available models...',
+    settings_custom_model_toggle: 'Manual input',
+    settings_dropdown_model_toggle: 'Select from list',
+    role_api_key_label: 'Role-specific API Key (Optional override)',
+    role_api_key_placeholder: 'Leave blank to use provider default API key...',
+    role_api_key_saved: 'Custom API key saved',
+    role_api_key_reset: 'Reset to default key',
 
     // Dashboard Home
     dash_welcome_title: 'Architecture Deliberation Dashboard',
@@ -222,6 +234,192 @@ export const translations = {
     dash_col_created: 'Started At',
     header_all_runs: '⬅ All Runs (Dashboard)',
     feedback_run_deleted: 'Run deleted permanently.',
+
+    // Connection & API Errors (Giai đoạn 1)
+    conn_connecting: 'Connecting to server...',
+    conn_offline_title: 'Cannot connect to server',
+    conn_offline_desc: 'Please ensure the backend is running and click Retry',
+    conn_retry: 'Retry',
+    conn_retrying: 'Retrying...',
+    conn_retrying_in: 'Retrying in {seconds}s',
+    conn_reconnected: 'Reconnected to server',
+    error_view_details: 'View details',
+    error_hide_details: 'Hide details',
+    error_generic_title: 'An error occurred',
+    error_dismiss_label: 'Dismiss notification',
+    error_correlation_id: 'Correlation ID:',
+
+    // General & Actions (Giai đoạn 2)
+    btn_close_modal: 'Close modal',
+    dash_col_action: 'Action',
+    dash_phase_prefix: 'Phase: {phase}',
+    dash_revision_prefix: 'Rev {revision}',
+
+    // New Run Modal (Giai đoạn 2)
+    modal_mode_label: 'Mode',
+    modal_mode_greenfield: 'Greenfield (New Architecture)',
+    modal_mode_repo: 'Existing Repository',
+    modal_requirement_placeholder: 'Requirement #{index}',
+    modal_remove_requirement: 'Remove requirement',
+
+    // Settings Modal (Giai đoạn 2)
+    settings_providers_desc: 'Configure LLM API keys and model profiles for autonomous multi-agent planning.',
+    settings_kind_openai_compat: 'OpenAI-Compatible (Xkiro, Ollama, vLLM, OpenRouter...)',
+    settings_kind_openai_official: 'OpenAI Official',
+    settings_kind_google_gemini: 'Google Gemini',
+    settings_action_activate: 'Activate',
+    settings_action_probe: 'Probe Connection',
+    settings_action_edit: 'Edit',
+    settings_action_delete: 'Delete Profile',
+    settings_show_api_key: 'Show API key',
+    settings_hide_api_key: 'Hide API key',
+    settings_key_stored: 'API Key Encrypted & Stored',
+    settings_key_missing: 'No API Key Configured',
+    role_footer_notice: 'Configuration is applied immediately to all subsequent runs.',
+    role_models_available_count: '{count} models available',
+    role_scanning_models_short: 'Scanning...',
+    role_default_model_prefix: 'Default: {model}',
+
+    // Run Overview (Giai đoạn 2)
+    overview_default_stop_reason: 'Stopped by operator',
+    overview_unknown_error: 'Unknown error occurred during workflow execution.',
+    overview_tooltip_validate: 'Execute P4 Quality Gate structural verification',
+    overview_tooltip_finalize: 'Evaluate finalization conditions to promote to FINAL status',
+
+    // Discussion Timeline (Giai đoạn 2)
+    timeline_filter_all: 'All Events ({count})',
+    timeline_filter_plan: 'Plan Commits',
+    timeline_filter_issues: 'Issues',
+    timeline_filter_decisions: 'Decisions',
+    timeline_filter_questions: 'Clarification Questions',
+    timeline_filter_phases: 'Phase Transitions',
+    timeline_auto_scroll: 'Auto-scroll',
+    actor_operator: 'Operator',
+
+    // Issues Table (Giai đoạn 2)
+    issue_sev_blocking: 'Blocking',
+    issue_sev_warning: 'Warning',
+    issue_sev_info: 'Info',
+    issue_status_open: 'Open',
+    issue_status_resolved: 'Resolved',
+    issue_status_rejected: 'Rejected',
+    issue_status_duplicate: 'Duplicate',
+    issue_filter_all_sev: 'All Severities',
+    issue_filter_blocking: 'Blocking Only',
+    issue_filter_warning: 'Warning Only',
+    issue_filter_info: 'Info Only',
+    issue_filter_all_status: 'All Statuses',
+    issue_col_severity: 'Severity',
+    issue_col_status: 'Status',
+    issue_col_concern: 'Claim & Concern',
+    issue_col_impact: 'Impact',
+    issue_col_resolution: 'Suggested Resolution',
+    issue_col_covered_reqs: 'Covered Reqs',
+
+    // Decisions Log (Giai đoạn 2)
+    decisions_chosen_alternative: 'Chosen Alternative',
+    decisions_rationale: 'Rationale:',
+    decisions_rejected_alternatives: 'Rejected Alternatives:',
+
+    // Evidence Ledger (Giai đoạn 2)
+    evidence_source_repo: 'Repo Code',
+    evidence_source_tool: 'Tool Exec',
+    evidence_source_doc: 'Document',
+    evidence_source_operator: 'Operator',
+    evidence_filter_all_sources: 'All Sources',
+    evidence_col_source_type: 'Source Type',
+    evidence_col_status: 'Verification Status',
+    evidence_col_locator: 'Locator / Path',
+    evidence_col_hash: 'Content Hash (SHA-256)',
+    evidence_col_captured_at: 'Captured At',
+
+    // Plan Viewer (Giai đoạn 2)
+    plan_view_revision: 'View Revision:',
+    plan_deliverables: 'Deliverables:',
+    plan_validation_command: 'Validation Command:',
+    plan_completion_criteria: 'Completion Criteria:',
+    plan_requirements_label: 'Requirements:',
+    plan_depends_on: 'Depends on:',
+
+    // Quality Gates (Giai đoạn 2)
+    qg_all_passed: 'All Quality Gates Passed',
+    qg_all_passed_desc: 'Plan revision {rev} fully satisfies structural integrity, requirement coverage, and DAG checks.',
+    qg_violations_detected: 'Violations Detected ({count})',
+    qg_violations_desc: 'The candidate plan requires remediation before it can be finalized.',
+    qg_remediation_label: 'Remediation:',
+    qg_finalize_success: 'Run Successfully Finalized',
+    qg_finalize_success_desc: 'Promoted to FINAL status. Plan is ready for export and execution handover.',
+    qg_finalize_blocked: 'Finalization Blocked',
+    qg_finalize_blocked_desc: 'Run status: {status}. Remaining blockers must be resolved first.',
+
+    // Execution Logs & Auth (Giai đoạn 2)
+    logs_status_stopped: '{status}: Execution Stopped',
+    logs_unknown_error: 'Unknown execution error',
+    auth_failed_generic: 'Authentication failed',
+
+    // Feedback & Error messages (Giai đoạn 2)
+    feedback_run_started: 'Run {id} started successfully!',
+    feedback_provider_updated: 'Active provider updated successfully.',
+    err_launch_run: 'Failed to launch new run',
+    err_load_runs: 'Failed to load runs',
+    err_load_run_detail: 'Failed to load run details',
+    err_answer_question: 'Failed to answer question',
+    err_resume_run: 'Failed to resume deliberation',
+    err_cancel_run: 'Failed to cancel run',
+    err_delete_run: 'Failed to delete run',
+    err_validate_gates: 'Failed to validate quality gates',
+    err_finalize_plan: 'Failed to finalize plan',
+    err_export_md: 'Failed to export Markdown',
+    err_export_json: 'Failed to export JSON',
+    err_change_password: 'Failed to change password',
+    err_login: 'Failed to log in',
+    err_setup_admin: 'Failed to setup admin account',
+    err_connect: 'Failed to connect',
+    nav_run_views_label: 'Run Views',
+    timeline_phase_advanced: 'Phase advanced to {phase} ({status})',
+    timeline_run_completed_status: 'Run Completed with Status: {status} ({phase})',
+    issue_verify_prefix: 'Verify: ',
+
+    // Onboarding (Giai đoạn 3)
+    onboarding_title: 'Getting Started with Astra Multi',
+    onboarding_desc: 'Autonomous multi-agent architecture planning system that analyzes requirements, challenges assumptions, and synthesizes verifiable technical blueprints.',
+    onboarding_step1_title: 'Configure LLM Providers',
+    onboarding_step1_desc: 'Connect at least one LLM provider (OpenAI, Anthropic, Gemini, Ollama...) to power AI personas.',
+    onboarding_step1_action: 'Configure Provider',
+    onboarding_step1_done: 'Provider configured',
+    onboarding_step2_title: 'Create Your First Run',
+    onboarding_step2_desc: 'Define your architecture goal and requirements to initiate multi-agent deliberation.',
+    onboarding_step3_title: 'Review & Finalize Results',
+    onboarding_step3_desc: 'Watch live agent debate, pass P4 structural quality gates, and export Markdown / JSON blueprints.',
+    onboarding_btn_create_first_run: 'Create First Run',
+    onboarding_offline_tooltip: 'Cannot create runs while backend is offline. Please start the backend server.',
+    onboarding_offline_notice: 'Server is currently disconnected. Start the backend server to create runs and configure models.',
+
+    // Settings modal improvements (Giai đoạn 4)
+    err_load_providers: 'Failed to load LLM providers',
+    settings_provider_offline_desc: 'Unable to reach backend server. Please verify your backend is running and retry.',
+    settings_no_providers_title: 'No LLM Providers Configured',
+    settings_no_providers_desc: 'Configure at least one LLM provider (OpenAI, Anthropic, Gemini, Ollama...) to enable autonomous multi-agent planning.',
+
+    // New Run Modal Validation & Tooltips (Giai đoạn 5)
+    modal_required_note: '* Required fields',
+    val_goal_required: 'Task goal cannot be empty.',
+    val_requirements_required: 'At least one requirement is required.',
+    val_req_item_empty: 'Requirement cannot be empty.',
+    val_max_rounds_invalid: 'Deliberation rounds must be between 1 and 10.',
+    val_token_limit_invalid: 'Token limit must be 0 or greater.',
+    val_cost_limit_invalid: 'Cost limit must be 0 or greater.',
+    tooltip_max_rounds: 'Number of deliberation rounds between Planner, Reviewer, and Synthesizer agents. 2 = fast, 4-5 = more thorough but uses more tokens and time.',
+    tooltip_mode: 'Greenfield: Design a new system from scratch. Existing Repository: Analyze and enhance an existing repo.',
+    tooltip_token_limit: 'Maximum total tokens allocated for all agent LLM calls in this run (0 = unlimited).',
+    tooltip_cost_limit: 'Maximum estimated budget in USD for LLM API calls in this run (0 = unlimited).',
+
+    // Admin Security & Password Improvements (Giai đoạn 6)
+    settings_security_desc: 'Update your administrator password to maintain strong access control.',
+    auth_show_password: 'Show password',
+    auth_hide_password: 'Hide password',
+    auth_error_invalid: 'Incorrect password. Please try again.',
+    settings_current_password_error: 'Current password is incorrect.',
   },
   VN: {
     // Header
@@ -422,6 +620,18 @@ export const translations = {
     role_saving: 'Đang lưu...',
     role_save_success: 'Cấu hình vai trò đã được lưu thành công.',
     role_same_model_warning: 'Cảnh báo: Planner và Synthesizer đang dùng chung provider và model. Dùng cùng model có thể làm giảm tính độc lập của phản biện.',
+    settings_scan_models: 'Quét Model từ API Key',
+    settings_scanning_models: 'Đang quét danh sách model từ API key...',
+    settings_models_count: 'Đã tìm thấy {count} model',
+    settings_free_models_group: 'Mô hình miễn phí (:free)',
+    settings_all_models_group: 'Tất cả mô hình có sẵn',
+    settings_select_model_placeholder: 'Chọn model từ danh sách quét được...',
+    settings_custom_model_toggle: 'Nhập thủ công',
+    settings_dropdown_model_toggle: 'Chọn từ danh sách',
+    role_api_key_label: 'API Key riêng cho Role này (Tùy chọn ghi đè)',
+    role_api_key_placeholder: 'Để trống để dùng key mặc định của provider...',
+    role_api_key_saved: 'Đã lưu API Key riêng',
+    role_api_key_reset: 'Dùng key mặc định',
 
     // Dashboard Home
     dash_welcome_title: 'Bảng điều khiển Thiết kế Kiến trúc',
@@ -442,8 +652,203 @@ export const translations = {
     dash_col_created: 'Khởi tạo lúc',
     header_all_runs: '⬅ Tất cả phiên (Trang chủ)',
     feedback_run_deleted: 'Đã xóa phiên vĩnh viễn.',
+
+    // Connection & API Errors (Giai đoạn 1)
+    conn_connecting: 'Đang kết nối tới máy chủ...',
+    conn_offline_title: 'Chưa kết nối được máy chủ',
+    conn_offline_desc: 'Hãy khởi động backend rồi bấm Thử lại',
+    conn_retry: 'Thử lại',
+    conn_retrying: 'Đang thử lại...',
+    conn_retrying_in: 'Thử lại sau {seconds}s',
+    conn_reconnected: 'Đã kết nối lại',
+    error_view_details: 'Xem chi tiết',
+    error_hide_details: 'Ẩn chi tiết',
+    error_generic_title: 'Đã xảy ra lỗi',
+    error_dismiss_label: 'Đóng thông báo',
+    error_correlation_id: 'Mã tương quan (Correlation ID):',
+
+    // General & Actions (Giai đoạn 2)
+    btn_close_modal: 'Đóng hộp thoại',
+    dash_col_action: 'Thao tác',
+    dash_phase_prefix: 'Giai đoạn: {phase}',
+    dash_revision_prefix: 'Bản {revision}',
+
+    // New Run Modal (Giai đoạn 2)
+    modal_mode_label: 'Chế độ',
+    modal_mode_greenfield: 'Dự án mới (Greenfield)',
+    modal_mode_repo: 'Kho mã nguồn có sẵn (Repository)',
+    modal_requirement_placeholder: 'Yêu cầu #{index}',
+    modal_remove_requirement: 'Xóa yêu cầu',
+
+    // Settings Modal (Giai đoạn 2)
+    settings_providers_desc: 'Cấu hình API key và hồ sơ mô hình LLM để lập kế hoạch đa tác tử tự động.',
+    settings_kind_openai_compat: 'Tương thích OpenAI (Xkiro, Ollama, vLLM, OpenRouter...)',
+    settings_kind_openai_official: 'OpenAI Chính thức',
+    settings_kind_google_gemini: 'Google Gemini',
+    settings_action_activate: 'Kích hoạt',
+    settings_action_probe: 'Kiểm tra kết nối',
+    settings_action_edit: 'Chỉnh sửa',
+    settings_action_delete: 'Xóa cấu hình',
+    settings_show_api_key: 'Hiện API key',
+    settings_hide_api_key: 'Ẩn API key',
+    settings_key_stored: 'API Key đã được mã hóa & lưu trữ',
+    settings_key_missing: 'Chưa cấu hình API Key',
+    role_footer_notice: 'Cấu hình được áp dụng tức thì cho mọi phiên chạy tiếp theo.',
+    role_models_available_count: '{count} mô hình có sẵn',
+    role_scanning_models_short: 'Đang quét...',
+    role_default_model_prefix: 'Mặc định: {model}',
+
+    // Run Overview (Giai đoạn 2)
+    overview_default_stop_reason: 'Người vận hành chủ động dừng',
+    overview_unknown_error: 'Đã xảy ra lỗi không xác định trong quá trình thực thi quy trình.',
+    overview_tooltip_validate: 'Thực thi kiểm tra cấu trúc cổng chất lượng P4',
+    overview_tooltip_finalize: 'Đánh giá điều kiện chốt kế hoạch để chuyển sang trạng thái HOÀN TẤT',
+
+    // Discussion Timeline (Giai đoạn 2)
+    timeline_filter_all: 'Tất cả sự kiện ({count})',
+    timeline_filter_plan: 'Ghi nhận kế hoạch',
+    timeline_filter_issues: 'Vấn đề',
+    timeline_filter_decisions: 'Quyết định',
+    timeline_filter_questions: 'Câu hỏi làm rõ',
+    timeline_filter_phases: 'Chuyển giai đoạn',
+    timeline_auto_scroll: 'Tự cuộn theo dòng sự kiện',
+    actor_operator: 'Người vận hành',
+
+    // Issues Table (Giai đoạn 2)
+    issue_sev_blocking: 'Chặn tiến độ',
+    issue_sev_warning: 'Cảnh báo',
+    issue_sev_info: 'Thông tin',
+    issue_status_open: 'Đang mở',
+    issue_status_resolved: 'Đã giải quyết',
+    issue_status_rejected: 'Bác bỏ',
+    issue_status_duplicate: 'Trùng lặp',
+    issue_filter_all_sev: 'Mọi mức độ',
+    issue_filter_blocking: 'Chỉ vấn đề chặn',
+    issue_filter_warning: 'Chỉ cảnh báo',
+    issue_filter_info: 'Chỉ thông tin',
+    issue_filter_all_status: 'Mọi trạng thái',
+    issue_col_severity: 'Mức độ',
+    issue_col_status: 'Trạng thái',
+    issue_col_concern: 'Vấn đề & Quan ngại',
+    issue_col_impact: 'Tác động',
+    issue_col_resolution: 'Phương án giải quyết',
+    issue_col_covered_reqs: 'Yêu cầu liên quan',
+
+    // Decisions Log (Giai đoạn 2)
+    decisions_chosen_alternative: 'Phương án được chọn',
+    decisions_rationale: 'Lý do lựa chọn:',
+    decisions_rejected_alternatives: 'Các phương án bị loại bỏ:',
+
+    // Evidence Ledger (Giai đoạn 2)
+    evidence_source_repo: 'Mã nguồn kho lưu trữ',
+    evidence_source_tool: 'Thực thi công cụ',
+    evidence_source_doc: 'Tài liệu kỹ thuật',
+    evidence_source_operator: 'Người vận hành',
+    evidence_filter_all_sources: 'Tất cả nguồn',
+    evidence_col_source_type: 'Nguồn bằng chứng',
+    evidence_col_status: 'Trạng thái kiểm chứng',
+    evidence_col_locator: 'Đường dẫn / Định vị',
+    evidence_col_hash: 'Mã băm nội dung (SHA-256)',
+    evidence_col_captured_at: 'Thời điểm thu thập',
+
+    // Plan Viewer (Giai đoạn 2)
+    plan_view_revision: 'Xem phiên bản:',
+    plan_deliverables: 'Sản phẩm bàn giao:',
+    plan_validation_command: 'Lệnh kiểm chứng:',
+    plan_completion_criteria: 'Tiêu chí hoàn thành:',
+    plan_requirements_label: 'Yêu cầu đáp ứng:',
+    plan_depends_on: 'Phụ thuộc vào:',
+
+    // Quality Gates (Giai đoạn 2)
+    qg_all_passed: 'Tất cả cổng chất lượng đã đạt',
+    qg_all_passed_desc: 'Bản kế hoạch số {rev} đáp ứng đầy đủ tính toàn vẹn cấu trúc, độ bao phủ yêu cầu và kiểm tra đồ thị DAG.',
+    qg_violations_detected: 'Phát hiện {count} vi phạm',
+    qg_violations_desc: 'Bản kế hoạch cần khắc phục vi phạm trước khi có thể chốt phương án.',
+    qg_remediation_label: 'Biện pháp khắc phục:',
+    qg_finalize_success: 'Đã chốt kế hoạch thành công',
+    qg_finalize_success_desc: 'Đã chuyển sang trạng thái HOÀN TẤT. Bản kế hoạch sẵn sàng để xuất và bàn giao triển khai.',
+    qg_finalize_blocked: 'Chưa thể chốt kế hoạch',
+    qg_finalize_blocked_desc: 'Trạng thái: {status}. Các vấn đề chặn còn lại cần được giải quyết trước.',
+
+    // Execution Logs & Auth (Giai đoạn 2)
+    logs_status_stopped: '{status}: Thực thi bị dừng',
+    logs_unknown_error: 'Lỗi thực thi không xác định',
+    auth_failed_generic: 'Xác thực không thành công',
+
+    // Feedback & Error messages (Giai đoạn 2)
+    feedback_run_started: 'Phiên {id} đã được khởi chạy thành công!',
+    feedback_provider_updated: 'Đã cập nhật nhà cung cấp mặc định thành công.',
+    err_launch_run: 'Không thể khởi chạy phiên mới',
+    err_load_runs: 'Không thể tải danh sách phiên làm việc',
+    err_load_run_detail: 'Không thể tải chi tiết phiên làm việc',
+    err_answer_question: 'Không thể gửi câu trả lời',
+    err_resume_run: 'Không thể tiếp tục phiên thảo luận',
+    err_cancel_run: 'Không thể hủy phiên làm việc',
+    err_delete_run: 'Không thể xóa phiên làm việc',
+    err_validate_gates: 'Không thể kiểm tra chất lượng',
+    err_finalize_plan: 'Không thể chốt kế hoạch',
+    err_export_md: 'Không thể xuất file Markdown',
+    err_export_json: 'Không thể xuất file JSON',
+    err_change_password: 'Không thể đổi mật khẩu',
+    err_login: 'Đăng nhập thất bại',
+    err_setup_admin: 'Thiết lập tài khoản admin thất bại',
+    err_connect: 'Không thể kết nối',
+    nav_run_views_label: 'Chế độ xem phiên',
+    timeline_phase_advanced: 'Đã chuyển sang giai đoạn {phase} ({status})',
+    timeline_run_completed_status: 'Lượt chạy hoàn tất với trạng thái: {status} ({phase})',
+    issue_verify_prefix: 'Kiểm chứng: ',
+
+    // Onboarding (Giai đoạn 3)
+    onboarding_title: 'Bắt đầu với Astra Multi',
+    onboarding_desc: 'Hệ thống lập kế hoạch kiến trúc đa tác nhân tự hành, tự động phân tích yêu cầu, phản biện giải pháp và tổng hợp bản thiết kế kỹ thuật có thể kiểm chứng.',
+    onboarding_step1_title: 'Cấu hình nhà cung cấp LLM',
+    onboarding_step1_desc: 'Kết nối ít nhất một nhà cung cấp LLM (OpenAI, Anthropic, Gemini, Ollama...) để kích hoạt các tác nhân AI.',
+    onboarding_step1_action: 'Cấu hình ngay',
+    onboarding_step1_done: 'Đã cấu hình nhà cung cấp',
+    onboarding_step2_title: 'Tạo phiên làm việc đầu tiên',
+    onboarding_step2_desc: 'Nhập mục tiêu hệ thống và danh sách yêu cầu kiến trúc để bắt đầu thảo luận.',
+    onboarding_step3_title: 'Thẩm định & Xem kết quả',
+    onboarding_step3_desc: 'Theo dõi tranh luận trực tiếp, kiểm định cổng chất lượng P4 và xuất bản kế hoạch Markdown / JSON.',
+    onboarding_btn_create_first_run: 'Tạo phiên đầu tiên',
+    onboarding_offline_tooltip: 'Không thể tạo phiên khi máy chủ ngoại tuyến. Vui lòng khởi động backend.',
+    onboarding_offline_notice: 'Máy chủ hiện chưa kết nối. Hãy khởi động backend để tạo phiên và cấu hình mô hình.',
+
+    // Settings modal improvements (Giai đoạn 4)
+    err_load_providers: 'Không thể tải danh sách nhà cung cấp LLM',
+    settings_provider_offline_desc: 'Không thể kết nối đến máy chủ backend. Vui lòng kiểm tra backend và thử lại.',
+    settings_no_providers_title: 'Chưa có cấu hình nhà cung cấp LLM nào',
+    settings_no_providers_desc: 'Thêm ít nhất một nhà cung cấp LLM (OpenAI, Anthropic, Gemini, Ollama...) để kích hoạt các tác nhân AI lập kế hoạch.',
+
+    // New Run Modal Validation & Tooltips (Giai đoạn 5)
+    modal_required_note: '* Các trường bắt buộc',
+    val_goal_required: 'Mục tiêu kiến trúc không được để trống.',
+    val_requirements_required: 'Cần ít nhất một yêu cầu hợp lệ.',
+    val_req_item_empty: 'Yêu cầu không được để trống.',
+    val_max_rounds_invalid: 'Số vòng thảo luận phải từ 1 đến 10.',
+    val_token_limit_invalid: 'Giới hạn Token phải lớn hơn hoặc bằng 0.',
+    val_cost_limit_invalid: 'Giới hạn chi phí phải lớn hơn hoặc bằng 0.',
+    tooltip_max_rounds: 'Số vòng thảo luận giữa các agent (Planner, Reviewer, Synthesizer). 2 = nhanh gọn, 4–5 = kỹ lưỡng hơn nhưng tốn token và thời gian hơn.',
+    tooltip_mode: 'Greenfield: Thiết kế hệ thống mới từ đầu. Existing Repository: Phân tích và cải tiến trên repo hiện có.',
+    tooltip_token_limit: 'Tổng số token tối đa cho tất cả lượt gọi LLM trong phiên này (0 = không giới hạn).',
+    tooltip_cost_limit: 'Ngân sách tối đa (USD) cho các lượt gọi API trong phiên này (0 = không giới hạn).',
+
+    // Admin Security & Password Improvements (Giai đoạn 6)
+    settings_security_desc: 'Cập nhật mật khẩu quản trị viên để bảo vệ các khóa API và phiên làm việc.',
+    auth_show_password: 'Hiện mật khẩu',
+    auth_hide_password: 'Ẩn mật khẩu',
+    auth_error_invalid: 'Mật khẩu không chính xác. Vui lòng thử lại.',
+    settings_current_password_error: 'Mật khẩu hiện tại không chính xác.',
   },
 } as const;
+
+// Compile-time assertion that translations.EN and translations.VN have identical keys
+type DiffKeys<A, B> = Exclude<keyof A, keyof B>;
+type VerifyI18nParity = DiffKeys<typeof translations.EN, typeof translations.VN> extends never
+  ? DiffKeys<typeof translations.VN, typeof translations.EN> extends never
+    ? true
+    : false
+  : false;
+export const _i18nParityCheck: VerifyI18nParity = true;
 
 export type TranslationKey = keyof typeof translations.EN;
 

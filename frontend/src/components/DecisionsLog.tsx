@@ -33,19 +33,19 @@ export const DecisionsLog: React.FC<DecisionsLogProps> = ({ decisions }) => {
               <div className="chosen-solution-box">
                 <div className="flex-align-center gap-2 text-emerald-400 mb-1">
                   <CheckCircle2 size={16} />
-                  <span className="text-sm font-semibold">Chosen Alternative</span>
+                  <span className="text-sm font-semibold">{t('decisions_chosen_alternative')}</span>
                 </div>
                 <p className="text-sm text-slate-100 font-medium">{dec.chosen}</p>
               </div>
 
               <div className="decision-rationale">
-                <strong className="text-xs text-slate-400 uppercase tracking-wider">Rationale:</strong>
+                <strong className="text-xs text-slate-400 uppercase tracking-wider">{t('decisions_rationale')}</strong>
                 <p className="text-sm text-slate-300 mt-1">{dec.rationale}</p>
               </div>
 
               {dec.alternatives && dec.alternatives.length > 0 && (
                 <div className="decision-alternatives">
-                  <strong className="text-xs text-slate-400 uppercase tracking-wider">Rejected Alternatives:</strong>
+                  <strong className="text-xs text-slate-400 uppercase tracking-wider">{t('decisions_rejected_alternatives')}</strong>
                   <ul className="alternatives-list">
                     {dec.alternatives.map((alt, i) => (
                       <li key={i} className="text-xs text-slate-400">{alt}</li>

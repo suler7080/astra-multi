@@ -85,17 +85,25 @@ class TestProviderResponse(BaseModel):
     error: str | None = None
 
 
+class RoleAssignmentInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    provider: str
+    model: str | None = None
+    api_key: str | None = None
+
+
 class RoleAssignmentItem(BaseModel):
     model_config = ConfigDict(extra="forbid")
     provider: str
     model: str | None = None
+    has_custom_key: bool = False
 
 
 class RoleMappingsPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    planner: RoleAssignmentItem | None = None
-    reviewer: RoleAssignmentItem | None = None
-    synthesizer: RoleAssignmentItem | None = None
+    planner: RoleAssignmentInput | None = None
+    reviewer: RoleAssignmentInput | None = None
+    synthesizer: RoleAssignmentInput | None = None
 
 
 class RoleMappingsResponse(BaseModel):
@@ -104,6 +112,86 @@ class RoleMappingsResponse(BaseModel):
     planner: RoleAssignmentItem | None = None
     reviewer: RoleAssignmentItem | None = None
     synthesizer: RoleAssignmentItem | None = None
+
+
+class DiscoverModelsRequest(BaseModel):
+    name: str | None = None
+    kind: str | None = None
+    base_url: str | None = None
+    api_key: str | None = None
+
+
+class DiscoverModelsResponse(BaseModel):
+    provider: str
+    models: list[str]
+    count: int
+
+
+async def fetch_available_models(
+    kind: str,
+    base_url: str | None,
+    api_key: str,
+) -> list[str]:
+    """Queries available models for a given provider configuration."""
+    model_ids: list[str] = []
+
+    if kind in ("openai", "openai-compatible"):
+        endpoint = base_url or ("https://api.openai.com/v1" if kind == "openai" else "https://api.openai.com/v1")
+        endpoint = endpoint.rstrip("/")
+        models_url = f"{endpoint}/models"
+        headers: dict[str, str] = {}
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.get(models_url, headers=headers)
+            if resp.status_code >= 400:
+                raise HTTPException(
+                    status_code=resp.status_code if resp.status_code in (400, 401, 403, 404) else 400,
+                    detail=f"Provider returned error HTTP {resp.status_code}: {resp.text[:300]}",
+                )
+            data = resp.json()
+            raw_list = data.get("data") if isinstance(data, dict) else data
+            if not isinstance(raw_list, list) and isinstance(data, dict):
+                raw_list = data.get("models")
+            if not isinstance(raw_list, list):
+                raw_list = []
+
+            for item in raw_list:
+                if isinstance(item, dict) and "id" in item:
+                    model_ids.append(str(item["id"]))
+                elif isinstance(item, str):
+                    model_ids.append(item)
+
+    elif kind == "google":
+        endpoint = base_url or "https://generativelanguage.googleapis.com/v1beta"
+        endpoint = endpoint.rstrip("/")
+        models_url = f"{endpoint}/models"
+        headers = {"x-goog-api-key": api_key} if api_key else {}
+
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.get(models_url, headers=headers)
+            if resp.status_code >= 400:
+                raise HTTPException(
+                    status_code=resp.status_code if resp.status_code in (400, 401, 403, 404) else 400,
+                    detail=f"Gemini returned error HTTP {resp.status_code}: {resp.text[:300]}",
+                )
+            data = resp.json()
+            raw_list = data.get("models", [])
+            for item in raw_list:
+                if isinstance(item, dict):
+                    name = item.get("name", "")
+                    if name.startswith("models/"):
+                        name = name[len("models/"):]
+                    methods = item.get("supportedGenerationMethods", [])
+                    if not methods or "generateContent" in methods:
+                        if name:
+                            model_ids.append(name)
+
+    unique_ids = list(dict.fromkeys(model_ids))
+    free_models = sorted([m for m in unique_ids if ":free" in m.lower()])
+    other_models = sorted([m for m in unique_ids if ":free" not in m.lower()])
+    return free_models + other_models
 
 
 def apply_all_providers_to_environment(store: SQLiteStore) -> None:
@@ -474,6 +562,94 @@ def create_auth_settings_router(store: SQLiteStore) -> APIRouter:
         except Exception as exc:
             return TestProviderResponse(success=False, error=str(exc))
 
+    @router.get("/settings/providers/{name}/models", response_model=DiscoverModelsResponse)
+    async def get_provider_models(
+        name: str,
+        _auth: Any = Depends(require_admin),
+    ) -> DiscoverModelsResponse:
+        existing = store.settings.get_provider(name)
+        if not existing:
+            raise HTTPException(status_code=404, detail=f"Provider {name} not found.")
+
+        master_key = ensure_master_encryption_key(store.settings)
+        api_key = ""
+        if existing.get("api_key_enc"):
+            api_key = decrypt_secret(existing["api_key_enc"], master_key)
+
+        if not api_key and existing.get("kind") != "openai-compatible":
+            raise HTTPException(
+                status_code=400,
+                detail=f"Provider {name} does not have an API key configured.",
+            )
+
+        try:
+            models = await fetch_available_models(
+                kind=existing["kind"],
+                base_url=existing.get("base_url"),
+                api_key=api_key,
+            )
+            return DiscoverModelsResponse(
+                provider=name,
+                models=models,
+                count=len(models),
+            )
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Failed to fetch models from provider {name}: {str(exc)}",
+            )
+
+    @router.post("/settings/providers/models", response_model=DiscoverModelsResponse)
+    async def discover_models(
+        req: DiscoverModelsRequest,
+        _auth: Any = Depends(require_admin),
+    ) -> DiscoverModelsResponse:
+        master_key = ensure_master_encryption_key(store.settings)
+        api_key = req.api_key
+        kind = req.kind
+        base_url = req.base_url
+
+        provider_label = req.name or "custom"
+        if req.name and not api_key:
+            existing = store.settings.get_provider(req.name)
+            if existing:
+                if not kind:
+                    kind = existing["kind"]
+                if not base_url:
+                    base_url = existing.get("base_url")
+                if existing.get("api_key_enc"):
+                    api_key = decrypt_secret(existing["api_key_enc"], master_key)
+
+        if not kind:
+            kind = "openai-compatible"
+
+        if not api_key and kind != "openai-compatible":
+            raise HTTPException(
+                status_code=400,
+                detail="API key is required to scan available models.",
+            )
+
+        try:
+            models = await fetch_available_models(
+                kind=kind,
+                base_url=base_url,
+                api_key=api_key or "",
+            )
+            return DiscoverModelsResponse(
+                provider=provider_label,
+                models=models,
+                count=len(models),
+            )
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Failed to scan models: {str(exc)}",
+            )
+
     # Role Mappings Endpoints
     @router.get("/settings/roles", response_model=RoleMappingsResponse)
     async def get_role_mappings(_auth: Any = Depends(require_admin)) -> RoleMappingsResponse:
@@ -488,6 +664,7 @@ def create_auth_settings_router(store: SQLiteStore) -> APIRouter:
                 mappings[role_name] = RoleAssignmentItem(
                     provider=item_data["provider"],
                     model=item_data.get("model"),
+                    has_custom_key=bool(item_data.get("api_key_enc")),
                 )
 
         return RoleMappingsResponse(
@@ -506,7 +683,10 @@ def create_auth_settings_router(store: SQLiteStore) -> APIRouter:
         active_info = store.settings.get_active_provider()
         active_provider_name = active_info["name"] if active_info else None
 
-        requested: dict[str, RoleAssignmentItem | None] = {
+        master_key = ensure_master_encryption_key(store.settings)
+        existing_mappings = store.settings.get_role_mappings()
+
+        requested: dict[str, RoleAssignmentInput | None] = {
             "planner": payload.planner,
             "reviewer": payload.reviewer,
             "synthesizer": payload.synthesizer,
@@ -539,7 +719,9 @@ def create_auth_settings_router(store: SQLiteStore) -> APIRouter:
             elif prov_config.get("kind") == "google":
                 has_env_key = bool(os.environ.get("GOOGLE_API_KEY"))
 
-            if not (has_key or is_active or has_env_key):
+            # Also consider custom api_key provided directly in this role
+            has_role_key = bool(item.api_key and item.api_key.strip())
+            if not (has_key or is_active or has_env_key or has_role_key):
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail=f"Provider '{provider_name}' assigned to role '{role_name}' is disabled or has no API key configured.",
@@ -549,15 +731,34 @@ def create_auth_settings_router(store: SQLiteStore) -> APIRouter:
             if model_val == "":
                 model_val = None
 
+            api_key_enc: str | None = None
+            if item.api_key is not None:
+                cleaned_key = item.api_key.strip()
+                if cleaned_key:
+                    api_key_enc = encrypt_secret(cleaned_key, master_key)
+                else:
+                    api_key_enc = None
+            else:
+                existing_item = existing_mappings.get(role_name)
+                if existing_item and existing_item.get("provider") == provider_name:
+                    api_key_enc = existing_item.get("api_key_enc")
+                else:
+                    api_key_enc = None
+
             new_mappings[role_name] = {
                 "provider": provider_name,
                 "model": model_val,
+                "api_key_enc": api_key_enc,
             }
 
         store.settings.save_role_mappings(new_mappings)
 
         resp_mappings: dict[str, RoleAssignmentItem] = {
-            k: RoleAssignmentItem(provider=v["provider"], model=v["model"])
+            k: RoleAssignmentItem(
+                provider=v["provider"],
+                model=v["model"],
+                has_custom_key=bool(v.get("api_key_enc")),
+            )
             for k, v in new_mappings.items()
         }
 

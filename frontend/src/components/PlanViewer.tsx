@@ -38,13 +38,13 @@ export const PlanViewer: React.FC<PlanViewerProps> = ({
         <div className="flex-align-center gap-2">
           <GitBranch size={18} className="text-sky-400" />
           <h3 className="card-title">{t('plan_title')}</h3>
-          <span className="badge-subtle ml-2">Revision {currentPlan.revision}</span>
+          <span className="badge-subtle ml-2">{t('dash_revision_prefix').replace('{revision}', String(currentPlan.revision))}</span>
         </div>
 
         <div className="flex-align-center gap-2">
           {revisions.length > 1 && (
             <div className="rev-selector-group">
-              <span className="text-xs text-slate-400">View Revision:</span>
+              <span className="text-xs text-slate-400">{t('plan_view_revision')}</span>
               <div className="rev-buttons-row">
                 {revisions.map((rev) => (
                   <button
@@ -93,7 +93,7 @@ export const PlanViewer: React.FC<PlanViewerProps> = ({
 
             <div className="step-details-grid">
               <div className="step-col">
-                <strong className="detail-label">Deliverables:</strong>
+                <strong className="detail-label">{t('plan_deliverables')}</strong>
                 <ul className="step-list">
                   {step.deliverables.map((d, i) => (
                     <li key={i} className="text-xs text-slate-200">{d}</li>
@@ -102,12 +102,12 @@ export const PlanViewer: React.FC<PlanViewerProps> = ({
               </div>
 
               <div className="step-col">
-                <strong className="detail-label">Validation Command:</strong>
+                <strong className="detail-label">{t('plan_validation_command')}</strong>
                 <code className="validation-cmd-box">{step.validation}</code>
               </div>
 
               <div className="step-col">
-                <strong className="detail-label">Completion Criteria:</strong>
+                <strong className="detail-label">{t('plan_completion_criteria')}</strong>
                 <ul className="step-list">
                   {step.completion_criteria.map((c, i) => (
                     <li key={i} className="text-xs text-slate-300">
@@ -121,7 +121,7 @@ export const PlanViewer: React.FC<PlanViewerProps> = ({
 
             <div className="step-footer">
               <div className="flex-align-center gap-1">
-                <span className="text-xs text-slate-400">Requirements:</span>
+                <span className="text-xs text-slate-400">{t('plan_requirements_label')}</span>
                 {step.requirement_ids.map((r) => (
                   <span key={r} className="badge-subtle text-xs">{r}</span>
                 ))}
@@ -129,7 +129,7 @@ export const PlanViewer: React.FC<PlanViewerProps> = ({
 
               {step.dependencies && step.dependencies.length > 0 && (
                 <div className="flex-align-center gap-1">
-                  <span className="text-xs text-slate-400">Depends on:</span>
+                  <span className="text-xs text-slate-400">{t('plan_depends_on')}</span>
                   {step.dependencies.map((dep) => (
                     <span key={dep} className="badge-amber text-xs">
                       <ArrowRight size={10} className="inline mr-1" />

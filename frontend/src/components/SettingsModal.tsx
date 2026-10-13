@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import type { ProviderItem, SaveProviderPayload, RoleMappings, RoleMappingsResponse } from '../types';
-import { api, ApiError } from '../api';
+import { api, ApiError, classifyApiError, type ClassifiedError } from '../api';
 import { useI18n } from '../i18nContext';
 import {
   X,
@@ -19,6 +19,11 @@ import {
   Eye,
   EyeOff,
   Edit2,
+  Compass,
+  ShieldAlert,
+  GitMerge,
+  Info,
+  RefreshCw,
 } from 'lucide-react';
 
 interface SettingsModalProps {
@@ -38,6 +43,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
+  const [loadProviderError, setLoadProviderError] = useState<ClassifiedError | null>(null);
+
+  // Scroll indicators state & ref
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const [canScrollUp, setCanScrollUp] = useState(false);
+  const [canScrollDown, setCanScrollDown] = useState(false);
+
+  // Focus restoration & Escape listener & scroll lock
+  const previousActiveElementRef = useRef<HTMLElement | null>(null);
 
   // Role Mappings State
   const [roleMappings, setRoleMappings] = useState<RoleMappings>({
@@ -73,6 +87,19 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [newPassword, setNewPassword] = useState('');
   const [confirmNewPassword, setConfirmNewPassword] = useState('');
   const [isChangingPass, setIsChangingPass] = useState(false);
+  const [showCurrentPassword, setShowCurrentPassword] = useState(false);
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [showConfirmNewPassword, setShowConfirmNewPassword] = useState(false);
+
+  // Model Discovery & Switching State
+  const [providerModelsCache, setProviderModelsCache] = useState<Record<string, string[]>>({});
+  const [loadingModels, setLoadingModels] = useState<Record<string, boolean>>({});
+  const [customModelMode, setCustomModelMode] = useState<Record<string, boolean>>({});
+  const [scanningFormModels, setScanningFormModels] = useState(false);
+  const [formDiscoveredModels, setFormDiscoveredModels] = useState<string[]>([]);
+  const [customFormModelMode, setCustomFormModelMode] = useState(false);
+  const [roleApiKeyInputs, setRoleApiKeyInputs] = useState<Record<string, string>>({});
+  const [showRoleApiKey, setShowRoleApiKey] = useState<Record<string, boolean>>({});
 
   const handleError = useCallback((err: unknown, fallback: string) => {
     if (err instanceof ApiError) {
@@ -84,17 +111,69 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     }
   }, []);
 
+  const fetchModelsForProvider = useCallback(async (providerName: string, force = false) => {
+    if (!providerName) return;
+    if (!force && providerModelsCache[providerName]) return;
+    setLoadingModels((prev) => ({ ...prev, [providerName]: true }));
+    try {
+      const models = await api.getProviderModels(providerName);
+      setProviderModelsCache((prev) => ({ ...prev, [providerName]: models }));
+    } catch (err: unknown) {
+      console.warn(`Could not load models for ${providerName}:`, err);
+    } finally {
+      setLoadingModels((prev) => ({ ...prev, [providerName]: false }));
+    }
+  }, [providerModelsCache]);
+
+  const checkScroll = useCallback(() => {
+    const el = bodyRef.current;
+    if (!el) return;
+    const hasScrollable = el.scrollHeight > el.clientHeight;
+    setCanScrollUp(hasScrollable && el.scrollTop > 5);
+    setCanScrollDown(hasScrollable && el.scrollTop + el.clientHeight < el.scrollHeight - 5);
+  }, []);
+
+  useEffect(() => {
+    if (isOpen) {
+      const timer = setTimeout(checkScroll, 60);
+      return () => clearTimeout(timer);
+    }
+  }, [isOpen, activeTab, providers, isEditing, loadProviderError, checkScroll]);
+
+  useEffect(() => {
+    if (isOpen) {
+      previousActiveElementRef.current = document.activeElement as HTMLElement | null;
+      const originalOverflow = document.body.style.overflow;
+      document.body.style.overflow = 'hidden';
+
+      const handleKeyDown = (e: KeyboardEvent) => {
+        if (e.key === 'Escape') {
+          onClose();
+        }
+      };
+
+      window.addEventListener('keydown', handleKeyDown);
+
+      return () => {
+        document.body.style.overflow = originalOverflow;
+        window.removeEventListener('keydown', handleKeyDown);
+        previousActiveElementRef.current?.focus();
+      };
+    }
+  }, [isOpen, onClose]);
+
   const loadProviders = useCallback(async () => {
     try {
       setIsLoading(true);
+      setLoadProviderError(null);
       const data = await api.listProviders();
       setProviders(data);
     } catch (err: unknown) {
-      handleError(err, 'Failed to load provider settings');
+      setLoadProviderError(classifyApiError(err));
     } finally {
       setIsLoading(false);
     }
-  }, [handleError]);
+  }, []);
 
   const extractRoleMappings = (res: RoleMappingsResponse): RoleMappings => ({
     planner: res.planner ?? res.mappings?.planner ?? null,
@@ -105,12 +184,23 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const loadRoleMappings = useCallback(async () => {
     try {
       const res = await api.getRoleMappings();
-      setRoleMappings(extractRoleMappings(res));
-      setActiveProviderName(res.active_provider || '');
+      const extracted = extractRoleMappings(res);
+      setRoleMappings(extracted);
+      const activeName = res.active_provider || '';
+      setActiveProviderName(activeName);
+
+      const toFetch = new Set<string>();
+      if (activeName) toFetch.add(activeName);
+      if (extracted.planner?.provider) toFetch.add(extracted.planner.provider);
+      if (extracted.reviewer?.provider) toFetch.add(extracted.reviewer.provider);
+      if (extracted.synthesizer?.provider) toFetch.add(extracted.synthesizer.provider);
+      for (const p of toFetch) {
+        void fetchModelsForProvider(p);
+      }
     } catch (err: unknown) {
       handleError(err, 'Failed to load role assignments');
     }
-  }, [handleError]);
+  }, [handleError, fetchModelsForProvider]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -119,18 +209,30 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       .then((data) => {
         if (!ignore) {
           setProviders(data);
+          setLoadProviderError(null);
         }
       })
       .catch((err: unknown) => {
         if (!ignore) {
-          handleError(err, 'Failed to load provider settings');
+          setLoadProviderError(classifyApiError(err));
         }
       });
     api.getRoleMappings()
       .then((res) => {
         if (!ignore) {
-          setRoleMappings(extractRoleMappings(res));
-          setActiveProviderName(res.active_provider || '');
+          const extracted = extractRoleMappings(res);
+          setRoleMappings(extracted);
+          const activeName = res.active_provider || '';
+          setActiveProviderName(activeName);
+
+          const toFetch = new Set<string>();
+          if (activeName) toFetch.add(activeName);
+          if (extracted.planner?.provider) toFetch.add(extracted.planner.provider);
+          if (extracted.reviewer?.provider) toFetch.add(extracted.reviewer.provider);
+          if (extracted.synthesizer?.provider) toFetch.add(extracted.synthesizer.provider);
+          for (const p of toFetch) {
+            void fetchModelsForProvider(p);
+          }
         }
       })
       .catch((err: unknown) => {
@@ -141,7 +243,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     return () => {
       ignore = true;
     };
-  }, [isOpen, handleError]);
+  }, [isOpen, handleError, fetchModelsForProvider]);
 
   const handleRoleProviderChange = (
     roleKey: 'planner' | 'reviewer' | 'synthesizer',
@@ -158,10 +260,19 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         ...prev,
         [roleKey]: {
           provider: providerName,
-          model: prev[roleKey]?.model || '',
+          model: prev[roleKey]?.provider === providerName ? prev[roleKey]?.model : '',
+          has_custom_key: prev[roleKey]?.provider === providerName ? prev[roleKey]?.has_custom_key : false,
         },
       };
     });
+    setRoleApiKeyInputs((prev) => {
+      const copy = { ...prev };
+      delete copy[roleKey];
+      return copy;
+    });
+    if (providerName) {
+      void fetchModelsForProvider(providerName);
+    }
   };
 
   const handleRoleModelChange = (
@@ -175,9 +286,33 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         [roleKey]: {
           provider: currentProvider,
           model: modelName,
+          has_custom_key: prev[roleKey]?.has_custom_key,
         },
       };
     });
+  };
+
+  const handleScanFormModels = async () => {
+    try {
+      setScanningFormModels(true);
+      setError(null);
+      const models = await api.discoverModels({
+        name: editingName || formName || undefined,
+        kind: formKind,
+        base_url: formBaseUrl || undefined,
+        api_key: formApiKey || undefined,
+      });
+      setFormDiscoveredModels(models);
+      if (models.length > 0 && !formModel) {
+        setFormModel(models[0]);
+      }
+      setSuccessMsg(t('settings_models_count').replace('{count}', String(models.length)));
+      setTimeout(() => setSuccessMsg(null), 4000);
+    } catch (err: unknown) {
+      handleError(err, 'Failed to scan models from provider.');
+    } finally {
+      setScanningFormModels(false);
+    }
   };
 
   const handleSaveRoleMappings = async () => {
@@ -189,18 +324,22 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         planner: roleMappings.planner?.provider ? {
           provider: roleMappings.planner.provider,
           model: roleMappings.planner.model?.trim() || null,
+          api_key: roleApiKeyInputs.planner !== undefined ? roleApiKeyInputs.planner : undefined,
         } : null,
         reviewer: roleMappings.reviewer?.provider ? {
           provider: roleMappings.reviewer.provider,
           model: roleMappings.reviewer.model?.trim() || null,
+          api_key: roleApiKeyInputs.reviewer !== undefined ? roleApiKeyInputs.reviewer : undefined,
         } : null,
         synthesizer: roleMappings.synthesizer?.provider ? {
           provider: roleMappings.synthesizer.provider,
           model: roleMappings.synthesizer.model?.trim() || null,
+          api_key: roleApiKeyInputs.synthesizer !== undefined ? roleApiKeyInputs.synthesizer : undefined,
         } : null,
       };
       const res = await api.saveRoleMappings(payload);
       setRoleMappings(extractRoleMappings(res));
+      setRoleApiKeyInputs({});
       setActiveProviderName(res.active_provider || '');
       setSuccessMsg(t('role_save_success'));
       setTimeout(() => setSuccessMsg(null), 4000);
@@ -219,6 +358,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     setFormModel('qwen/qwen3.7-flash:free');
     setFormApiKey('');
     setFormIsActive(false);
+    setFormDiscoveredModels([]);
+    setCustomFormModelMode(false);
     setIsEditing(true);
     setTestResult(null);
     setError(null);
@@ -232,9 +373,16 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     setFormModel(p.model);
     setFormApiKey('');
     setFormIsActive(p.is_active);
+    setFormDiscoveredModels([]);
+    setCustomFormModelMode(false);
     setIsEditing(true);
     setTestResult(null);
     setError(null);
+    if (p.has_api_key) {
+      void api.getProviderModels(p.name).then((models) => {
+        setFormDiscoveredModels(models);
+      }).catch(() => {});
+    }
   };
 
   const handleSaveProvider = async (e: React.FormEvent) => {
@@ -349,7 +497,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       setNewPassword('');
       setConfirmNewPassword('');
     } catch (err: unknown) {
-      handleError(err, 'Failed to update password');
+      if (
+        (err instanceof ApiError && (err.status === 400 && err.message.toLowerCase().includes('current password is incorrect'))) ||
+        (err instanceof Error && err.message.toLowerCase().includes('current password is incorrect'))
+      ) {
+        setError(t('settings_current_password_error'));
+      } else {
+        handleError(err, t('err_change_password'));
+      }
     } finally {
       setIsChangingPass(false);
     }
@@ -358,14 +513,21 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   if (!isOpen) return null;
 
   return (
-    <div className="modal-backdrop">
-      <div className="modal-container max-w-2xl" role="dialog" aria-modal="true">
+    <div
+      className="modal-backdrop"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) {
+          onClose();
+        }
+      }}
+    >
+      <div className="modal-container modal-container-settings" role="dialog" aria-modal="true">
         <div className="modal-header">
           <div className="modal-title-group">
             <Settings className="text-sky-400" size={20} />
             <h2 className="modal-title">{t('settings_title')}</h2>
           </div>
-          <button onClick={onClose} className="btn-icon" aria-label="Close modal">
+          <button onClick={onClose} className="btn-icon" aria-label={t('btn_close_modal')}>
             <X size={18} />
           </button>
         </div>
@@ -395,143 +557,185 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           </button>
         </div>
 
-        <div className="settings-body">
-          {error && (
-            <div className="error-alert mb-4">
-              <AlertTriangle size={16} className="flex-shrink-0" />
-              <span className="text-xs">{error}</span>
-            </div>
-          )}
+        <div className={`settings-body-wrapper ${canScrollUp ? 'has-scroll-up' : ''} ${canScrollDown ? 'has-scroll-down' : ''}`}>
+          <div ref={bodyRef} onScroll={checkScroll} className="settings-body">
+            {error && (
+              <div className="error-alert mb-4">
+                <AlertTriangle size={16} className="flex-shrink-0" />
+                <span className="text-xs">{error}</span>
+              </div>
+            )}
 
-          {successMsg && (
-            <div className="test-banner-success mb-4">
-              <CheckCircle size={16} />
-              <span>{successMsg}</span>
-            </div>
-          )}
+            {successMsg && (
+              <div className="test-banner-success mb-4">
+                <CheckCircle size={16} />
+                <span>{successMsg}</span>
+              </div>
+            )}
 
-          {/* TAB 1: LLM PROVIDERS */}
-          {activeTab === 'providers' && (
-            <div>
-              {!isEditing ? (
-                <>
-                  <div className="settings-section-header">
-                    <span className="text-xs text-slate-400">
-                      Configure LLM API keys and model profiles for autonomous multi-agent planning.
-                    </span>
-                    <button onClick={handleStartAdd} className="btn-primary btn-sm flex items-center gap-1.5">
-                      <Plus size={14} />
-                      <span>{t('settings_add_provider')}</span>
-                    </button>
-                  </div>
+            {/* TAB 1: LLM PROVIDERS */}
+            {activeTab === 'providers' && (
+              <div>
+                {!isEditing ? (
+                  <>
+                    <div className="settings-section-header">
+                      <span className="text-xs text-slate-400">
+                        {t('settings_providers_desc')}
+                      </span>
+                      <button onClick={handleStartAdd} className="btn-primary btn-sm flex items-center gap-1.5">
+                        <Plus size={14} />
+                        <span>{t('settings_add_provider')}</span>
+                      </button>
+                    </div>
 
-                  <div className="provider-card-list">
-                    {providers.map((p) => {
-                      const isCurrentTest = testResult && testResult.name === p.name;
-                      return (
-                        <div
-                          key={p.name}
-                          className={`provider-card ${p.is_active ? 'provider-card-active' : ''}`}
-                        >
-                          <div className="provider-card-header">
-                            <div className="provider-info">
-                              <div className="provider-badges">
-                                <span className="provider-name">{p.name}</span>
-                                <span className="badge-subtle uppercase text-[10px]">{p.kind}</span>
-                                {p.is_active && (
-                                  <span className="badge-emerald text-[10px] flex items-center gap-1 font-semibold">
-                                    <Radio size={10} className="animate-pulse" />
-                                    {t('settings_active_badge')}
-                                  </span>
-                                )}
-                              </div>
-                              <div className="provider-model-name">{p.model}</div>
-                              {p.base_url && (
-                                <div className="provider-meta-row">
-                                  <Globe size={12} />
-                                  <span>{p.base_url}</span>
-                                </div>
-                              )}
-                              <div className="provider-meta-row mt-1">
-                                <Key size={12} className={p.has_api_key ? 'text-emerald-400' : 'text-slate-500'} />
-                                <span>{p.has_api_key ? 'API Key Encrypted & Stored' : 'No API Key Configured'}</span>
-                              </div>
-                            </div>
-
-                            <div className="provider-actions-row">
-                              {!p.is_active && (
-                                <button
-                                  onClick={() => handleActivate(p.name)}
-                                  className="btn-secondary btn-sm"
-                                  title="Activate"
-                                >
-                                  {t('settings_btn_activate')}
-                                </button>
-                              )}
-                              <button
-                                onClick={() => handleTestConnection(p)}
-                                disabled={testingName === p.name}
-                                className="btn-secondary btn-sm flex items-center gap-1"
-                                title="Probe Connection"
-                              >
-                                <Play size={11} className={testingName === p.name ? 'animate-spin text-sky-400' : ''} />
-                                <span>{testingName === p.name ? t('settings_btn_testing') : t('settings_btn_test')}</span>
-                              </button>
-                              <button
-                                onClick={() => handleStartEdit(p)}
-                                className="btn-icon p-1.5"
-                                title="Edit"
-                              >
-                                <Edit2 size={13} />
-                              </button>
-                              {!p.is_active && (
-                                <button
-                                  onClick={() => handleDelete(p.name)}
-                                  className="btn-icon-danger p-1.5"
-                                  title="Delete"
-                                >
-                                  <Trash2 size={13} />
-                                </button>
-                              )}
+                    {loadProviderError ? (
+                      <div className="settings-error-card">
+                        <div className="settings-error-content">
+                          <AlertTriangle size={20} className="text-amber-400 flex-shrink-0 mt-0.5" />
+                          <div>
+                            <div className="settings-error-title">{t('err_load_providers')}</div>
+                            <div className="settings-error-desc">
+                              {loadProviderError.category === 'backend_offline'
+                                ? t('settings_provider_offline_desc')
+                                : (loadProviderError.userMessage || t('settings_provider_offline_desc'))}
                             </div>
                           </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => void loadProviders()}
+                          disabled={isLoading}
+                          className="btn-secondary btn-sm flex items-center gap-1.5 flex-shrink-0"
+                        >
+                          <RefreshCw size={13} className={isLoading ? 'animate-spin' : ''} />
+                          <span>{t('conn_retry')}</span>
+                        </button>
+                      </div>
+                    ) : providers.length === 0 ? (
+                      <div className="settings-empty-providers">
+                        <div className="empty-provider-icon">
+                          <Cpu size={26} className="text-sky-400" />
+                        </div>
+                        <h4 className="empty-provider-title">{t('settings_no_providers_title')}</h4>
+                        <p className="empty-provider-desc">{t('settings_no_providers_desc')}</p>
+                        <button
+                          type="button"
+                          onClick={handleStartAdd}
+                          className="btn-primary btn-sm flex items-center gap-1.5"
+                        >
+                          <Plus size={14} />
+                          <span>{t('settings_add_provider')}</span>
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="provider-card-list">
+                        {providers.map((p) => {
+                          const isCurrentTest = testResult && testResult.name === p.name;
+                          return (
+                            <div
+                              key={p.name}
+                              className={`provider-card ${p.is_active ? 'provider-card-active' : ''}`}
+                            >
+                              <div className="provider-card-header">
+                                <div className="provider-info">
+                                  <div className="provider-badges">
+                                    <span className="provider-name">{p.name}</span>
+                                    <span className="badge-subtle uppercase text-[10px]">{p.kind}</span>
+                                    {p.is_active && (
+                                      <span className="badge-emerald text-[10px] flex items-center gap-1 font-semibold">
+                                        <Radio size={10} className="animate-pulse" />
+                                        {t('settings_active_badge')}
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div className="provider-model-name">{p.model}</div>
+                                  {p.base_url && (
+                                    <div className="provider-meta-row">
+                                      <Globe size={12} />
+                                      <span>{p.base_url}</span>
+                                    </div>
+                                  )}
+                                  <div className="provider-meta-row mt-1">
+                                    <Key size={12} className={p.has_api_key ? 'text-emerald-400' : 'text-slate-500'} />
+                                    <span>{p.has_api_key ? t('settings_key_stored') : t('settings_key_missing')}</span>
+                                  </div>
+                                </div>
 
-                          {/* Test connection result banner */}
-                          {isCurrentTest && (
-                            <div className={testResult.success ? 'test-banner-success' : 'test-banner-error'}>
-                              {testResult.success ? (
-                                <>
-                                  <CheckCircle size={14} className="flex-shrink-0" />
-                                  <span>{t('settings_test_success')} ({testResult.latency} ms)</span>
-                                </>
-                              ) : (
-                                <>
-                                  <AlertTriangle size={14} className="flex-shrink-0" />
-                                  <span>{t('settings_test_failed')}: {testResult.error}</span>
-                                </>
+                                <div className="provider-actions-row">
+                                  {!p.is_active && (
+                                    <button
+                                      onClick={() => handleActivate(p.name)}
+                                      className="btn-secondary btn-sm"
+                                      title={t('settings_action_activate')}
+                                    >
+                                      {t('settings_btn_activate')}
+                                    </button>
+                                  )}
+                                  <button
+                                    onClick={() => handleTestConnection(p)}
+                                    disabled={testingName === p.name}
+                                    className="btn-secondary btn-sm flex items-center gap-1"
+                                    title={t('settings_action_probe')}
+                                  >
+                                    <Play size={11} className={testingName === p.name ? 'animate-spin text-sky-400' : ''} />
+                                    <span>{testingName === p.name ? t('settings_btn_testing') : t('settings_btn_test')}</span>
+                                  </button>
+                                  <button
+                                    onClick={() => handleStartEdit(p)}
+                                    className="btn-icon p-1.5"
+                                    title={t('settings_action_edit')}
+                                  >
+                                    <Edit2 size={13} />
+                                  </button>
+                                  {!p.is_active && (
+                                    <button
+                                      onClick={() => handleDelete(p.name)}
+                                      className="btn-icon-danger p-1.5"
+                                      title={t('settings_action_delete')}
+                                    >
+                                      <Trash2 size={13} />
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+
+                              {/* Test connection result banner */}
+                              {isCurrentTest && (
+                                <div className={testResult.success ? 'test-banner-success' : 'test-banner-error'}>
+                                  {testResult.success ? (
+                                    <>
+                                      <CheckCircle size={14} className="flex-shrink-0" />
+                                      <span>{t('settings_test_success')} ({testResult.latency} ms)</span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <AlertTriangle size={14} className="flex-shrink-0" />
+                                      <span>{t('settings_test_failed')}: {testResult.error}</span>
+                                    </>
+                                  )}
+                                </div>
                               )}
                             </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                </>
-              ) : (
-                /* Edit / Add Provider Form */
-                <form onSubmit={handleSaveProvider} className="space-y-4">
-                  <div className="flex justify-between items-center border-b border-slate-800 pb-2 mb-3">
-                    <h3 className="text-sm font-semibold text-slate-200">
-                      {editingName ? t('settings_edit_provider') : t('settings_add_provider')}
-                    </h3>
-                    <button
-                      type="button"
-                      onClick={() => setIsEditing(false)}
-                      className="btn-text-sm"
-                    >
-                      Cancel
-                    </button>
-                  </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  /* Edit / Add Provider Form */
+                  <form onSubmit={handleSaveProvider} className="space-y-4">
+                    <div className="flex justify-between items-center border-b border-slate-800 pb-2 mb-3">
+                      <h3 className="text-sm font-semibold text-slate-200">
+                        {editingName ? t('settings_edit_provider') : t('settings_add_provider')}
+                      </h3>
+                      <button
+                        type="button"
+                        onClick={() => setIsEditing(false)}
+                        className="btn-text-sm"
+                      >
+                        {t('modal_btn_cancel')}
+                      </button>
+                    </div>
 
                   <div className="provider-form-grid mb-3">
                     <div className="form-group">
@@ -554,23 +758,78 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         onChange={(e) => setFormKind(e.target.value as any)}
                         className="form-select"
                       >
-                        <option value="openai-compatible">OpenAI-Compatible (Xkiro, Ollama, vLLM, OpenRouter)</option>
-                        <option value="openai">OpenAI Official</option>
-                        <option value="google">Google Gemini</option>
+                        <option value="openai-compatible">{t('settings_kind_openai_compat')}</option>
+                        <option value="openai">{t('settings_kind_openai_official')}</option>
+                        <option value="google">{t('settings_kind_google_gemini')}</option>
                       </select>
                     </div>
                   </div>
 
                   <div className="form-group mb-3">
-                    <label className="form-label">{t('settings_model')} *</label>
-                    <input
-                      type="text"
-                      value={formModel}
-                      onChange={(e) => setFormModel(e.target.value)}
-                      placeholder="e.g. qwen/qwen3.7-flash:free, gpt-4o-mini, gemini-2.0-flash"
-                      required
-                      className="form-input"
-                    />
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="form-label mb-0">{t('settings_model')} *</label>
+                      <div className="flex items-center gap-2">
+                        {formDiscoveredModels.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => setCustomFormModelMode(!customFormModelMode)}
+                            className="text-[11px] text-sky-400 hover:text-sky-300 underline"
+                          >
+                            {customFormModelMode ? t('settings_dropdown_model_toggle') : t('settings_custom_model_toggle')}
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={handleScanFormModels}
+                          disabled={scanningFormModels || (!formApiKey && !editingName)}
+                          className="text-[11px] px-2 py-0.5 rounded bg-sky-500/10 hover:bg-sky-500/20 text-sky-300 border border-sky-500/30 flex items-center gap-1 transition-all disabled:opacity-40"
+                          title={t('settings_scan_models')}
+                        >
+                          <RefreshCw size={11} className={scanningFormModels ? "animate-spin" : ""} />
+                          <span>{scanningFormModels ? t('settings_scanning_models') : t('settings_scan_models')}</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {formDiscoveredModels.length > 0 && !customFormModelMode ? (
+                      <select
+                        value={formModel}
+                        onChange={(e) => setFormModel(e.target.value)}
+                        className="form-select"
+                        required
+                      >
+                        <option value="">{t('settings_select_model_placeholder')}</option>
+                        {formDiscoveredModels.filter((m) => m.toLowerCase().includes(':free')).length > 0 && (
+                          <optgroup label={t('settings_free_models_group')}>
+                            {formDiscoveredModels
+                              .filter((m) => m.toLowerCase().includes(':free'))
+                              .map((m) => (
+                                <option key={m} value={m}>
+                                  {m}
+                                </option>
+                              ))}
+                          </optgroup>
+                        )}
+                        <optgroup label={t('settings_all_models_group')}>
+                          {formDiscoveredModels
+                            .filter((m) => !m.toLowerCase().includes(':free'))
+                            .map((m) => (
+                              <option key={m} value={m}>
+                                {m}
+                              </option>
+                            ))}
+                        </optgroup>
+                      </select>
+                    ) : (
+                      <input
+                        type="text"
+                        value={formModel}
+                        onChange={(e) => setFormModel(e.target.value)}
+                        placeholder="e.g. qwen/qwen3.7-flash:free, gpt-4o-mini, gemini-2.0-flash"
+                        required
+                        className="form-input"
+                      />
+                    )}
                   </div>
 
                   <div className="form-group mb-3">
@@ -679,119 +938,281 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 key: 'planner' as const,
                 title: t('role_planner_title'),
                 desc: t('role_planner_desc'),
-                badgeClass: 'badge-planner',
+                icon: Compass,
+                iconColor: 'text-sky-400',
+                iconBg: 'bg-sky-500/10 border-sky-500/25',
+                tagClass: 'text-sky-400 bg-sky-500/10 border-sky-500/25',
               },
               {
                 key: 'reviewer' as const,
                 title: t('role_reviewer_title'),
                 desc: t('role_reviewer_desc'),
-                badgeClass: 'badge-reviewer',
+                icon: ShieldAlert,
+                iconColor: 'text-purple-400',
+                iconBg: 'bg-purple-500/10 border-purple-500/25',
+                tagClass: 'text-purple-400 bg-purple-500/10 border-purple-500/25',
               },
               {
                 key: 'synthesizer' as const,
                 title: t('role_synthesizer_title'),
                 desc: t('role_synthesizer_desc'),
-                badgeClass: 'badge-synthesizer',
+                icon: GitMerge,
+                iconColor: 'text-emerald-400',
+                iconBg: 'bg-emerald-500/10 border-emerald-500/25',
+                tagClass: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/25',
               },
             ];
 
             return (
               <div className="space-y-4">
-                <div className="settings-section-header">
+                <div className="settings-section-header mb-1">
                   <span className="text-xs text-slate-400">
                     {t('settings_roles_desc')}
                   </span>
                 </div>
 
                 {isSamePlannerSynthesizer && (
-                  <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-md text-amber-300 text-xs flex items-center gap-2 mb-3">
+                  <div className="p-3 bg-amber-500/10 border border-amber-500/25 rounded-xl text-amber-300 text-xs flex items-center gap-2.5">
                     <AlertTriangle size={16} className="flex-shrink-0 text-amber-400" />
                     <span>{t('role_same_model_warning')}</span>
                   </div>
                 )}
 
-                <div className="space-y-3">
+                <div className="space-y-3.5">
                   {roleCards.map((r) => {
+                    const RoleIcon = r.icon;
                     const assignment = roleMappings[r.key];
                     const currentProviderName = assignment?.provider || '';
                     const matchedProvider = providers.find(
                       (p) => p.name.toLowerCase() === currentProviderName.toLowerCase()
                     );
                     const defaultModelHint = matchedProvider?.model;
+                    const availableModels = currentProviderName ? (providerModelsCache[currentProviderName] || []) : [];
+                    const isLoadingModels = currentProviderName ? loadingModels[currentProviderName] : false;
+                    const isManual = customModelMode[r.key];
 
                     return (
                       <div
                         key={r.key}
-                        className="p-4 bg-slate-900/60 border border-slate-800 rounded-lg space-y-3"
+                        className="role-card-modern"
                       >
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-2">
-                            <span className={`actor-badge ${r.badgeClass}`}>
-                              {r.key.toUpperCase()}
-                            </span>
-                            <span className="text-sm font-semibold text-slate-200">
-                              {r.title}
-                            </span>
-                          </div>
-                          {currentProviderName ? (
-                            <span className="badge-subtle text-[10px] uppercase font-mono">
-                              Custom: {currentProviderName}
-                            </span>
-                          ) : (
-                            <span className="badge-emerald text-[10px] uppercase font-semibold">
-                              Default
-                            </span>
-                          )}
-                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-12 gap-5 items-center">
+                          {/* Role Details */}
+                          <div className="md:col-span-5 space-y-2">
+                            <div className="flex items-center gap-3">
+                              <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 border ${r.iconBg} ${r.iconColor}`}>
+                                <RoleIcon size={16} />
+                              </div>
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <span className={`text-[10px] font-mono font-bold uppercase tracking-wider px-1.5 py-0.5 rounded border ${r.tagClass}`}>
+                                    {r.key.toUpperCase()}
+                                  </span>
+                                  <h4 className="text-sm font-semibold text-slate-100 truncate">
+                                    {r.title}
+                                  </h4>
+                                </div>
+                                <div className="mt-1 flex items-center gap-1.5">
+                                  {currentProviderName ? (
+                                    <span className="inline-flex items-center gap-1 text-[10px] font-mono px-2 py-0.5 rounded-full bg-sky-500/10 text-sky-300 border border-sky-500/25">
+                                      <span className="w-1.5 h-1.5 rounded-full bg-sky-400" />
+                                      Custom: {currentProviderName}
+                                    </span>
+                                  ) : (
+                                    <span className="inline-flex items-center text-[10px] px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 border border-slate-700/60">
+                                      Default: {activeProviderName || 'Active'}
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
 
-                        <p className="text-xs text-slate-400">
-                          {r.desc}
-                        </p>
-
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
-                          <div className="form-group">
-                            <label className="form-label">{t('role_provider_label')}</label>
-                            <select
-                              value={currentProviderName}
-                              onChange={(e) => handleRoleProviderChange(r.key, e.target.value)}
-                              className="form-select"
-                            >
-                              <option value="">
-                                {t('role_provider_default').replace('{provider}', activeProviderName || 'Active')}
-                              </option>
-                              {availableProviders.map((p) => (
-                                <option key={p.name} value={p.name}>
-                                  {p.name} ({p.kind})
-                                </option>
-                              ))}
-                            </select>
+                            <p className="text-xs text-slate-400 leading-relaxed pl-0.5">
+                              {r.desc}
+                            </p>
                           </div>
 
-                          <div className="form-group">
-                            <label className="form-label">{t('role_model_label')}</label>
-                            <input
-                              type="text"
-                              list={`model-suggestions-${r.key}`}
-                              value={assignment?.model ?? ''}
-                              onChange={(e) => handleRoleModelChange(r.key, e.target.value)}
-                              placeholder={
-                                currentProviderName
-                                  ? (defaultModelHint
-                                      ? `Default: ${defaultModelHint}`
-                                      : t('role_model_placeholder'))
-                                  : t('role_model_placeholder')
-                              }
-                              disabled={!currentProviderName}
-                              className="form-input"
-                            />
-                            <datalist id={`model-suggestions-${r.key}`}>
-                              {defaultModelHint && <option value={defaultModelHint} />}
-                              <option value="qwen/qwen3.7-flash:free" />
-                              <option value="gpt-4o-mini" />
-                              <option value="gpt-4o" />
-                              <option value="gemini-2.0-flash" />
-                              <option value="claude-3-5-sonnet" />
-                            </datalist>
+                          {/* Control Box */}
+                          <div className="md:col-span-7">
+                            <div className="role-control-box space-y-2.5">
+                              <div>
+                                <label className="block text-[11px] font-medium uppercase tracking-wider text-slate-400 mb-1">
+                                  {t('role_provider_label')}
+                                </label>
+                                <select
+                                  value={currentProviderName}
+                                  onChange={(e) => handleRoleProviderChange(r.key, e.target.value)}
+                                  className="role-control-input form-select py-1.5 px-2.5 text-xs w-full"
+                                >
+                                  <option value="">
+                                    {t('role_provider_default').replace('{provider}', activeProviderName || 'Active')}
+                                  </option>
+                                  {availableProviders.map((p) => (
+                                    <option key={p.name} value={p.name}>
+                                      {p.name} ({p.kind})
+                                    </option>
+                                  ))}
+                                </select>
+                              </div>
+
+                              <div>
+                                <div className="flex items-center justify-between mb-1">
+                                  <div className="flex items-center gap-1.5">
+                                    <label className="text-[11px] font-medium uppercase tracking-wider text-slate-400">
+                                      {t('role_model_label')}
+                                    </label>
+                                    {availableModels.length > 0 && (
+                                      <span className="text-[10px] text-emerald-400 font-mono px-1 py-0.2 rounded bg-emerald-500/10 border border-emerald-500/20">
+                                        ✓ {t('role_models_available_count').replace('{count}', String(availableModels.length))}
+                                      </span>
+                                    )}
+                                    {isLoadingModels && (
+                                      <span className="text-[10px] text-sky-400 flex items-center gap-1 font-mono">
+                                        <RefreshCw size={10} className="animate-spin" />
+                                        {t('role_scanning_models_short')}
+                                      </span>
+                                    )}
+                                  </div>
+
+                                  <div className="flex items-center gap-2">
+                                    {currentProviderName && availableModels.length > 0 && (
+                                      <button
+                                        type="button"
+                                        onClick={() => setCustomModelMode((prev) => ({ ...prev, [r.key]: !prev[r.key] }))}
+                                        className="text-[10px] text-sky-400 hover:text-sky-300 underline"
+                                      >
+                                        {isManual ? t('settings_dropdown_model_toggle') : t('settings_custom_model_toggle')}
+                                      </button>
+                                    )}
+                                    {currentProviderName && defaultModelHint && !availableModels.length && (
+                                      <span className="text-[10px] text-slate-500 font-mono">
+                                        {t('role_default_model_prefix').replace('{model}', defaultModelHint)}
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+
+                                {!currentProviderName ? (
+                                  <input
+                                    type="text"
+                                    disabled
+                                    value=""
+                                    placeholder={t('role_model_placeholder')}
+                                    className="role-control-input form-input py-1.5 px-2.5 text-xs w-full opacity-40 cursor-not-allowed bg-slate-900/40"
+                                  />
+                                ) : availableModels.length > 0 && !isManual ? (
+                                  <select
+                                    value={assignment?.model ?? ''}
+                                    onChange={(e) => handleRoleModelChange(r.key, e.target.value)}
+                                    className="role-control-input form-select py-1.5 px-2.5 text-xs w-full"
+                                  >
+                                    <option value="">
+                                      {defaultModelHint
+                                        ? t('role_default_model_prefix').replace('{model}', defaultModelHint)
+                                        : t('role_model_placeholder')}
+                                    </option>
+                                    {availableModels.filter((m) => m.toLowerCase().includes(':free')).length > 0 && (
+                                      <optgroup label={t('settings_free_models_group')}>
+                                        {availableModels
+                                          .filter((m) => m.toLowerCase().includes(':free'))
+                                          .map((m) => (
+                                            <option key={m} value={m}>
+                                              {m}
+                                            </option>
+                                          ))}
+                                      </optgroup>
+                                    )}
+                                    <optgroup label={t('settings_all_models_group')}>
+                                      {availableModels
+                                        .filter((m) => !m.toLowerCase().includes(':free'))
+                                        .map((m) => (
+                                          <option key={m} value={m}>
+                                            {m}
+                                          </option>
+                                        ))}
+                                    </optgroup>
+                                  </select>
+                                ) : (
+                                  <div className="relative">
+                                    <input
+                                      type="text"
+                                      list={`model-suggestions-${r.key}`}
+                                      value={assignment?.model ?? ''}
+                                      onChange={(e) => handleRoleModelChange(r.key, e.target.value)}
+                                      placeholder={
+                                        defaultModelHint
+                                          ? t('role_default_model_prefix').replace('{model}', defaultModelHint)
+                                          : t('role_model_placeholder')
+                                      }
+                                      className="role-control-input form-input py-1.5 px-2.5 text-xs w-full"
+                                    />
+                                    <datalist id={`model-suggestions-${r.key}`}>
+                                      {defaultModelHint && <option value={defaultModelHint} />}
+                                      {availableModels.map((m) => (
+                                        <option key={m} value={m} />
+                                      ))}
+                                    </datalist>
+                                  </div>
+                                )}
+                              </div>
+
+                              {/* Custom Role API Key Override */}
+                              {currentProviderName && (
+                                <div>
+                                  <div className="flex items-center justify-between mb-1">
+                                    <div className="flex items-center gap-1.5">
+                                      <label className="text-[11px] font-medium uppercase tracking-wider text-slate-400 flex items-center gap-1">
+                                        <Key size={11} className={assignment?.has_custom_key ? 'text-emerald-400' : 'text-slate-500'} />
+                                        {t('role_api_key_label')}
+                                      </label>
+                                      {assignment?.has_custom_key && !roleApiKeyInputs[r.key] && (
+                                        <span className="text-[10px] text-emerald-400 font-mono px-1 py-0.2 rounded bg-emerald-500/10 border border-emerald-500/20">
+                                          ✓ {t('role_api_key_saved')}
+                                        </span>
+                                      )}
+                                    </div>
+
+                                    {assignment?.has_custom_key && (
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setRoleApiKeyInputs((prev) => ({ ...prev, [r.key]: '' }));
+                                          setRoleMappings((prev) => ({
+                                            ...prev,
+                                            [r.key]: prev[r.key] ? { ...prev[r.key]!, has_custom_key: false } : null,
+                                          }));
+                                        }}
+                                        className="text-[10px] text-red-400 hover:text-red-300 underline"
+                                      >
+                                        {t('role_api_key_reset')}
+                                      </button>
+                                    )}
+                                  </div>
+
+                                  <div className="relative">
+                                    <input
+                                      type={showRoleApiKey[r.key] ? 'text' : 'password'}
+                                      value={roleApiKeyInputs[r.key] ?? ''}
+                                      onChange={(e) => setRoleApiKeyInputs((prev) => ({ ...prev, [r.key]: e.target.value }))}
+                                      placeholder={
+                                        assignment?.has_custom_key
+                                          ? `•••••••• (${t('role_api_key_saved')})`
+                                          : t('role_api_key_placeholder')
+                                      }
+                                      className="role-control-input form-input py-1.5 px-2.5 pr-8 text-xs w-full font-mono"
+                                    />
+                                    <button
+                                      type="button"
+                                      onClick={() => setShowRoleApiKey((prev) => ({ ...prev, [r.key]: !prev[r.key] }))}
+                                      className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200"
+                                      title={showRoleApiKey[r.key] ? t('settings_hide_api_key') : t('settings_show_api_key')}
+                                    >
+                                      {showRoleApiKey[r.key] ? <EyeOff size={13} /> : <Eye size={13} />}
+                                    </button>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
                           </div>
                         </div>
                       </div>
@@ -799,15 +1220,29 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   })}
                 </div>
 
-                <div className="modal-actions pt-4 mt-2">
+                <div className="role-footer-bar">
+                  <div className="flex items-center gap-1.5 text-xs text-slate-400">
+                    <Info size={14} className="text-sky-400 flex-shrink-0" />
+                    <span>{t('role_footer_notice')}</span>
+                  </div>
+
                   <button
                     type="button"
                     onClick={handleSaveRoleMappings}
                     disabled={isSavingRoles}
-                    className="btn-primary btn-sm flex items-center gap-1.5"
+                    className="btn-primary btn-sm flex items-center gap-2 px-4 py-2 font-medium"
                   >
-                    <CheckCircle size={14} />
-                    <span>{isSavingRoles ? t('role_saving') : t('role_btn_save')}</span>
+                    {isSavingRoles ? (
+                      <>
+                        <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                        <span>{t('role_saving')}</span>
+                      </>
+                    ) : (
+                      <>
+                        <CheckCircle size={15} />
+                        <span>{t('role_btn_save')}</span>
+                      </>
+                    )}
                   </button>
                 </div>
               </div>
@@ -817,42 +1252,72 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           {/* TAB 2: ADMIN SECURITY */}
           {activeTab === 'security' && (
             <form onSubmit={handleChangePassword} className="space-y-4 max-w-md">
-              <p className="text-xs text-slate-400 mb-3">
-                Update your administrator password to maintain strong access control.
+              <p className="text-xs text-slate-400 mb-3 leading-relaxed">
+                {t('settings_security_desc')}
               </p>
 
               <div className="form-group mb-3">
                 <label className="form-label">{t('settings_current_password')} *</label>
-                <input
-                  type="password"
-                  value={currentPassword}
-                  onChange={(e) => setCurrentPassword(e.target.value)}
-                  required
-                  className="form-input"
-                />
+                <div className="relative">
+                  <input
+                    type={showCurrentPassword ? 'text' : 'password'}
+                    value={currentPassword}
+                    onChange={(e) => setCurrentPassword(e.target.value)}
+                    required
+                    className="form-input pr-10"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowCurrentPassword(!showCurrentPassword)}
+                    className="absolute right-2.5 top-2.5 text-slate-400 hover:text-slate-200 focus:outline-none focus:text-sky-400 p-0.5 rounded"
+                    aria-label={showCurrentPassword ? t('auth_hide_password') : t('auth_show_password')}
+                  >
+                    {showCurrentPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                  </button>
+                </div>
               </div>
 
               <div className="form-group mb-3">
                 <label className="form-label">{t('settings_new_password')} *</label>
-                <input
-                  type="password"
-                  value={newPassword}
-                  onChange={(e) => setNewPassword(e.target.value)}
-                  placeholder={t('auth_password_placeholder')}
-                  required
-                  className="form-input"
-                />
+                <div className="relative">
+                  <input
+                    type={showNewPassword ? 'text' : 'password'}
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    placeholder={t('auth_password_placeholder')}
+                    required
+                    className="form-input pr-10"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowNewPassword(!showNewPassword)}
+                    className="absolute right-2.5 top-2.5 text-slate-400 hover:text-slate-200 focus:outline-none focus:text-sky-400 p-0.5 rounded"
+                    aria-label={showNewPassword ? t('auth_hide_password') : t('auth_show_password')}
+                  >
+                    {showNewPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                  </button>
+                </div>
               </div>
 
               <div className="form-group mb-4">
                 <label className="form-label">{t('auth_confirm_password_label')} *</label>
-                <input
-                  type="password"
-                  value={confirmNewPassword}
-                  onChange={(e) => setConfirmNewPassword(e.target.value)}
-                  required
-                  className="form-input"
-                />
+                <div className="relative">
+                  <input
+                    type={showConfirmNewPassword ? 'text' : 'password'}
+                    value={confirmNewPassword}
+                    onChange={(e) => setConfirmNewPassword(e.target.value)}
+                    required
+                    className="form-input pr-10"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowConfirmNewPassword(!showConfirmNewPassword)}
+                    className="absolute right-2.5 top-2.5 text-slate-400 hover:text-slate-200 focus:outline-none focus:text-sky-400 p-0.5 rounded"
+                    aria-label={showConfirmNewPassword ? t('auth_hide_password') : t('auth_show_password')}
+                  >
+                    {showConfirmNewPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                  </button>
+                </div>
               </div>
 
               <div>
@@ -866,6 +1331,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               </div>
             </form>
           )}
+          </div>
         </div>
       </div>
     </div>

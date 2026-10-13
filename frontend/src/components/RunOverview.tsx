@@ -48,7 +48,7 @@ export const RunOverview: React.FC<RunOverviewProps> = ({
 }) => {
   const { t } = useI18n();
   const [answers, setAnswers] = useState<Record<string, string>>({});
-  const [cancelReason, setCancelReason] = useState('Stopped by operator');
+  const [cancelReason, setCancelReason] = useState(() => t('overview_default_stop_reason'));
   const [showCancelPrompt, setShowCancelPrompt] = useState(false);
   const [showDeletePrompt, setShowDeletePrompt] = useState(false);
 
@@ -84,10 +84,10 @@ export const RunOverview: React.FC<RunOverviewProps> = ({
                   <h3 className="text-sm font-semibold text-rose-200">
                     {t('overview_execution_stopped')}: {run.status === 'FAILED' ? t('overview_fatal_failure') : run.status}
                   </h3>
-                  <span className="badge-danger text-[11px]">Phase: {run.phase}</span>
+                  <span className="badge-danger text-[11px]">{t('dash_phase_prefix').replace('{phase}', run.phase)}</span>
                 </div>
                 <p className="text-xs text-rose-300/90 mt-1 font-mono break-words bg-rose-950/40 p-2.5 rounded border border-rose-900/40">
-                  {run.stop_reason || 'Unknown error occurred during workflow execution.'}
+                  {run.stop_reason || t('overview_unknown_error')}
                 </p>
               </div>
             </div>
@@ -180,7 +180,7 @@ export const RunOverview: React.FC<RunOverviewProps> = ({
           <span className="stat-label">{t('overview_status_rev')}</span>
           <div className="flex-align-center gap-2 mt-1">
             <span className="font-semibold text-lg">{run.status}</span>
-            <span className="badge-subtle">Rev {run.revision}</span>
+            <span className="badge-subtle">{t('dash_revision_prefix').replace('{revision}', String(run.revision))}</span>
           </div>
         </div>
         <div className="stat-card">
@@ -286,7 +286,7 @@ export const RunOverview: React.FC<RunOverviewProps> = ({
             onClick={onValidate}
             className="btn-secondary"
             disabled={isProcessing}
-            title="Execute P4 Quality Gate structural verification"
+            title={t('overview_tooltip_validate')}
           >
             <ShieldCheck size={15} className="text-sky-400" />
             <span>{t('overview_validate_gates')}</span>
@@ -296,7 +296,7 @@ export const RunOverview: React.FC<RunOverviewProps> = ({
             onClick={onFinalize}
             className="btn-secondary"
             disabled={isProcessing || run.status === 'FINAL'}
-            title="Evaluate finalization conditions to promote to FINAL status"
+            title={t('overview_tooltip_finalize')}
           >
             <Award size={15} className="text-emerald-400" />
             <span>{t('overview_finalize_plan')}</span>

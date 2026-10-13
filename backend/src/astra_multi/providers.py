@@ -258,6 +258,7 @@ def generate(
     *,
     settings: ProviderSettingsRepository | None = None,
     credentials: CredentialStore | None = None,
+    api_key_override: str | None = None,
 ) -> ModelResult:
     manager = ProviderManager(
         settings if settings is not None else ProviderSettingsRepository(), credentials
@@ -272,16 +273,19 @@ def generate(
             str(error),
             provider,
         ) from None
-    try:
-        key = manager.resolve_key(profile)
-    except CredentialStoreError as error:
-        raise AuthError("CREDENTIAL_STORE_UNAVAILABLE", str(error), provider) from None
-    if key is None:
-        raise AuthError(
-            "NO_API_KEY",
-            "Configure a key in the OS store or the profile's environment variable",
-            provider,
-        )
+    if api_key_override:
+        key = api_key_override
+    else:
+        try:
+            key = manager.resolve_key(profile)
+        except CredentialStoreError as error:
+            raise AuthError("CREDENTIAL_STORE_UNAVAILABLE", str(error), provider) from None
+        if key is None:
+            raise AuthError(
+                "NO_API_KEY",
+                "Configure a key in the OS store or the profile's environment variable",
+                provider,
+            )
     try:
         options = (
             limits

@@ -130,13 +130,33 @@ class RunWorker:
             if role_mappings is None:
                 role_mappings = self.store.settings.get_role_mappings()
 
+            resolved_assignments: dict[str, dict[str, str | None]] = {}
+            if role_mappings:
+                try:
+                    from astra_multi.security.crypto import decrypt_secret, ensure_master_encryption_key
+                    master_key = ensure_master_encryption_key(self.store.settings)
+                except Exception:
+                    master_key = None
+
+                for r_name, r_cfg in role_mappings.items():
+                    if not isinstance(r_cfg, dict):
+                        continue
+                    item_dict = dict(r_cfg)
+                    enc_key = item_dict.get("api_key_enc")
+                    if enc_key and master_key:
+                        try:
+                            item_dict["api_key_override"] = decrypt_secret(enc_key, master_key)
+                        except Exception as dec_err:
+                            logger.warning("Could not decrypt API key for role '%s': %s", r_name, dec_err)
+                    resolved_assignments[r_name] = item_dict
+
             wf_ctx = WorkflowContext(
                 controller=controller,
                 gateway=self.gateway,
                 context_builder=context_builder,
                 budget_service=budget_service,
                 provider=active_provider_name,
-                role_assignments=role_mappings,
+                role_assignments=resolved_assignments,
             )
 
             graph = create_workflow_graph(wf_ctx)

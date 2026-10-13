@@ -276,3 +276,24 @@ def test_run_metadata_snapshot_isolation():
     run_snapshot = store.get_run_role_mappings_snapshot(run_id)
     assert run_snapshot == {"planner": {"provider": "p1", "model": "m1"}}
     assert run_snapshot != store.get_role_mappings()
+
+
+def test_get_api_key_override_for_role():
+    """Verify get_api_key_override_for_role returns custom API key when configured."""
+    role_assignments = {
+        "planner": {"provider": "xkiro", "model": "qwen", "api_key_override": "sk-planner-key"},
+        "reviewer": {"provider": "xkiro", "model": "deepseek-r1"},
+    }
+    wf_ctx = WorkflowContext(
+        controller=MagicMock(),
+        gateway=MagicMock(),
+        context_builder=MagicMock(),
+        provider="active-fallback",
+        role_assignments=role_assignments,
+    )
+
+    assert wf_ctx.get_api_key_override_for_role("planner") == "sk-planner-key"
+    assert wf_ctx.get_api_key_override_for_role("propose") == "sk-planner-key"
+    assert wf_ctx.get_api_key_override_for_role("reviewer") is None
+    assert wf_ctx.get_api_key_override_for_role("review") is None
+    assert wf_ctx.get_api_key_override_for_role("synthesizer") is None

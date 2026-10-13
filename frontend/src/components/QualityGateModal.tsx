@@ -38,7 +38,7 @@ export const QualityGateModal: React.FC<QualityGateModalProps> = ({
               </>
             )}
           </div>
-          <button onClick={onClose} className="btn-icon" aria-label="Close modal">
+          <button onClick={onClose} className="btn-icon" aria-label={t('btn_close_modal')}>
             <X size={18} />
           </button>
         </div>
@@ -51,9 +51,9 @@ export const QualityGateModal: React.FC<QualityGateModalProps> = ({
                   <>
                     <CheckCircle size={20} className="text-emerald-400" />
                     <div>
-                      <h4 className="font-semibold text-emerald-300">All Quality Gates Passed</h4>
+                      <h4 className="font-semibold text-emerald-300">{t('qg_all_passed')}</h4>
                       <p className="text-xs text-emerald-200">
-                        Plan revision {report.plan_revision} fully satisfies structural integrity, requirement coverage, and DAG checks.
+                        {t('qg_all_passed_desc').replace('{rev}', String(report.plan_revision))}
                       </p>
                     </div>
                   </>
@@ -61,9 +61,9 @@ export const QualityGateModal: React.FC<QualityGateModalProps> = ({
                   <>
                     <AlertTriangle size={20} className="text-rose-400" />
                     <div>
-                      <h4 className="font-semibold text-rose-300">Violations Detected ({report.violations.length})</h4>
+                      <h4 className="font-semibold text-rose-300">{t('qg_violations_detected').replace('{count}', String(report.violations.length))}</h4>
                       <p className="text-xs text-rose-200">
-                        The candidate plan requires remediation before it can be finalized.
+                        {t('qg_violations_desc')}
                       </p>
                     </div>
                   </>
@@ -81,7 +81,7 @@ export const QualityGateModal: React.FC<QualityGateModalProps> = ({
                         <span className="code-id text-xs">{v.entity}</span>
                       </div>
                       <p className="text-xs font-medium text-slate-100">{v.message}</p>
-                      <p className="text-xs text-slate-400 mt-1 italic">Remediation: {v.remediation}</p>
+                      <p className="text-xs text-slate-400 mt-1 italic">{t('qg_remediation_label')} {v.remediation}</p>
                     </div>
                   ))}
                 </div>
@@ -107,9 +107,9 @@ export const QualityGateModal: React.FC<QualityGateModalProps> = ({
                   <>
                     <CheckCircle size={20} className="text-emerald-400" />
                     <div>
-                      <h4 className="font-semibold text-emerald-300">Run Successfully Finalized</h4>
+                      <h4 className="font-semibold text-emerald-300">{t('qg_finalize_success')}</h4>
                       <p className="text-xs text-emerald-200">
-                        {finalizeResult.message || 'Promoted to FINAL status. Plan is ready for export and execution handover.'}
+                        {finalizeResult.message || t('qg_finalize_success_desc')}
                       </p>
                     </div>
                   </>
@@ -117,9 +117,9 @@ export const QualityGateModal: React.FC<QualityGateModalProps> = ({
                   <>
                     <AlertTriangle size={20} className="text-amber-400" />
                     <div>
-                      <h4 className="font-semibold text-amber-300">Finalization Blocked</h4>
+                      <h4 className="font-semibold text-amber-300">{t('qg_finalize_blocked')}</h4>
                       <p className="text-xs text-amber-200">
-                        {finalizeResult.reason || `Run status: ${finalizeResult.status}. Remaining blockers must be resolved first.`}
+                        {finalizeResult.reason || t('qg_finalize_blocked_desc').replace('{status}', finalizeResult.status)}
                       </p>
                     </div>
                   </>

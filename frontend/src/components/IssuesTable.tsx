@@ -21,11 +21,11 @@ export const IssuesTable: React.FC<IssuesTableProps> = ({ issues }) => {
   const getSeverityBadge = (severity: string) => {
     switch (severity) {
       case 'blocking':
-        return <span className="severity-badge badge-blocking"><AlertOctagon size={12} /> Blocking</span>;
+        return <span className="severity-badge badge-blocking"><AlertOctagon size={12} /> {t('issue_sev_blocking')}</span>;
       case 'warning':
-        return <span className="severity-badge badge-warning"><AlertTriangle size={12} /> Warning</span>;
+        return <span className="severity-badge badge-warning"><AlertTriangle size={12} /> {t('issue_sev_warning')}</span>;
       case 'info':
-        return <span className="severity-badge badge-info"><Info size={12} /> Info</span>;
+        return <span className="severity-badge badge-info"><Info size={12} /> {t('issue_sev_info')}</span>;
       default:
         return <span className="severity-badge">{severity}</span>;
     }
@@ -34,13 +34,13 @@ export const IssuesTable: React.FC<IssuesTableProps> = ({ issues }) => {
   const getStatusBadge = (status: string) => {
     switch (status) {
       case 'OPEN':
-        return <span className="status-badge badge-running">Open</span>;
+        return <span className="status-badge badge-running">{t('issue_status_open')}</span>;
       case 'RESOLVED':
-        return <span className="status-badge badge-final"><CheckCircle2 size={12} /> Resolved</span>;
+        return <span className="status-badge badge-final"><CheckCircle2 size={12} /> {t('issue_status_resolved')}</span>;
       case 'REJECTED':
-        return <span className="status-badge badge-failed">Rejected</span>;
+        return <span className="status-badge badge-failed">{t('issue_status_rejected')}</span>;
       case 'DUPLICATE':
-        return <span className="status-badge badge-partial">Duplicate</span>;
+        return <span className="status-badge badge-partial">{t('issue_status_duplicate')}</span>;
       default:
         return <span className="status-badge">{status}</span>;
     }
@@ -61,10 +61,10 @@ export const IssuesTable: React.FC<IssuesTableProps> = ({ issues }) => {
             onChange={(e) => setSeverityFilter(e.target.value)}
             className="form-select-sm"
           >
-            <option value="all">All Severities</option>
-            <option value="blocking">Blocking Only</option>
-            <option value="warning">Warning Only</option>
-            <option value="info">Info Only</option>
+            <option value="all">{t('issue_filter_all_sev')}</option>
+            <option value="blocking">{t('issue_filter_blocking')}</option>
+            <option value="warning">{t('issue_filter_warning')}</option>
+            <option value="info">{t('issue_filter_info')}</option>
           </select>
 
           <select
@@ -72,10 +72,10 @@ export const IssuesTable: React.FC<IssuesTableProps> = ({ issues }) => {
             onChange={(e) => setStatusFilter(e.target.value)}
             className="form-select-sm"
           >
-            <option value="all">All Statuses</option>
-            <option value="OPEN">Open</option>
-            <option value="RESOLVED">Resolved</option>
-            <option value="REJECTED">Rejected</option>
+            <option value="all">{t('issue_filter_all_status')}</option>
+            <option value="OPEN">{t('issue_status_open')}</option>
+            <option value="RESOLVED">{t('issue_status_resolved')}</option>
+            <option value="REJECTED">{t('issue_status_rejected')}</option>
           </select>
         </div>
       </div>
@@ -90,12 +90,12 @@ export const IssuesTable: React.FC<IssuesTableProps> = ({ issues }) => {
             <thead>
               <tr>
                 <th>ID</th>
-                <th>Severity</th>
-                <th>Status</th>
-                <th>Claim & Concern</th>
-                <th>Impact</th>
-                <th>Suggested Resolution</th>
-                <th>Covered Reqs</th>
+                <th>{t('issue_col_severity')}</th>
+                <th>{t('issue_col_status')}</th>
+                <th>{t('issue_col_concern')}</th>
+                <th>{t('issue_col_impact')}</th>
+                <th>{t('issue_col_resolution')}</th>
+                <th>{t('issue_col_covered_reqs')}</th>
               </tr>
             </thead>
             <tbody>
@@ -107,7 +107,7 @@ export const IssuesTable: React.FC<IssuesTableProps> = ({ issues }) => {
                   <td className="max-w-xs">
                     <p className="text-sm font-medium text-slate-100">{iss.claim}</p>
                     {iss.verification_request && (
-                      <p className="text-xs text-slate-400 mt-1 italic">Verify: {iss.verification_request}</p>
+                      <p className="text-xs text-slate-400 mt-1 italic">{t('issue_verify_prefix')}{iss.verification_request}</p>
                     )}
                   </td>
                   <td className="max-w-xs text-sm text-slate-300">{iss.impact}</td>

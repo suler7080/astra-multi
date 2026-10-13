@@ -13,6 +13,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ mode, onAuthenticated }) =
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -40,11 +41,19 @@ export const AuthModal: React.FC<AuthModalProps> = ({ mode, onAuthenticated }) =
       onAuthenticated();
     } catch (err: unknown) {
       if (err instanceof ApiError) {
-        setError(err.message);
+        if (err.status === 401 || err.message.toLowerCase().includes('invalid password')) {
+          setError(t('auth_error_invalid'));
+        } else {
+          setError(err.message);
+        }
       } else if (err instanceof Error) {
-        setError(err.message);
+        if (err.message.toLowerCase().includes('invalid password')) {
+          setError(t('auth_error_invalid'));
+        } else {
+          setError(err.message);
+        }
       } else {
-        setError('Authentication failed');
+        setError(t('auth_failed_generic'));
       }
     } finally {
       setIsSubmitting(false);
@@ -96,8 +105,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({ mode, onAuthenticated }) =
               <button
                 type="button"
                 onClick={() => setShowPassword(!showPassword)}
-                className="absolute right-2.5 top-2.5 text-slate-400 hover:text-slate-200"
-                tabIndex={-1}
+                className="absolute right-2.5 top-2.5 text-slate-400 hover:text-slate-200 focus:outline-none focus:text-sky-400 p-0.5 rounded"
+                aria-label={showPassword ? t('auth_hide_password') : t('auth_show_password')}
               >
                 {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
               </button>
@@ -109,14 +118,24 @@ export const AuthModal: React.FC<AuthModalProps> = ({ mode, onAuthenticated }) =
               <label className="form-label">
                 {t('auth_confirm_password_label')} <span className="text-rose-400">*</span>
               </label>
-              <input
-                type={showPassword ? 'text' : 'password'}
-                value={confirmPassword}
-                onChange={(e) => setConfirmPassword(e.target.value)}
-                placeholder={t('auth_confirm_password_placeholder')}
-                required
-                className="form-input w-full"
-              />
+              <div className="relative">
+                <input
+                  type={showConfirmPassword ? 'text' : 'password'}
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  placeholder={t('auth_confirm_password_placeholder')}
+                  required
+                  className="form-input w-full pr-10"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                  className="absolute right-2.5 top-2.5 text-slate-400 hover:text-slate-200 focus:outline-none focus:text-sky-400 p-0.5 rounded"
+                  aria-label={showConfirmPassword ? t('auth_hide_password') : t('auth_show_password')}
+                >
+                  {showConfirmPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
+              </div>
             </div>
           )}
 

@@ -12,7 +12,7 @@ Hệ thống đa tác nhân (Multi-Agent System) phân tích kiến trúc phần
 ![React](https://img.shields.io/badge/React-18.x-61DAFB?logo=react)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6?logo=typescript)
 ![Vite](https://img.shields.io/badge/Vite-5.x-646CFF?logo=vite)
-![Tests](https://img.shields.io/badge/tests-407%20passed%20%7C%2013%20skipped-success)
+![Tests](https://img.shields.io/badge/tests-477%20passed%20%7C%2014%20skipped-success)
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-lightgrey)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
@@ -39,6 +39,10 @@ Dữ liệu được lưu trữ bền vững (durable persistence) với SQLite 
 
 - **Quy trình thảo luận 11 giai đoạn (11-Phase LangGraph Workflow)**:
   `INTAKE` ➔ `SNAPSHOT` ➔ `INVESTIGATE` ➔ `INDEPENDENT_ANALYSIS` ➔ `PROPOSE` ➔ `REVIEW` ➔ `VERIFY` ➔ `REVISE` ➔ `SEMANTIC_REVIEW` ➔ `QUALITY_GATE` ➔ `EXPORT`.
+- **Phân bổ mô hình theo vai trò (Multi-Model Role Assignment & Role-level API Key Override)**:
+  Hỗ trợ gán độc lập các mô hình LLM chuyên biệt cho từng tác nhân (`Planner`, `Reviewer`, `Synthesizer`). Tối ưu hóa tính độc lập phản biện (ví dụ: Planner dùng Qwen, Reviewer dùng DeepSeek-R1 để phản biện sắc bén, Synthesizer dùng Llama/Gemma để dung hòa khách quan). Hỗ trợ **Ghi đè API Key riêng biệt theo từng vai trò (Role-specific API Key Override)** giúp cô lập quota, phân tách chi phí và chống nghẽn Rate Limit (RPM/TPM). Snapshot cấu hình vai trò được ghim cố định cho từng phiên chạy (Run metadata snapshot).
+- **Tự động quét & Chọn Model trực quan (Live Model Discovery & Switch)**:
+  Tự động kết nối API key để truy vấn danh mục mô hình khả dụng trực tiếp từ nhà cung cấp (OpenAI, Google Gemini, xKiro, OpenRouter...). Tự động phân loại mô hình miễn phí (`:free`) và mô hình trả phí, chuyển đổi nhanh qua Dropdown Select, triệt tiêu lỗi gõ sai tên mô hình.
 - **Durable Persistence & Fenced Leases**:
   Lưu trữ trạng thái chuẩn tắc (canonical state) trên SQLite với chế độ WAL và `PRAGMA synchronous=FULL`; kiểm soát tranh chấp bằng lease token/epoch fencing, ngăn ngừa xung đột phiên bản và phân tán ghi.
 - **Model Gateway đa nhà cung cấp**:
@@ -47,8 +51,8 @@ Dữ liệu được lưu trữ bền vững (durable persistence) với SQLite 
   Thực thi lệnh kiểm chứng độc lập trên cả **Linux Docker** và **Native Windows Subprocess** với kiểm soát tài nguyên, timeout, hủy tác vụ an toàn và tự động che giấu thông tin nhạy cảm (secrets redaction).
 - **Cổng chất lượng P4 (Quality Gates & Parity Exporter)**:
   Kiểm tra tĩnh 100% đồ thị phụ thuộc (DAG), mức độ bao phủ yêu cầu (requirements coverage), giải quyết toàn bộ blocking issues, đánh giá ngữ nghĩa (semantic review) và xuất bản đồng nhất định dạng JSON Schema v1 cùng Markdown (chuẩn `PLAN_TEMPLATE.md`).
-- **Giao diện Web cục bộ (Local Web UI) & Server-Sent Events (SSE)**:
-  Ứng dụng Single-Page Application (React + TypeScript + Vite) hỗ trợ luồng sự kiện real-time, bảng theo dõi tiến trình 11 phase, form tương tác giải đáp thắc mắc của tác nhân (Human-in-the-loop), bảng tra cứu Issues, Decisions, Evidence và Plan Diff.
+- **Giao diện Web cục bộ (Local Web UI) & Trải nghiệm Chuẩn Impeccable**:
+  Ứng dụng Single-Page Application (React + TypeScript + Vite) hỗ trợ luồng sự kiện real-time (SSE), bảng theo dõi tiến trình 11 phase, form tương tác giải đáp thắc mắc của tác nhân (Human-in-the-loop), bảng tra cứu Issues, Decisions, Evidence và Plan Diff. Hỗ trợ song ngữ **Tiếng Việt / English** và modal cấu hình hiện đại đạt chuẩn thiết kế chuyên nghiệp.
 - **Giao diện dòng lệnh toàn diện (CLI Lifecycle)**:
   Cung cấp công cụ CLI hoàn chỉnh hỗ trợ `create`, `status`, `answer`, `cancel`, `artifacts`, `validate`, `finalize`, và `serve`.
 
@@ -119,10 +123,19 @@ Truy cập trình duyệt tại địa chỉ: **`http://127.0.0.1:8000`**
 
 - **Dashboard & Quản lý Phiên (Sessions):** Tạo phiên thiết kế mới, xem danh sách các phiên chạy, trạng thái hoàn thành và tiến độ trực quan.
 - **Theo dõi Tiến trình Real-Time (SSE PhaseTracker):** Tự động đồng bộ hóa luồng sự kiện qua 11 giai đoạn (`INTAKE` ➔ `EXPORT`) không cần tải lại trang.
-- **Xác thực Admin & Cấu hình LLM Providers:**
+- **Xác thực Admin & Cấu hình Hệ thống Chuyên sâu (Settings Modal):**
   - Nhấp vào biểu tượng **Settings** trên thanh tiêu đề (Header).
   - Lần đầu sử dụng: Thiết lập mật khẩu quản trị viên (Admin Password).
-  - Cấu hình khóa API, endpoint và model cho **OpenAI**, **Google Gemini**, **Anthropic**, hoặc **xKiro** (hỗ trợ mô hình mã nguồn mở miễn phí như `xkiro/llama-3.1-70b-instruct`).
+  - **Tab 1 - Nhà cung cấp (Providers):**
+    - Cấu hình khóa API, endpoint và mô hình cho **OpenAI**, **Google Gemini**, **Anthropic**, hoặc **xKiro / OpenRouter** (hỗ trợ mô hình mã nguồn mở như `qwen/qwen3.7-max:free`, `deepseek-ai/deepseek-r1:free`).
+    - Bấm **"Quét Model từ API Key"** để hệ thống tự động kiểm tra và trả về danh sách mô hình khả dụng, tự động chia nhóm `🆓 Mô hình miễn phí` và cho phép chuyển đổi tức thì qua Dropdown Select (hỗ trợ chuyển đổi chế độ nhập tay).
+  - **Tab 2 - Phân vai trò (Role Assignment):**
+    - Thiết lập mô hình riêng biệt cho từng tác nhân: **Planner** (Lập kế hoạch), **Reviewer** (Phản biện độc lập), **Synthesizer** (Dung hòa và đúc kết).
+    - Tự động nạp danh mục mô hình của provider được chọn kèm huy hiệu `✓ {count} models`.
+    - **Ghi đè API Key riêng biệt (Role-specific API Key):** Cho phép nhập key riêng cho từng vai trò ngay tại thẻ vai trò (mã hóa AES Fernet an toàn, không lộ secret) để phân chia quota và tránh chạm ngưỡng Rate Limit.
+    - Cảnh báo trực quan nếu Planner và Synthesizer dùng chung mô hình, đảm bảo tính phản biện độc lập tối đa.
+    - Tùy chọn `Mặc định (active provider)` giúp dễ dàng sử dụng mô hình chung của hệ thống khi cần.
+  - **Tab 3 - Đổi mật khẩu Admin.**
 - **Chuyển đổi Đa ngôn ngữ (i18n):** Nút chuyển đổi nhanh **Tiếng Việt / English** ngay trên Header.
 - **Trình xem Nhật ký Thực thi (Execution Log Viewer):** Theo dõi chi tiết log vận hành, sự kiện vòng lặp, cảnh báo và lỗi hệ thống cho từng phiên chạy.
 
@@ -234,7 +247,7 @@ Dự án duy trì tỷ lệ kiểm thử nghiêm ngặt trên môi trường nat
 cd backend
 .\.venv\Scripts\python -m pytest tests -v
 ```
-*(Kết quả hiện tại: 407 passed, 13 skipped, 0 failed).*
+*(Kết quả hiện tại: 477 passed, 14 skipped, 0 failed).*
 
 ---
 
@@ -257,7 +270,7 @@ astra-multi/
 │   │   ├── providers/              # Adapters cho OpenAI, Google, Anthropic, xKiro
 │   │   ├── sandbox/                # Docker runner & Windows subprocess sandbox
 │   │   └── cli.py                  # Entrypoint giao diện dòng lệnh CLI
-│   └── tests/                      # Bộ kiểm thử tích hợp, unit và recovery (347 tests)
+│   └── tests/                      # Bộ kiểm thử tích hợp, unit và recovery (491 tests)
 │
 ├── frontend/                       # Giao diện người dùng Web (React + Vite)
 │   ├── src/
@@ -326,9 +339,10 @@ Mọi đóng góp cho dự án đều được hoan nghênh. Vui lòng tuân th�
      cd backend
      .venv\Scripts\python -m pytest tests/ -v
      ```
-   - Nếu có chỉnh sửa Frontend, đảm bảo bản build không phát sinh lỗi TypeScript:
+   - Nếu có chỉnh sửa Frontend, đảm bảo kiểm tra lint và build không phát sinh lỗi:
      ```powershell
      cd frontend
+     npx oxlint --deny-warnings
      npm run build
      ```
 4. **Cam kết thay đổi**:

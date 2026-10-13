@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
-import { api, ApiError } from './api';
+import { api, classifyApiError } from './api';
 import type {
   CreateRunPayload,
   Decision,
@@ -26,6 +26,7 @@ import { ExecutionLogs } from './components/ExecutionLogs';
 import { AuthModal } from './components/AuthModal';
 import { SettingsModal } from './components/SettingsModal';
 import { DashboardHome } from './components/DashboardHome';
+import { ErrorBanner, type GenericErrorInfo } from './components/ErrorBanner';
 import { useI18n } from './i18nContext';
 import {
   LayoutDashboard,
@@ -35,6 +36,7 @@ import {
   FileSearch,
   GitBranch,
   Terminal,
+  CheckCircle2,
 } from 'lucide-react';
 
 export const App: React.FC = () => {
@@ -62,25 +64,64 @@ export const App: React.FC = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isDeletingId, setIsDeletingId] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isSseConnected, setIsSseConnected] = useState(false);
 
+  // Centralized Connection & Error state (Giai đoạn 1)
+  const [connectionStatus, setConnectionStatus] = useState<'connected' | 'connecting' | 'offline'>('connected');
+  const [retryCountdown, setRetryCountdown] = useState(10);
+  const [isRetrying, setIsRetrying] = useState(false);
+  const [genericError, setGenericError] = useState<GenericErrorInfo | null>(null);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [hasConfiguredProvider, setHasConfiguredProvider] = useState<boolean>(false);
+
+  const checkProviders = useCallback(async () => {
+    try {
+      const list = await api.listProviders();
+      setHasConfiguredProvider(list.length > 0);
+    } catch {
+      setHasConfiguredProvider(false);
+    }
+  }, []);
+
+  const backoffDelayRef = useRef(10);
+  const connectingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
 
-  const handleError = useCallback((err: unknown, defaultMsg: string) => {
-    let msg = defaultMsg;
-    if (err instanceof ApiError) {
-      msg = `${err.code}: ${err.message}`;
-      if (err.status === 401) {
-        setIsAuthModalOpen(true);
-        setAuthMode('login');
+  const handleOffline = useCallback(() => {
+    setConnectionStatus((prev) => {
+      if (prev === 'offline' || prev === 'connecting') return prev;
+      if (!connectingTimeoutRef.current) {
+        connectingTimeoutRef.current = setTimeout(() => {
+          setConnectionStatus('offline');
+          setRetryCountdown(backoffDelayRef.current);
+          connectingTimeoutRef.current = null;
+        }, 3000);
       }
-    } else if (err instanceof Error) {
-      msg = err.message;
-    }
-    setErrorMessage(msg);
-    setTimeout(() => setErrorMessage(null), 6000);
+      return 'connecting';
+    });
   }, []);
+
+  const handleError = useCallback((err: unknown, defaultMsg: string) => {
+    const classified = classifyApiError(err, defaultMsg);
+    if (classified.category === 'backend_offline') {
+      handleOffline();
+      return;
+    }
+
+    if (classified.category === 'unauthorized') {
+      setIsAuthModalOpen(true);
+      setAuthMode('login');
+      return;
+    }
+
+    setGenericError({
+      message: classified.userMessage,
+      details: classified.details,
+      code: classified.code,
+      status: classified.status,
+      correlationId: classified.correlationId,
+    });
+  }, [handleOffline]);
 
   // Sync runParam into window URL without reload
   const updateUrlParam = (runId: string) => {
@@ -136,18 +177,19 @@ export const App: React.FC = () => {
           setCurrentPlan(null);
         }
       } catch (err: unknown) {
-        if (!silent) handleError(err, `Failed to load run ${runId}`);
+        if (!silent) handleError(err, t('err_load_run_detail'));
       } finally {
         if (!silent) setIsLoading(false);
       }
     },
-    [handleError]
+    [handleError, t]
   );
 
   const loadRuns = useCallback(
     async (initialRunId?: string | null, silent = false) => {
       try {
         if (!silent) setIsLoading(true);
+        void checkProviders();
         const list = await api.listRuns();
         setRuns(list);
 
@@ -178,13 +220,88 @@ export const App: React.FC = () => {
           updateUrlParam('');
         }
       } catch (err: unknown) {
-        if (!silent) handleError(err, 'Failed to load runs');
+        if (!silent) handleError(err, t('err_load_runs'));
       } finally {
         if (!silent) setIsLoading(false);
       }
     },
-    [selectedRunId, loadRunDetails, handleError]
+    [selectedRunId, loadRunDetails, handleError, t, checkProviders]
   );
+
+  const performRetry = useCallback(async () => {
+    if (isRetrying) return;
+    setIsRetrying(true);
+    try {
+      const auth = await api.getAuthStatus();
+      if (connectingTimeoutRef.current) {
+        clearTimeout(connectingTimeoutRef.current);
+        connectingTimeoutRef.current = null;
+      }
+      const wasDisconnected = connectionStatus === 'offline' || connectionStatus === 'connecting';
+      setConnectionStatus('connected');
+      backoffDelayRef.current = 10;
+      setRetryCountdown(10);
+
+      if (wasDisconnected) {
+        setToastMessage(t('conn_reconnected'));
+        setTimeout(() => setToastMessage(null), 4000);
+      }
+
+      if (auth.setup_required) {
+        setAuthMode('setup');
+        setIsAuthModalOpen(true);
+      } else if (!auth.authenticated) {
+        setAuthMode('login');
+        setIsAuthModalOpen(true);
+      } else {
+        setIsAuthModalOpen(false);
+        const params = new URLSearchParams(window.location.search);
+        const runParam = params.get('run');
+        void loadRuns(runParam);
+        void checkProviders();
+      }
+    } catch (err: unknown) {
+      const classified = classifyApiError(err);
+      if (classified.category === 'backend_offline') {
+        backoffDelayRef.current = Math.min(backoffDelayRef.current + 5, 30);
+        setRetryCountdown(backoffDelayRef.current);
+        setConnectionStatus('offline');
+      } else {
+        setConnectionStatus('connected');
+        backoffDelayRef.current = 10;
+        setRetryCountdown(10);
+        handleError(err, t('err_connect'));
+      }
+    } finally {
+      setIsRetrying(false);
+    }
+  }, [connectionStatus, isRetrying, loadRuns, handleError, t, checkProviders]);
+
+  // Auto-retry timer when connection is offline
+  useEffect(() => {
+    if (connectionStatus !== 'offline') return;
+
+    const timer = setInterval(() => {
+      setRetryCountdown((prev) => {
+        if (prev <= 1) {
+          void performRetry();
+          return backoffDelayRef.current;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [connectionStatus, performRetry]);
+
+  // Cleanup timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (connectingTimeoutRef.current) {
+        clearTimeout(connectingTimeoutRef.current);
+      }
+    };
+  }, []);
 
   // Check auth status on mount and load runs if authenticated
   useEffect(() => {
@@ -193,6 +310,7 @@ export const App: React.FC = () => {
       .getAuthStatus()
       .then((status) => {
         if (ignore) return;
+        setConnectionStatus('connected');
         if (status.setup_required) {
           setAuthMode('setup');
           setIsAuthModalOpen(true);
@@ -207,17 +325,22 @@ export const App: React.FC = () => {
         const runParam = params.get('run');
         void loadRuns(runParam);
       })
-      .catch(() => {
+      .catch((err: unknown) => {
         if (ignore) return;
-        const params = new URLSearchParams(window.location.search);
-        const runParam = params.get('run');
-        void loadRuns(runParam);
+        const classified = classifyApiError(err);
+        if (classified.category === 'backend_offline') {
+          handleOffline();
+        } else {
+          const params = new URLSearchParams(window.location.search);
+          const runParam = params.get('run');
+          void loadRuns(runParam);
+        }
       });
 
     return () => {
       ignore = true;
     };
-  }, [loadRuns]);
+  }, [loadRuns, handleOffline]);
 
   // Setup SSE stream for selected run
   useEffect(() => {
@@ -418,13 +541,13 @@ export const App: React.FC = () => {
   const handleCreateRun = async (payload: CreateRunPayload, idempotencyKey: string) => {
     try {
       setIsSubmitting(true);
-      setErrorMessage(null);
+      setGenericError(null);
       const res = await api.createRun(payload, idempotencyKey);
       setIsNewRunOpen(false);
-      showFeedback(`Run ${res.run_id} started successfully!`);
+      showFeedback(t('feedback_run_started').replace('{id}', res.run_id));
       await loadRuns(res.run_id);
     } catch (err: unknown) {
-      handleError(err, 'Failed to launch new run');
+      handleError(err, t('err_launch_run'));
     } finally {
       setIsSubmitting(false);
     }
@@ -438,7 +561,7 @@ export const App: React.FC = () => {
       showFeedback(t('feedback_question_answered'));
       await loadRunDetails(selectedRunId);
     } catch (err: unknown) {
-      handleError(err, 'Failed to submit answer');
+      handleError(err, t('err_answer_question'));
     } finally {
       setIsLoading(false);
     }
@@ -452,7 +575,7 @@ export const App: React.FC = () => {
       showFeedback(t('feedback_run_resumed'));
       await loadRunDetails(selectedRunId);
     } catch (err: unknown) {
-      handleError(err, 'Failed to resume run');
+      handleError(err, t('err_resume_run'));
     } finally {
       setIsLoading(false);
     }
@@ -466,7 +589,7 @@ export const App: React.FC = () => {
       showFeedback(t('feedback_run_cancelled'));
       await loadRunDetails(selectedRunId);
     } catch (err: unknown) {
-      handleError(err, 'Failed to cancel run');
+      handleError(err, t('err_cancel_run'));
     } finally {
       setIsLoading(false);
     }
@@ -497,7 +620,7 @@ export const App: React.FC = () => {
       }
       await loadRuns();
     } catch (err: unknown) {
-      handleError(err, 'Failed to delete run');
+      handleError(err, t('err_delete_run'));
     } finally {
       setIsDeletingId(null);
     }
@@ -512,7 +635,7 @@ export const App: React.FC = () => {
       setQualityModalMode('validation');
       setIsQualityModalOpen(true);
     } catch (err: unknown) {
-      handleError(err, 'Validation failed');
+      handleError(err, t('err_validate_gates'));
     } finally {
       setIsLoading(false);
     }
@@ -529,7 +652,7 @@ export const App: React.FC = () => {
       await loadRunDetails(selectedRunId);
       await loadRuns(selectedRunId);
     } catch (err: unknown) {
-      handleError(err, 'Finalization failed');
+      handleError(err, t('err_finalize_plan'));
     } finally {
       setIsLoading(false);
     }
@@ -541,7 +664,7 @@ export const App: React.FC = () => {
       const plan = await api.getPlan(selectedRunId, rev);
       setCurrentPlan(plan);
     } catch (err: unknown) {
-      handleError(err, `Failed to fetch plan revision ${rev}`);
+      handleError(err, t('err_load_run_detail'));
     }
   };
 
@@ -551,7 +674,7 @@ export const App: React.FC = () => {
       const md = await api.exportPlanMarkdown(selectedRunId, rev);
       downloadFile(md, `plan-${selectedRunId}-rev${rev || currentRun?.revision || 1}.md`, 'text/markdown');
     } catch (err: unknown) {
-      handleError(err, 'Failed to export Markdown');
+      handleError(err, t('err_export_md'));
     }
   };
 
@@ -561,7 +684,7 @@ export const App: React.FC = () => {
       const data = await api.exportPlanJson(selectedRunId, rev);
       downloadFile(JSON.stringify(data, null, 2), `plan-${selectedRunId}-rev${rev || currentRun?.revision || 1}.json`, 'application/json');
     } catch (err: unknown) {
-      handleError(err, 'Failed to export JSON');
+      handleError(err, t('err_export_json'));
     }
   };
 
@@ -600,10 +723,19 @@ export const App: React.FC = () => {
         isLoading={isLoading}
       />
 
-      {errorMessage && (
-        <div className="global-error-toast" role="alert">
-          <span>{errorMessage}</span>
-          <button onClick={() => setErrorMessage(null)} className="btn-text-sm">Dismiss</button>
+      <ErrorBanner
+        connectionStatus={connectionStatus}
+        countdown={retryCountdown}
+        isRetrying={isRetrying}
+        onRetry={() => void performRetry()}
+        genericError={genericError}
+        onDismissGenericError={() => setGenericError(null)}
+      />
+
+      {toastMessage && (
+        <div className="global-toast-success" role="status" aria-live="polite">
+          <CheckCircle2 size={16} />
+          <span>{toastMessage}</span>
         </div>
       )}
 
@@ -616,7 +748,7 @@ export const App: React.FC = () => {
           />
 
           {/* Navigation Tabs */}
-          <nav className="tab-navigation" aria-label="Run Views">
+          <nav className="tab-navigation" aria-label={t('nav_run_views_label')}>
             <button
               onClick={() => setActiveTab('overview')}
               className={`nav-tab ${activeTab === 'overview' ? 'tab-active' : ''}`}
@@ -740,9 +872,15 @@ export const App: React.FC = () => {
           onSelectRun={handleSelectRun}
           onDeleteRun={handleDeleteRun}
           onOpenNewRun={() => setIsNewRunOpen(true)}
-          onRefresh={() => loadRuns()}
+          onOpenSettings={() => setIsSettingsOpen(true)}
+          onRefresh={() => {
+            void loadRuns();
+            void checkProviders();
+          }}
           isLoading={isLoading}
           isDeletingId={isDeletingId}
+          isBackendOffline={connectionStatus === 'offline'}
+          hasConfiguredProvider={hasConfiguredProvider}
         />
       )}
 
@@ -751,7 +889,7 @@ export const App: React.FC = () => {
         onClose={() => setIsNewRunOpen(false)}
         onSubmit={handleCreateRun}
         isSubmitting={isSubmitting}
-        error={errorMessage}
+        error={genericError?.message || null}
       />
 
       <QualityGateModal
@@ -766,8 +904,9 @@ export const App: React.FC = () => {
         isOpen={isSettingsOpen}
         onClose={() => setIsSettingsOpen(false)}
         onProviderChanged={() => {
-          showFeedback('Active provider updated successfully.');
+          showFeedback(t('feedback_provider_updated'));
           if (selectedRunId) loadRunDetails(selectedRunId);
+          void checkProviders();
         }}
       />
 
@@ -779,6 +918,7 @@ export const App: React.FC = () => {
             const params = new URLSearchParams(window.location.search);
             const runParam = params.get('run');
             loadRuns(runParam);
+            void checkProviders();
           }}
         />
       )}

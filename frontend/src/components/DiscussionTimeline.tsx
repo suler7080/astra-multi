@@ -72,7 +72,7 @@ export const DiscussionTimeline: React.FC<DiscussionTimelineProps> = ({
       return <span className="actor-badge badge-verifier"><Shield size={12} /> Verifier</span>;
     }
     if (lower.includes('user') || lower.includes('human')) {
-      return <span className="actor-badge badge-user"><User size={12} /> Operator</span>;
+      return <span className="actor-badge badge-user"><User size={12} /> {t('actor_operator')}</span>;
     }
     return <span className="actor-badge badge-system"><Code size={12} /> {actor}</span>;
   };
@@ -97,12 +97,12 @@ export const DiscussionTimeline: React.FC<DiscussionTimelineProps> = ({
             onChange={(e) => setFilterType(e.target.value)}
             className="form-select-sm"
           >
-            <option value="all">All Events ({events.length})</option>
-            <option value="commit_plan">Plan Commits</option>
-            <option value="record_issue">Issues</option>
-            <option value="record_decision">Decisions</option>
-            <option value="ask_question">Questions</option>
-            <option value="transition_phase">Phase Transitions</option>
+            <option value="all">{t('timeline_filter_all').replace('{count}', String(events.length))}</option>
+            <option value="commit_plan">{t('timeline_filter_plan')}</option>
+            <option value="record_issue">{t('timeline_filter_issues')}</option>
+            <option value="record_decision">{t('timeline_filter_decisions')}</option>
+            <option value="ask_question">{t('timeline_filter_questions')}</option>
+            <option value="transition_phase">{t('timeline_filter_phases')}</option>
           </select>
 
           <label className="checkbox-label text-xs">
@@ -111,7 +111,7 @@ export const DiscussionTimeline: React.FC<DiscussionTimelineProps> = ({
               checked={autoScroll}
               onChange={(e) => setAutoScroll(e.target.checked)}
             />
-            Auto-scroll
+            {t('timeline_auto_scroll')}
           </label>
         </div>
       </div>
@@ -161,7 +161,7 @@ export const DiscussionTimeline: React.FC<DiscussionTimelineProps> = ({
                       return (
                         <div className="run-completed-banner" style={{ borderColor: 'rgba(56, 189, 248, 0.4)', background: 'rgba(12, 74, 110, 0.2)' }}>
                           <span className="text-sky-400 font-semibold">➔ {t('phase_workflow_lifecycle')}:</span>
-                          <span>Phase advanced to <strong>{phaseName}</strong> ({statusName})</span>
+                          <span>{t('timeline_phase_advanced').replace('{phase}', phaseName).replace('{status}', statusName)}</span>
                         </div>
                       );
                     })()}
@@ -169,7 +169,7 @@ export const DiscussionTimeline: React.FC<DiscussionTimelineProps> = ({
                     {item.event === 'run_completed' && (
                       <div className="run-completed-banner">
                         <CheckCircle size={16} className="text-emerald-400" />
-                        <span>Run Completed with Status: <strong>{d.status}</strong> ({d.phase})</span>
+                        <span>{t('timeline_run_completed_status').replace('{status}', d.status || '').replace('{phase}', d.phase || '')}</span>
                       </div>
                     )}
                   </div>
