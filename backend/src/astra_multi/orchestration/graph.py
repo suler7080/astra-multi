@@ -1022,7 +1022,12 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> StateGraph:
         # Check requirement coverage
         if plan:
             req_ids = {r.id for r in curr_state.task.requirements}
-            covered = {r_id for s in plan.steps for r_id in s.requirement_ids}
+            if curr_state.run.mode == "design":
+                covered = {r_id for s in plan.steps for r_id in s.requirement_ids} | {
+                    r_id for da in plan.design_artifacts for r_id in da.requirement_ids
+                }
+            else:
+                covered = {r_id for s in plan.steps for r_id in s.requirement_ids}
             if req_ids - covered:
                 problems.append(f"Missing requirement coverage: {req_ids - covered}")
 
