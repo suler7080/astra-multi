@@ -156,7 +156,7 @@ class StructuralQualityValidator:
                 k: deps - ready for k, deps in remaining.items() if k not in ready
             }
 
-        # 3. Check unresolved blocking issues
+        # 3. Check unresolved blocking and warning issues
         for issue in state.issues:
             if issue.severity == IssueSeverity.BLOCKING and issue.status != IssueStatus.RESOLVED:
                 unresolved_blockers.append(issue.id)
@@ -167,6 +167,23 @@ class StructuralQualityValidator:
                         entity_ref=f"issue:{issue.id}",
                         message=f"Blocking issue remains unresolved: {issue.claim}",
                         remediation="Address and resolve the issue in a new revision or update requirements.",
+                    )
+                )
+
+            # RULE-ISSUE-002: Open issues (BLOCKING or WARNING) must be resolved before finalization
+            if (
+                issue.severity in (IssueSeverity.BLOCKING, IssueSeverity.WARNING)
+                and issue.status in (IssueStatus.OPEN, IssueStatus.INVESTIGATING, IssueStatus.PROPOSED_RESOLUTION)
+            ):
+                sev_str = getattr(issue.severity, "value", str(issue.severity))
+                stat_str = getattr(issue.status, "value", str(issue.status))
+                violations.append(
+                    QualityViolation(
+                        rule_id="RULE-ISSUE-002",
+                        severity=ViolationSeverity.BLOCKER,
+                        entity_ref=f"issue:{issue.id}",
+                        message=f"Issue [{issue.id}] (severity: {sev_str}, status: {stat_str}) remains open: {issue.claim}",
+                        remediation="Giải quyết, từ chối hoặc đánh dấu trùng (DUPLICATE) mọi issue warning trở lên trước khi xuất bản plan.",
                     )
                 )
 
