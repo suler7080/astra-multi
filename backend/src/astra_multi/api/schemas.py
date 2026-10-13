@@ -7,11 +7,23 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 
+class RequirementInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    text: str = Field(min_length=1, description="Requirement statement")
+    acceptance: str | None = Field(default=None, description="Optional acceptance criteria")
+
+
 class CreateRunRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     goal: str = Field(min_length=1, description="Goal of the architecture design task")
-    requirements: list[str] = Field(min_length=1, description="List of requirement statements")
+    requirements: list[str | RequirementInput] = Field(
+        min_length=1, description="List of requirement statements or objects with text and acceptance"
+    )
+    constraints: list[str] = Field(default_factory=list, description="Operational or technical constraints")
+    non_goals: list[str] = Field(default_factory=list, description="Out of scope goals")
+    expected_outputs: list[str] = Field(default_factory=list, description="Expected outputs")
     mode: Literal["greenfield", "repo"] = "greenfield"
     snapshot_path: str | None = None
     idempotency_key: str | None = None

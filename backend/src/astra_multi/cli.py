@@ -58,6 +58,24 @@ def build_parser() -> argparse.ArgumentParser:
         help="One or more requirement statements",
     )
     create_p.add_argument(
+        "--constraints",
+        nargs="*",
+        default=[],
+        help="Optional constraint statements",
+    )
+    create_p.add_argument(
+        "--non-goals",
+        nargs="*",
+        default=[],
+        help="Optional non-goals statements",
+    )
+    create_p.add_argument(
+        "--expected-outputs",
+        nargs="*",
+        default=[],
+        help="Optional expected outputs statements",
+    )
+    create_p.add_argument(
         "--run-id",
         help="Optional run ID (defaults to auto-generated)",
     )
@@ -132,24 +150,65 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def cmd_create(store: SQLiteStore, args: argparse.Namespace) -> int:
+    import json
     import uuid
 
     run_id = args.run_id or f"RUN-{uuid.uuid4().hex[:8]}"
     task_id = f"TASK-{run_id}"
 
-    reqs = [
-        Requirement(
-            id=f"REQ-{idx + 1:03d}",
-            text=text,
-            acceptance="Verified by tests and candidate plan steps",
+    reqs: list[Requirement] = []
+    for item in args.requirements:
+        req_id = f"REQ-{len(reqs) + 1:03d}"
+        r_text = str(item).strip()
+        r_acc = None
+        if isinstance(item, str):
+            item_s = item.strip()
+            if item_s.startswith("{") and item_s.endswith("}"):
+                try:
+                    parsed = json.loads(item_s)
+                    if isinstance(parsed, dict) and "text" in parsed:
+                        r_text = str(parsed["text"]).strip()
+                        r_acc = parsed.get("acceptance")
+                except Exception:
+                    pass
+        elif isinstance(item, dict):
+            r_text = str(item.get("text", "")).strip()
+            r_acc = item.get("acceptance")
+        elif hasattr(item, "text"):
+            r_text = str(item.text).strip()
+            r_acc = getattr(item, "acceptance", None)
+
+        acc = (
+            r_acc.strip()
+            if (r_acc and isinstance(r_acc, str) and r_acc.strip())
+            else f"Plan nêu cơ chế cụ thể đáp ứng yêu cầu này và cách kiểm chứng: {r_text}"
         )
-        for idx, text in enumerate(args.requirements)
-    ]
+        reqs.append(
+            Requirement(
+                id=req_id,
+                text=r_text,
+                acceptance=acc,
+            )
+        )
+
+    for out_text in getattr(args, "expected_outputs", []) or []:
+        req_id = f"REQ-{len(reqs) + 1:03d}"
+        out_cleaned = str(out_text).strip()
+        acc = f"Plan nêu cơ chế cụ thể đáp ứng yêu cầu này và cách kiểm chứng: {out_cleaned}"
+        reqs.append(
+            Requirement(
+                id=req_id,
+                text=out_cleaned,
+                acceptance=acc,
+            )
+        )
 
     task = TaskSpec(
         id=task_id,
         goal=args.goal,
         requirements=reqs,
+        constraints=getattr(args, "constraints", []) or [],
+        non_goals=getattr(args, "non_goals", []) or [],
     )
 
     run = Run(

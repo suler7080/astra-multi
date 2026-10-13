@@ -218,19 +218,50 @@ def create_app(
         run_id = f"RUN-{uuid.uuid4().hex[:8]}"
         task_id = f"TASK-{run_id}"
 
-        requirements = [
-            Requirement(
-                id=f"REQ-{idx + 1:03d}",
-                text=req_text,
-                acceptance="Verified by design and candidate test steps",
+        requirements: list[Requirement] = []
+        for req in payload.requirements:
+            req_id = f"REQ-{len(requirements) + 1:03d}"
+            if isinstance(req, str):
+                r_text = req.strip()
+                r_acc = None
+            elif isinstance(req, dict):
+                r_text = str(req.get("text", "")).strip()
+                r_acc = req.get("acceptance")
+            else:
+                r_text = req.text.strip()
+                r_acc = req.acceptance
+
+            acc = (
+                r_acc.strip()
+                if (r_acc and isinstance(r_acc, str) and r_acc.strip())
+                else f"Plan nêu cơ chế cụ thể đáp ứng yêu cầu này và cách kiểm chứng: {r_text}"
             )
-            for idx, req_text in enumerate(payload.requirements)
-        ]
+            requirements.append(
+                Requirement(
+                    id=req_id,
+                    text=r_text,
+                    acceptance=acc,
+                )
+            )
+
+        for out_text in payload.expected_outputs:
+            req_id = f"REQ-{len(requirements) + 1:03d}"
+            out_cleaned = str(out_text).strip()
+            acc = f"Plan nêu cơ chế cụ thể đáp ứng yêu cầu này và cách kiểm chứng: {out_cleaned}"
+            requirements.append(
+                Requirement(
+                    id=req_id,
+                    text=out_cleaned,
+                    acceptance=acc,
+                )
+            )
 
         task = TaskSpec(
             id=task_id,
             goal=payload.goal,
             requirements=requirements,
+            constraints=payload.constraints,
+            non_goals=payload.non_goals,
         )
 
         run = Run(
