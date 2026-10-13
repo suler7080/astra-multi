@@ -14,7 +14,7 @@ ROLE_GROUP: dict[str, str] = {
     "propose": "planner",
     "review": "reviewer",
     "revise": "synthesizer",
-    "semantic_review": "synthesizer",
+    "semantic_review": "reviewer",
     # Direct canonical roles lookup
     "planner": "planner",
     "reviewer": "reviewer",
