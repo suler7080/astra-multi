@@ -17,6 +17,9 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+import pytest
+from pydantic import ValidationError
+
 from astra_multi.agents.roles import (
     AnalysisOutput,
     IssueReport,
@@ -107,21 +110,21 @@ def test_normalize_issues_addressed_regex_robustness():
     )
     assert s4.issues_addressed == ["ISSUE-1", "2"]
 
-    # 5. Fallback for completely unstructured string
-    s5 = SynthesizerOutput(
-        steps=[
-            StepDraft(
-                objective="Step 1",
-                requirement_ids=["REQ-001"],
-                deliverables=["doc"],
-                completion_criteria=["done"],
-                validation="pass",
-            )
-        ],
-        rationale="test",
-        issues_addressed=["general improvements"],
-    )
-    assert s5.issues_addressed == ["ISSUE-1"]
+    # 5. Completely unstructured string raises ValidationError (no spoofing ISSUE-1)
+    with pytest.raises(ValidationError):
+        SynthesizerOutput(
+            steps=[
+                StepDraft(
+                    objective="Step 1",
+                    requirement_ids=["REQ-001"],
+                    deliverables=["doc"],
+                    completion_criteria=["done"],
+                    validation="pass",
+                )
+            ],
+            rationale="test",
+            issues_addressed=["general improvements"],
+        )
 
 
 def test_fix03_issue_id_enrichment_and_exact_id_resolution():

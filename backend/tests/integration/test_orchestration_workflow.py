@@ -58,20 +58,35 @@ def fake_model_adapter(
             claim_ids=[],
         )
     elif output_schema == ReviewOutput:
-        content = ReviewOutput(
-            summary="Review completed with warning",
-            reviewed_evidence_ids=[],
-            issues=[
-                IssueReport(
-                    claim="No timeout specified on health endpoint probe",
-                    impact="Possible thread starvation",
-                    severity=IssueSeverity.WARNING,
-                    verification_request="Verify health endpoint response with network delay simulated",
-                    suggested_resolution="Add 2-second timeout",
-                    requirement_ids=["REQ-001"],
-                )
-            ],
-        )
+        is_semantic = any("SEMANTIC_REVIEW" in m.get("content", "") for m in messages)
+        if is_semantic:
+            content = ReviewOutput(
+                summary="Semantic review: verified timeout addressed",
+                reviewed_evidence_ids=[],
+                issues=[],
+                resolutions=[
+                    IssueResolutionReport(
+                        issue_id="ISSUE-1",
+                        resolution_text="Timeout verified in plan revision",
+                        review_result="PASS",
+                    )
+                ],
+            )
+        else:
+            content = ReviewOutput(
+                summary="Review completed with warning",
+                reviewed_evidence_ids=[],
+                issues=[
+                    IssueReport(
+                        claim="No timeout specified on health endpoint probe",
+                        impact="Possible thread starvation",
+                        severity=IssueSeverity.WARNING,
+                        verification_request="Verify health endpoint response with network delay simulated",
+                        suggested_resolution="Add 2-second timeout",
+                        requirement_ids=["REQ-001"],
+                    )
+                ],
+            )
     elif output_schema == SynthesizerOutput:
         content = SynthesizerOutput(
             steps=[
@@ -97,7 +112,7 @@ def fake_model_adapter(
                 )
             ],
             risks=["High load on health route"],
-            issues_addressed=[],
+            issues_addressed=["ISSUE-1"],
             rationale="FastAPI route provides clean async handling",
         )
     else:
@@ -187,21 +202,35 @@ def test_workflow_sanitizes_unvalidated_llm_references():
                 claim_ids=["REQ-001", "REQ-002", "CLAIM-DOES-NOT-EXIST"],
             )
         elif output_schema == ReviewOutput:
-            # LLM puts unknown requirement and evidence IDs
-            content = ReviewOutput(
-                summary="Review completed",
-                issues=[
-                    IssueReport(
-                        claim="Issue without evidence or explicit verif req",
-                        impact="High impact",
-                        severity=IssueSeverity.WARNING,
-                        verification_request=None,
-                        suggested_resolution="Fix it",
-                        requirement_ids=["UNKNOWN_REQ", "REQ-001"],
-                        evidence_ids=["UNKNOWN_EVIDENCE"],
-                    )
-                ],
-            )
+            is_semantic = any("SEMANTIC_REVIEW" in m.get("content", "") for m in messages)
+            if is_semantic:
+                content = ReviewOutput(
+                    summary="Semantic review completed",
+                    issues=[],
+                    resolutions=[
+                        IssueResolutionReport(
+                            issue_id="ISSUE-1",
+                            resolution_text="Resolved hallucinated issue",
+                            review_result="PASS",
+                        )
+                    ],
+                )
+            else:
+                # LLM puts unknown requirement and evidence IDs
+                content = ReviewOutput(
+                    summary="Review completed",
+                    issues=[
+                        IssueReport(
+                            claim="Issue without evidence or explicit verif req",
+                            impact="High impact",
+                            severity=IssueSeverity.WARNING,
+                            verification_request=None,
+                            suggested_resolution="Fix it",
+                            requirement_ids=["UNKNOWN_REQ", "REQ-001"],
+                            evidence_ids=["UNKNOWN_EVIDENCE"],
+                        )
+                    ],
+                )
         elif output_schema == SynthesizerOutput:
             # LLM puts unknown requirement and evidence IDs and cyclic/unknown dependencies
             content = SynthesizerOutput(
@@ -228,7 +257,7 @@ def test_workflow_sanitizes_unvalidated_llm_references():
                     )
                 ],
                 risks=[],
-                issues_addressed=["UNKNOWN_ISSUE"],
+                issues_addressed=["ISSUE-1"],
                 rationale="Rationale",
             )
         else:

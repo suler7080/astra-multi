@@ -967,13 +967,20 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> StateGraph:
             problems.append("No plan committed")
 
         # Check blocking and warning issues
-        open_warning_or_blocking = [
+        unresolved_blocking = [
             i.id for i in curr_state.issues
-            if i.severity in (IssueSeverity.BLOCKING, IssueSeverity.WARNING)
+            if i.severity == IssueSeverity.BLOCKING and i.status != IssueStatus.RESOLVED
+        ]
+        if unresolved_blocking:
+            problems.append(f"{len(unresolved_blocking)} unresolved blocking issues")
+
+        open_warnings = [
+            i.id for i in curr_state.issues
+            if i.severity == IssueSeverity.WARNING
             and i.status in (IssueStatus.OPEN, IssueStatus.INVESTIGATING, IssueStatus.PROPOSED_RESOLUTION)
         ]
-        if open_warning_or_blocking:
-            problems.append(f"Còn {len(open_warning_or_blocking)} issue mức warning trở lên chưa giải quyết ({', '.join(open_warning_or_blocking)})")
+        if open_warnings:
+            problems.append(f"Còn {len(open_warnings)} issue mức warning chưa giải quyết ({', '.join(open_warnings)})")
 
         # Check requirement coverage
         if plan:

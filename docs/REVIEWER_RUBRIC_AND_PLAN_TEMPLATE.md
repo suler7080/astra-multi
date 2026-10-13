@@ -247,31 +247,46 @@ class StepDraft(AgentContract):
     @classmethod
     def normalize_requirement_ids(cls, v: Any) -> list[str]:
         if not v:
-            return ["REQ-001"]
+            raise ValueError("Step must explicitly map to at least one requirement ID")
         if isinstance(v, list):
             res = [str(x).strip() for x in v if str(x).strip()]
-            return res if res else ["REQ-001"]
-        return [str(v).strip()]
+            if not res:
+                raise ValueError("Step must explicitly map to at least one requirement ID")
+            return res
+        s = str(v).strip()
+        if not s:
+            raise ValueError("Step must explicitly map to at least one requirement ID")
+        return [s]
 
     @field_validator("deliverables", mode="before")
     @classmethod
     def normalize_deliverables(cls, v: Any) -> list[str]:
         if not v:
-            return ["Deliverable artifact"]
+            raise ValueError("Step must specify at least one deliverable")
         if isinstance(v, list):
             res = [str(x).strip() for x in v if str(x).strip()]
-            return res if res else ["Deliverable artifact"]
-        return [str(v).strip()]
+            if not res:
+                raise ValueError("Step must specify at least one deliverable")
+            return res
+        s = str(v).strip()
+        if not s:
+            raise ValueError("Step must specify at least one deliverable")
+        return [s]
 
     @field_validator("completion_criteria", mode="before")
     @classmethod
     def normalize_completion_criteria(cls, v: Any) -> list[str]:
         if not v:
-            return ["Completion verified"]
+            raise ValueError("Step must specify at least one completion criterion")
         if isinstance(v, list):
             res = [str(x).strip() for x in v if str(x).strip()]
-            return res if res else ["Completion verified"]
-        return [str(v).strip()]
+            if not res:
+                raise ValueError("Step must specify at least one completion criterion")
+            return res
+        s = str(v).strip()
+        if not s:
+            raise ValueError("Step must specify at least one completion criterion")
+        return [s]
 
 
 class DecisionDraft(AgentContract):

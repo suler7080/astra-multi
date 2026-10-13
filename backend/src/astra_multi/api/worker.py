@@ -255,13 +255,17 @@ class RunWorker:
                     ctrl = WorkflowController(
                         self.store, failure_lease, actor="api-worker"
                     )
+                    from pydantic import ValidationError
+                    is_schema_error = isinstance(exc, (ValidationError, ValueError)) or "validation error" in str(exc).lower()
+                    target_status = RunStatus.PARTIAL if is_schema_error else RunStatus.FAILED
+                    reason = f"Model output failed schema validation: {exc}" if is_schema_error else f"Execution error: {exc}"
                     ctrl.transition_phase(
                         new_phase=state.run.phase,
-                        new_status=RunStatus.FAILED,
-                        reason=f"Execution error: {exc}",
+                        new_status=target_status,
+                        reason=reason,
                     )
             except Exception as exc_mark:
-                logger.warning("Failed to mark run %s as FAILED: %s", run_id, exc_mark)
+                logger.warning("Failed to mark run %s as terminal status: %s", run_id, exc_mark)
         finally:
             if heartbeat_task is not None and not heartbeat_task.done():
                 heartbeat_task.cancel()
