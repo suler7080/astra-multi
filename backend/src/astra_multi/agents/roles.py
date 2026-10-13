@@ -166,6 +166,32 @@ class DecisionDraft(AgentContract):
     related_issue_ids: list[ID] = Field(default_factory=list)
 
 
+class DesignArtifactDraft(AgentContract):
+    kind: Literal[
+        "state_machine",
+        "message_schema",
+        "stop_conditions",
+        "recovery_protocol",
+        "failure_modes",
+        "sequence_flow",
+    ]
+    title: Text
+    content: Text
+    requirement_ids: list[ID] = Field(min_length=1)
+
+    @field_validator("requirement_ids", mode="before")
+    @classmethod
+    def normalize_requirement_ids(cls, v: Any) -> list[str]:
+        if isinstance(v, str):
+            v = [v]
+        if isinstance(v, list):
+            res = [str(x).strip() for x in v if str(x).strip()]
+            if not res:
+                raise ValueError("Design artifact must specify at least one requirement_id")
+            return res
+        raise ValueError("requirement_ids must be a list of requirement IDs")
+
+
 class SynthesizerOutput(AgentContract):
     """Output schema for Synthesizer in REVISE phase."""
 
@@ -173,6 +199,7 @@ class SynthesizerOutput(AgentContract):
     decisions: list[DecisionDraft] = Field(default_factory=list)
     risks: list[Text] = Field(default_factory=list)
     issues_addressed: list[ID] = Field(default_factory=list)
+    design_artifacts: list[DesignArtifactDraft] = Field(default_factory=list)
     rationale: Text
 
     @field_validator("issues_addressed", mode="before")
@@ -240,9 +267,10 @@ def format_propose_prompt(bundle: ContextBundle, analyses: list[AnalysisOutput])
         "Phase: PROPOSE\n"
         "Rules:\n"
         "1. Formulate a cohesive technical proposal covering all task requirements.\n"
-        "2. Synthesize findings, risks, and assumptions from earlier analyses.\n"
-        "3. Output strictly according to ProposalOutput schema.\n"
-        "4. Do not alter canonical run status or budget."
+        "2. Với mỗi requirement, nêu rõ cơ chế cụ thể và vì sao cơ chế đó giải quyết đúng vấn đề của requirement (For each requirement, specify the concrete mechanism and justify why it solves the exact problem).\n"
+        "3. Synthesize findings, risks, and assumptions from earlier analyses.\n"
+        "4. Output strictly according to ProposalOutput schema, including requirement_coverage.\n"
+        "5. Do not alter canonical run status or budget."
     )
     user_message = (
         f"Context:\n{bundle.content}\n\n"
@@ -275,6 +303,8 @@ def format_review_prompt(
         f"Context:\n{bundle.content}\n\n"
         f"Proposal under review:\n{json.dumps(proposal.model_dump(mode='json'), ensure_ascii=False, separators=(',', ': '))}\n\n"
     )
+    if proposal.requirement_coverage:
+        user_message += f"Proposed Requirement Coverage Mechanisms:\n{json.dumps(proposal.requirement_coverage, ensure_ascii=False, separators=(',', ': '))}\n\n"
     if current_plan and '"plan":' not in bundle.content:
         user_message += f"Current Plan:\n{json.dumps(current_plan, ensure_ascii=False, separators=(',', ': '))}\n\n"
     user_message += "Please provide your review and issues."
@@ -289,14 +319,24 @@ def format_synthesize_prompt(
     proposal: ProposalOutput,
     review: ReviewOutput,
     current_plan: dict | None = None,
+    mode: str = "greenfield",
 ) -> list[dict[str, str]]:
     """Prompt for Synthesizer in REVISE phase."""
+    if mode == "design":
+        rule1 = (
+            "1. Formulate an architecture design consisting of design_artifacts (state_machine, message_schema, "
+            "stop_conditions, recovery_protocol, failure_modes, sequence_flow) covering ALL task requirements. "
+            "Steps must serve as a minimal implementation and verification plan (kế hoạch kiểm chứng/triển khai tối thiểu)."
+        )
+    else:
+        rule1 = "1. Combine proposal, review feedback, and resolved issues into an actionable, step-by-step plan."
+
     system_message = (
         "You are the SYNTHESIZER in Astra Multi.\n"
         f"Prompt Version: {PROMPT_VERSION_V1}\n"
         "Phase: REVISE\n"
         "Rules:\n"
-        "1. Combine proposal, review feedback, and resolved issues into an actionable, step-by-step plan.\n"
+        f"{rule1}\n"
         "2. Step dependencies must form a strict Directed Acyclic Graph (DAG).\n"
         "3. Every step must have objective, requirement_ids, validation, deliverables, and completion_criteria.\n"
         "4. In issues_addressed, list the exact issue IDs from Review Issues that this plan revision resolves (e.g. ['ISSUE-3a8c1f0d'] or []). Do NOT put sentences or descriptions into issues_addressed.\n"

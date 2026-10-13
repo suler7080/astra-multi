@@ -143,7 +143,7 @@ class Run(Entity):
     task_id: ID
     task_revision: Revision
     snapshot_id: ID | None
-    mode: Literal["repo", "greenfield"]
+    mode: Literal["repo", "greenfield", "design"]
     revision: Revision = 1
     phase: RunPhase = RunPhase.INTAKE
     status: RunStatus = RunStatus.RUNNING
@@ -157,7 +157,7 @@ class Run(Entity):
     def snapshot_contract(self) -> Self:
         if (self.mode == "repo") != (self.snapshot_id is not None):
             raise ValueError(
-                "repo requires snapshot_id; greenfield requires explicit null"
+                "repo requires snapshot_id; greenfield and design require explicit null"
             )
         if (
             self.status in TERMINAL
@@ -311,6 +311,20 @@ class PlanStep(Entity):
     evidence_ids: list[ID] = Field(default_factory=list)
 
 
+class DesignArtifact(Entity):
+    kind: Literal[
+        "state_machine",
+        "message_schema",
+        "stop_conditions",
+        "recovery_protocol",
+        "failure_modes",
+        "sequence_flow",
+    ]
+    title: Text
+    content: Text
+    requirement_ids: list[ID] = Field(min_length=1)
+
+
 class PlanRevision(RunEntity):
     revision: Revision
     based_on_revision: Annotated[int, Field(ge=0, strict=True)]
@@ -320,11 +334,13 @@ class PlanRevision(RunEntity):
     decisions: list[Decision] = Field(default_factory=list)
     risks: list[Text] = Field(default_factory=list)
     issues_addressed: list[ID] = Field(default_factory=list)
+    design_artifacts: list[DesignArtifact] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def step_graph(self) -> Self:
         unique(self.steps)
         unique(self.decisions)
+        unique(self.design_artifacts)
         if self.revision != self.based_on_revision + 1:
             raise ValueError("plan revisions must be consecutive")
         remaining = {step.id: set(step.dependencies) for step in self.steps}

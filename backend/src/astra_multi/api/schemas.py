@@ -24,7 +24,7 @@ class CreateRunRequest(BaseModel):
     constraints: list[str] = Field(default_factory=list, description="Operational or technical constraints")
     non_goals: list[str] = Field(default_factory=list, description="Out of scope goals")
     expected_outputs: list[str] = Field(default_factory=list, description="Expected outputs")
-    mode: Literal["greenfield", "repo"] = "greenfield"
+    mode: Literal["greenfield", "repo", "design"] = "greenfield"
     snapshot_path: str | None = None
     idempotency_key: str | None = None
     max_rounds: int = Field(default=2, ge=1, le=10)

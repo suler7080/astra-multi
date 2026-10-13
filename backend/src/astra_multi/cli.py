@@ -76,6 +76,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Optional expected outputs statements",
     )
     create_p.add_argument(
+        "--mode",
+        choices=["greenfield", "repo", "design"],
+        default="greenfield",
+        help="Run mode (greenfield, repo, design)",
+    )
+    create_p.add_argument(
         "--run-id",
         help="Optional run ID (defaults to auto-generated)",
     )
@@ -216,7 +222,7 @@ def cmd_create(store: SQLiteStore, args: argparse.Namespace) -> int:
         task_id=task.id,
         task_revision=1,
         snapshot_id=None,
-        mode="greenfield",
+        mode=getattr(args, "mode", "greenfield") or "greenfield",
         config_hash="0" * 64,
     )
 

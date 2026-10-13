@@ -78,7 +78,7 @@ class StructuralQualityValidator:
                 violations=violations,
             )
 
-        # 1. Check requirements coverage
+        # 1. Check requirements coverage and design artifacts
         task_req_ids = {r.id for r in task.requirements}
         step_covered_req_ids: set[str] = set()
         for step in plan.steps:
@@ -96,7 +96,36 @@ class StructuralQualityValidator:
                 else:
                     step_covered_req_ids.add(r_id)
 
-        missing_reqs = task_req_ids - step_covered_req_ids
+        covered_req_ids = set(step_covered_req_ids)
+        design_artifacts = getattr(plan, "design_artifacts", []) or []
+
+        if state.run.mode == "design":
+            if not design_artifacts:
+                violations.append(
+                    QualityViolation(
+                        rule_id="RULE-DESIGN-001",
+                        severity=ViolationSeverity.BLOCKER,
+                        entity_ref=f"plan:{plan.id}",
+                        message="Run ở mode 'design' nhưng plan không có design artifact nào.",
+                        remediation="Bổ sung ít nhất một design artifact mô tả thiết kế kiến trúc.",
+                    )
+                )
+            for da in design_artifacts:
+                for r_id in da.requirement_ids:
+                    if r_id not in task_req_ids:
+                        violations.append(
+                            QualityViolation(
+                                rule_id="RULE-REF-001",
+                                severity=ViolationSeverity.BLOCKER,
+                                entity_ref=f"artifact:{da.id}",
+                                message=f"Design artifact references unknown requirement ID: {r_id}",
+                                remediation="Ensure design artifact requirement_ids match current TaskSpec requirements.",
+                            )
+                        )
+                    else:
+                        covered_req_ids.add(r_id)
+
+        missing_reqs = task_req_ids - covered_req_ids
         if missing_reqs:
             uncovered = sorted(missing_reqs)
             violations.append(
@@ -105,7 +134,7 @@ class StructuralQualityValidator:
                     severity=ViolationSeverity.BLOCKER,
                     entity_ref=f"plan:{plan.id}",
                     message=f"Plan fails to cover all requirements. Missing: {sorted(missing_reqs)}",
-                    remediation="Add or update plan steps to address every requirement in the TaskSpec.",
+                    remediation="Add or update plan steps or design artifacts to address every requirement in the TaskSpec.",
                 )
             )
 

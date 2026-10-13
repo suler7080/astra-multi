@@ -38,6 +38,7 @@ from astra_multi.context.bundle import ContextBuilder, orchestration_limits
 from astra_multi.context.evidence import EvidenceLedger
 from astra_multi.domain.models import (
     Decision,
+    DesignArtifact,
     Issue,
     IssueSeverity,
     IssueStatus,
@@ -641,7 +642,13 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> StateGraph:
         )
         prop = ProposalOutput.model_validate(state["proposal"])
         rev = ReviewOutput.model_validate(state["review"])
-        messages = format_synthesize_prompt(bundle, prop, rev, curr_state.plan.model_dump(mode="json") if curr_state.plan else None)
+        messages = format_synthesize_prompt(
+            bundle,
+            prop,
+            rev,
+            curr_state.plan.model_dump(mode="json") if curr_state.plan else None,
+            mode=curr_state.run.mode,
+        )
 
         call_id = f"CALL-SYNTH-{current_round}"
         res = _call_model_with_budget(
@@ -773,6 +780,21 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> StateGraph:
 
         filtered_issues_addressed = resolved_ids
 
+        plan_design_artifacts: list[DesignArtifact] = []
+        for idx, da in enumerate(getattr(synth_out, "design_artifacts", []) or []):
+            filtered_reqs = [rid for rid in da.requirement_ids if rid in valid_reqs]
+            if not filtered_reqs:
+                filtered_reqs = [fallback_req_id]
+            plan_design_artifacts.append(
+                DesignArtifact(
+                    id=f"ART-{idx + 1}",
+                    kind=da.kind,
+                    title=da.title,
+                    content=da.content,
+                    requirement_ids=filtered_reqs,
+                )
+            )
+
         new_plan = PlanRevision(
             id=f"PLAN-{base_rev + 1}",
             run_id=curr_state.run.id,
@@ -784,6 +806,7 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> StateGraph:
             decisions=plan_decisions,
             risks=synth_out.risks,
             issues_addressed=filtered_issues_addressed,
+            design_artifacts=plan_design_artifacts,
         )
         ctrl.commit_plan_revision(new_plan)
 

@@ -69,6 +69,16 @@ class PlanExporter:
                     for d in (plan.decisions if plan else state.decisions)
                 ],
             },
+            "design_artifacts": [
+                {
+                    "id": da.id,
+                    "kind": da.kind,
+                    "title": da.title,
+                    "content": da.content,
+                    "requirement_ids": da.requirement_ids,
+                }
+                for da in (plan.design_artifacts if plan else [])
+            ],
             "steps": [
                 {
                     "id": s.id,
@@ -162,7 +172,29 @@ class PlanExporter:
 
         lines.extend([
             "",
-            "## 4. Các bước thực hiện",
+            "## 4. Thiết kế",
+            "",
+        ])
+
+        design_artifacts = plan.design_artifacts if plan else []
+        if design_artifacts:
+            for da in design_artifacts:
+                reqs_str = ", ".join(f"`{r}`" for r in da.requirement_ids)
+                lines.extend([
+                    f"### {da.id} — {escape_markdown(da.title)} ({da.kind})",
+                    "",
+                    f"- **Loại:** `{da.kind}`",
+                    f"- **Requirements:** {reqs_str}",
+                    "",
+                    da.content,
+                    "",
+                ])
+        else:
+            lines.append("*Chưa có artifact thiết kế nào.*")
+            lines.append("")
+
+        lines.extend([
+            "## 5. Các bước thực hiện",
             "",
         ])
 
@@ -184,7 +216,7 @@ class PlanExporter:
             lines.append("")
 
         lines.extend([
-            "## 5. Issues, rủi ro và trạng thái",
+            "## 6. Issues, rủi ro và trạng thái",
             "",
             "| ID | Nội dung | Mức độ | Trạng thái | Hướng giải quyết |",
             "|---|---|---|---|---|",
@@ -197,7 +229,7 @@ class PlanExporter:
 
         lines.extend([
             "",
-            "## 6. Evidence index",
+            "## 7. Evidence index",
             "",
             "| Evidence ID | Nguồn / locator | Hash | Trạng thái kiểm chứng |",
             "|---|---|---|---|",
