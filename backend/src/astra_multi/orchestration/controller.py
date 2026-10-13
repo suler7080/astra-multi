@@ -396,3 +396,8 @@ class WorkflowController:
         )
         self.repository.commit(self.lease.run_id, cmd, self.lease)
         return self.get_state()
+
+    def save_semantic_review(self, assessment: Any) -> None:
+        if hasattr(self.repository, "save_semantic_review"):
+            self.repository.save_semantic_review(self.lease.run_id, assessment)
+

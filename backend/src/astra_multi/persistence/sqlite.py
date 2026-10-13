@@ -390,5 +390,58 @@ class SQLiteStore:
             err_file = self.artifacts.root / "errors" / f"{run_id}.log"
             if err_file.exists():
                 err_file.unlink()
+            sem_file = self.artifacts.root / "semantic_reviews" / f"{run_id}.json"
+            if sem_file.exists():
+                sem_file.unlink()
+            self.settings.delete_setting(f"semantic_review:{run_id}")
         except Exception:
             pass
+
+    def save_semantic_review(self, run_id: str, assessment: Any) -> None:
+        from dataclasses import asdict
+        data = asdict(assessment)
+        try:
+            self.settings.set_setting(f"semantic_review:{run_id}", json.dumps(data, ensure_ascii=False))
+        except Exception:
+            pass
+        try:
+            rev_dir = self.artifacts.root / "semantic_reviews"
+            rev_dir.mkdir(parents=True, exist_ok=True)
+            (rev_dir / f"{run_id}.json").write_text(
+                json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+        except Exception:
+            pass
+
+    def get_semantic_review(self, run_id: str) -> Any:
+        from astra_multi.exports.finalization import SemanticReviewAssessment
+
+        # 1. Try app_settings table
+        try:
+            val = self.settings.get_setting(f"semantic_review:{run_id}")
+            if val:
+                data = json.loads(val)
+                return SemanticReviewAssessment(
+                    passed=bool(data.get("passed")),
+                    reviewed_plan_revision=int(data.get("reviewed_plan_revision", 0)),
+                    feedback=str(data.get("feedback", "")),
+                    concerns=list(data.get("concerns", [])),
+                )
+        except Exception:
+            pass
+
+        # 2. Try artifacts directory
+        try:
+            sem_file = self.artifacts.root / "semantic_reviews" / f"{run_id}.json"
+            if sem_file.exists():
+                data = json.loads(sem_file.read_text(encoding="utf-8"))
+                return SemanticReviewAssessment(
+                    passed=bool(data.get("passed")),
+                    reviewed_plan_revision=int(data.get("reviewed_plan_revision", 0)),
+                    feedback=str(data.get("feedback", "")),
+                    concerns=list(data.get("concerns", [])),
+                )
+        except Exception:
+            pass
+        return None
+

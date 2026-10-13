@@ -785,13 +785,7 @@ def create_app(
         state = store.load(run_id)
         service = FinalizationService()
 
-        plan_rev = state.plan.revision if state.plan else 0
-        assessment = SemanticReviewAssessment(
-            passed=True,
-            reviewed_plan_revision=plan_rev,
-            feedback="Verified against requirements.",
-            concerns=[],
-        )
+        assessment = store.get_semantic_review(run_id) if hasattr(store, "get_semantic_review") else None
 
         decision = service.evaluate(state, assessment)
         if decision.can_finalize:

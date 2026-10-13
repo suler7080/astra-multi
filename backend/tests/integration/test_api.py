@@ -166,6 +166,16 @@ def test_api_export_and_validate():
                 assert val_res.json()["passed"] is True
 
                 # Finalize
+                from astra_multi.exports.finalization import SemanticReviewAssessment
+                store.save_semantic_review(
+                    run_id,
+                    SemanticReviewAssessment(
+                        passed=True,
+                        reviewed_plan_revision=1,
+                        feedback="Requirements met",
+                        concerns=[],
+                    ),
+                )
                 fin_res = client.post(f"/api/runs/{run_id}/finalize")
                 assert fin_res.status_code == 200
                 assert fin_res.json()["status"] == "FINAL"

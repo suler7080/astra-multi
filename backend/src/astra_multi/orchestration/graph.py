@@ -47,6 +47,7 @@ from astra_multi.domain.models import (
     RunPhase,
     RunStatus,
 )
+from astra_multi.exports.finalization import SemanticReviewAssessment
 from astra_multi.exports.quality_validator import (
     StructuralQualityValidator,
     ViolationSeverity,
@@ -920,9 +921,37 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> StateGraph:
         # Check stagnation after resolutions are evaluated
         detector.record_round(ctrl.get_state(), state.get("round", 0))
 
+        # Build and persist SemanticReviewAssessment
+        latest_state = ctrl.get_state()
+        plan_rev = latest_state.plan.revision if latest_state.plan else 0
+        open_warning_or_blocker = [
+            i for i in latest_state.issues
+            if i.severity in (IssueSeverity.BLOCKING, IssueSeverity.WARNING)
+            and i.status != IssueStatus.RESOLVED
+        ]
+        assessment_passed = (len(open_warning_or_blocker) == 0)
+        concerns = [f"[{i.id}] {i.claim}" for i in open_warning_or_blocker]
+        feedback = review_out.summary or (
+            "Tất cả issue mức warning trở lên đã được giải quyết"
+            if assessment_passed
+            else f"Còn {len(open_warning_or_blocker)} issue mức warning trở lên chưa giải quyết"
+        )
+        assessment = SemanticReviewAssessment(
+            passed=assessment_passed,
+            reviewed_plan_revision=plan_rev,
+            feedback=feedback,
+            concerns=concerns,
+        )
+        if hasattr(ctrl, "save_semantic_review"):
+            ctrl.save_semantic_review(assessment)
+        elif hasattr(ctrl.repository, "save_semantic_review"):
+            ctrl.repository.save_semantic_review(curr_state.run.id, assessment)
+
         return {
             "semantic_review": review_out.model_dump(mode="json"),
-            "events": [f"[SEMANTIC_REVIEW] Evaluated {len(review_out.resolutions)} resolutions, {len(review_out.issues)} issues"],
+            "events": [
+                f"[SEMANTIC_REVIEW] Evaluated {len(review_out.resolutions)} resolutions, {len(review_out.issues)} issues (Passed: {assessment_passed})"
+            ],
         }
 
     def quality_gate_node(state: OrchestrationState) -> dict:
