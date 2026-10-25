@@ -242,7 +242,7 @@ def run_single_minesweeper(
             final_output = None
 
             try:
-                final_output = app.invoke(initial_state)
+                final_output = app.invoke(initial_state, config={"recursion_limit": 150})
             except BudgetExhaustedError as be:
                 error_reason = f"BUDGET_EXHAUSTED: {be}"
                 print(f"[Run {run_index}] Cảnh báo trần ngân sách: {be}")

@@ -12,7 +12,7 @@ Hệ thống đa tác nhân (Multi-Agent System) phân tích kiến trúc phần
 ![React](https://img.shields.io/badge/React-18.x-61DAFB?logo=react)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6?logo=typescript)
 ![Vite](https://img.shields.io/badge/Vite-5.x-646CFF?logo=vite)
-![Tests](https://img.shields.io/badge/tests-477%20passed%20%7C%2014%20skipped-success)
+![Tests](https://img.shields.io/badge/tests-490%20passed%20%7C%205%20skipped-success)
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-lightgrey)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
@@ -46,15 +46,15 @@ Dữ liệu được lưu trữ bền vững (durable persistence) với SQLite 
 - **Durable Persistence & Fenced Leases**:
   Lưu trữ trạng thái chuẩn tắc (canonical state) trên SQLite với chế độ WAL và `PRAGMA synchronous=FULL`; kiểm soát tranh chấp bằng lease token/epoch fencing, ngăn ngừa xung đột phiên bản và phân tán ghi.
 - **Model Gateway đa nhà cung cấp**:
-  Tương thích OpenAI, Google Gemini, Anthropic và các endpoint tương thích OpenAI (như xKiro) với cơ chế tự động sửa lỗi đầu ra JSON (output repair), retry thích ứng (exponential backoff) và quản lý ngân sách nghiêm ngặt (token / USD limits).
+  Tương thích OpenAI, Google Gemini và các endpoint tương thích OpenAI (xKiro, OpenRouter, relay OpenAI-compatible) với cơ chế tự động sửa lỗi đầu ra JSON (output repair), retry thích ứng (exponential backoff) và quản lý ngân sách nghiêm ngặt (token / USD limits).
 - **Môi trường thực thi Sandbox cô lập (Isolated Sandboxes)**:
-  Thực thi lệnh kiểm chứng độc lập trên cả **Linux Docker** và **Native Windows Subprocess** với kiểm soát tài nguyên, timeout, hủy tác vụ an toàn và tự động che giấu thông tin nhạy cảm (secrets redaction).
+  Thực thi script kiểm chứng độc lập qua **PlanSandboxVerifier** trên Native Windows Subprocess (subprocess riêng biệt, timeout có ranh giới, fail-fast khi lỗi) — trình thực thi duy nhất trong `backend/src/astra_multi/sandbox/` (runner Docker đã gỡ khỏi mã nguồn).
 - **Cổng chất lượng P4 (Quality Gates & Parity Exporter)**:
   Kiểm tra tĩnh 100% đồ thị phụ thuộc (DAG), mức độ bao phủ yêu cầu (requirements coverage), giải quyết toàn bộ blocking issues, đánh giá ngữ nghĩa (semantic review) và xuất bản đồng nhất định dạng JSON Schema v1 cùng Markdown (chuẩn `PLAN_TEMPLATE.md`).
 - **Giao diện Web cục bộ (Local Web UI) & Trải nghiệm Chuẩn Impeccable**:
   Ứng dụng Single-Page Application (React + TypeScript + Vite) hỗ trợ luồng sự kiện real-time (SSE), bảng theo dõi tiến trình 11 phase, form tương tác giải đáp thắc mắc của tác nhân (Human-in-the-loop), bảng tra cứu Issues, Decisions, Evidence và Plan Diff. Hỗ trợ song ngữ **Tiếng Việt / English** và modal cấu hình hiện đại đạt chuẩn thiết kế chuyên nghiệp.
 - **Giao diện dòng lệnh toàn diện (CLI Lifecycle)**:
-  Cung cấp công cụ CLI hoàn chỉnh hỗ trợ `create`, `status`, `answer`, `cancel`, `artifacts`, `validate`, `finalize`, và `serve`.
+  Cung cấp công cụ CLI hoàn chỉnh hỗ trợ `create`, `status`, `answer`, `cancel`, `delete`, `artifacts`, `validate`, `finalize`, `logs`, và `serve`.
 
 ---
 
@@ -63,7 +63,7 @@ Dữ liệu được lưu trữ bền vững (durable persistence) với SQLite 
 - **Backend**: Python 3.11+, FastAPI 0.115+, Uvicorn, LangGraph 0.6+, Pydantic v2.
 - **Frontend**: React 18, TypeScript 5, Vite, Lucide React.
 - **Cơ sở dữ liệu & Lưu trữ**: SQLite (WAL mode, Foreign Keys ON), File Artifact Store (băm nội dung SHA-256).
-- **Hạ tầng & Bảo mật**: OS Keyring (`keyring` tích hợp Windows Credential Manager / macOS Keychain / Secret Service), Docker Runner, Windows Subprocess Sandbox.
+- **Hạ tầng & Bảo mật**: OS Keyring (`keyring` tích hợp Windows Credential Manager / macOS Keychain / Secret Service), Windows Subprocess Sandbox (PlanSandboxVerifier).
 - **Kiểm thử & Chất lượng mã nguồn**: Pytest, Pytest-Asyncio, Ruff, Mypy.
 
 ---
@@ -74,7 +74,6 @@ Dữ liệu được lưu trữ bền vững (durable persistence) với SQLite 
 - **Python**: `>= 3.11`
 - **Node.js**: `>= 18.0.0` (Khuyên dùng `>= 20.x` hoặc `24.x`) và npm `>= 9.x`
 - **Git**
-- *(Tùy chọn)* Docker nếu chạy sandbox trên Linux/WSL2
 
 ### Các bước cài đặt
 
@@ -127,7 +126,7 @@ Truy cập trình duyệt tại địa chỉ: **`http://127.0.0.1:8000`**
   - Nhấp vào biểu tượng **Settings** trên thanh tiêu đề (Header).
   - Lần đầu sử dụng: Thiết lập mật khẩu quản trị viên (Admin Password).
   - **Tab 1 - Nhà cung cấp (Providers):**
-    - Cấu hình khóa API, endpoint và mô hình cho **OpenAI**, **Google Gemini**, **Anthropic**, hoặc **xKiro / OpenRouter** (hỗ trợ mô hình mã nguồn mở như `qwen/qwen3.7-max:free`, `deepseek-ai/deepseek-r1:free`).
+    - Cấu hình khóa API, endpoint và mô hình cho **OpenAI**, **Google Gemini**, hoặc **xKiro / OpenRouter** (hỗ trợ mô hình mã nguồn mở như `qwen/qwen3.7-max:free`, `deepseek-ai/deepseek-r1:free`).
     - Bấm **"Quét Model từ API Key"** để hệ thống tự động kiểm tra và trả về danh sách mô hình khả dụng, tự động chia nhóm `🆓 Mô hình miễn phí` và cho phép chuyển đổi tức thì qua Dropdown Select (hỗ trợ chuyển đổi chế độ nhập tay).
   - **Tab 2 - Phân vai trò (Role Assignment):**
     - Thiết lập mô hình riêng biệt cho từng tác nhân: **Planner** (Lập kế hoạch), **Reviewer** (Phản biện độc lập), **Synthesizer** (Dung hòa và đúc kết).
@@ -247,7 +246,7 @@ Dự án duy trì tỷ lệ kiểm thử nghiêm ngặt trên môi trường nat
 cd backend
 .\.venv\Scripts\python -m pytest tests -v
 ```
-*(Kết quả hiện tại: 477 passed, 14 skipped, 0 failed).*
+*(Kết quả hiện tại: 490 passed, 5 skipped, 0 failed).*
 
 ---
 
@@ -261,16 +260,18 @@ astra-multi/
 │   ├── src/astra_multi/            # Gói mã nguồn chính
 │   │   ├── agents/                 # Prompts, vai trò Planner, Reviewer, Synthesizer
 │   │   ├── api/                    # FastAPI endpoints, Pydantic schemas, SSE Worker
-│   │   ├── context/                # Quản lý snapshots, ledger bằng chứng, bundles
+│   │   ├── context/                # Context bundle cho các tác nhân
 │   │   ├── domain/                 # Mô hình dữ liệu chuẩn, policies, commands, state
 │   │   ├── exports/                # Quality validator, finalization, plan exporter
 │   │   ├── gateway/                # Model gateway, định tuyến, rate limits, retry
 │   │   ├── orchestration/          # LangGraph graph, nodes, workflow controller, budget
 │   │   ├── persistence/            # SQLite repository, migrations, artifact storage
-│   │   ├── providers/              # Adapters cho OpenAI, Google, Anthropic, xKiro
-│   │   ├── sandbox/                # Docker runner & Windows subprocess sandbox
+│   │   ├── providers.py            # Adapters OpenAI, Google, endpoint tương thích (xKiro, relay)
+│   │   ├── provider_cli.py         # Cấu hình profile + API key (OS Keyring hoặc biến môi trường)
+│   │   ├── provider_smoke.py       # Smoke kiểm tra live một provider profile (opt-in)
+│   │   ├── sandbox/                # PlanSandboxVerifier (subprocess độc lập)
 │   │   └── cli.py                  # Entrypoint giao diện dòng lệnh CLI
-│   └── tests/                      # Bộ kiểm thử tích hợp, unit và recovery (491 tests)
+│   └── tests/                      # Bộ kiểm thử tích hợp, unit (495 tests)
 │
 ├── frontend/                       # Giao diện người dùng Web (React + Vite)
 │   ├── src/
@@ -285,14 +286,11 @@ astra-multi/
 ├── docs/                           # Tài liệu kỹ thuật chi tiết
 │   ├── P1_CONTRACTS.md             # Đặc tả hợp đồng dữ liệu & persistence
 │   ├── P2_CONTRACTS.md             # Đặc tả snapshot & execution sandbox
-│   ├── adr/                        # Các bản ghi quyết định kiến trúc (ADR-001 -> ADR-006)
-│   └── spikes/                     # Báo cáo các đợt thử nghiệm kỹ thuật
+│   ├── adr/                        # Các bản ghi quyết định kiến trúc (ADR-001 -> ADR-007 + semantic review)
+│   ├── spikes/                     # Báo cáo các đợt thử nghiệm kỹ thuật
+│   └── audit/                      # Báo cáo kiểm toán backend (review 2026-10-24 + re-scan 2026-10-25)
 │
-├── plans/                          # Kế hoạch chi tiết từng giai đoạn P0 -> P6
-├── PLAN.md                         # Đặc tả toàn diện kiến trúc hệ thống
-├── PLAN_TEMPLATE.md                # Mẫu chuẩn đầu ra kế hoạch kiến trúc
-├── IMPLEMENTATION_PLAN.md          # Lộ trình kỹ thuật phân bổ cho dev agents
-├── IMPLEMENTATION_STATUS.md        # Bảng theo dõi tiến độ thực tế chi tiết
+├── plans/                          # Kế hoạch chi tiết từng giai đoạn P0 -> P6 (lịch sử xây dựng)
 └── README.md                       # Tài liệu hướng dẫn chính của dự án
 ```
 
@@ -308,15 +306,23 @@ Astra Multi hỗ trợ nạp cấu hình qua biến môi trường hoặc lưu t
 |---|---|---|
 | `OPENAI_API_KEY` | Tùy chọn | Khóa API dịch vụ OpenAI |
 | `GOOGLE_API_KEY` | Tùy chọn | Khóa API dịch vụ Google Gemini |
-| `ANTHROPIC_API_KEY` | Tùy chọn | Khóa API dịch vụ Anthropic |
-| `ASTRA_MULTI_PROFILE` | Không | Chỉ định profile cấu hình mặc định |
+| `XKIRO_API_KEY` | Tùy chọn | Khóa API relay OpenAI-compatible (xKiro) |
+| `ASTRA_MULTI_PROVIDER` | Không | Provider mặc định cho gateway khi không cấu hình (mặc định `fake` — mock) |
+| `ASTRA_LIVE_LLM` | Không | Đặt `1` để script thử nghiệm (`live_minesweeper_run.py`) gọi LLM thật |
 | `PYTHONIOENCODING` | Khuyên dùng | Đặt `utf-8` trên Windows để hiển thị ký tự chuẩn |
 
 ### Quản lý khóa an toàn qua OS Credential Store
 Để tránh lộ khóa API trong tệp cấu hình phẳng, Astra Multi hỗ trợ lưu khóa trực tiếp vào OS Keyring (Windows Credential Manager, macOS Keychain, Linux Secret Service):
 ```powershell
 # Xem hướng dẫn chi tiết tại docs/PROVIDER_CONFIGURATION.md
-.venv\Scripts\python -m astra_multi.provider_smoke default
+cd backend
+# --env-only chỉ lưu TÊN biến môi trường, không lưu giá trị key
+.venv\Scripts\python -m astra_multi.provider_cli set <ten-profile> `
+  --kind openai-compatible --model <model-id> --base-url <endpoint-url> `
+  --key-env XKIRO_API_KEY --env-only
+
+# Smoke kiểm tra profile vừa cấu hình (in verdict theo scenario, không in secret)
+.venv\Scripts\python -m astra_multi.provider_smoke <ten-profile>
 ```
 
 ---
