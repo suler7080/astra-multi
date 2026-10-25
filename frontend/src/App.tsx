@@ -464,6 +464,30 @@ export const App: React.FC = () => {
       });
     });
 
+    // Backend ends the SSE stream with a "stream_error" event (api/worker.py) when
+    // the run's event feed fails, then closes it server-side. EventSource would
+    // auto-reconnect into a loop while the error persists, so close it here and
+    // rely on the periodic polling below, which runs independently of the stream.
+    es.addEventListener('stream_error', (e: MessageEvent) => {
+      let backendMessage: string | undefined;
+      try {
+        const parsed = JSON.parse(e.data) as { message?: unknown };
+        if (typeof parsed?.message === 'string') backendMessage = parsed.message;
+      } catch {
+        // Malformed payload — the generic message below still informs the user.
+      }
+      // Close first to stop the reconnect loop, then flag the connection as down.
+      es.close();
+      if (eventSourceRef.current === es) {
+        eventSourceRef.current = null;
+      }
+      setIsSseConnected(false);
+      setGenericError({
+        message: t('conn_stream_error'),
+        details: backendMessage,
+      });
+    });
+
     es.onerror = () => {
       setIsSseConnected(false);
     };
@@ -472,7 +496,7 @@ export const App: React.FC = () => {
       es.close();
       eventSourceRef.current = null;
     };
-  }, [selectedRunId, loadRunDetails]);
+  }, [selectedRunId, loadRunDetails, t]);
 
   // Periodic background safety-net polling for the selected run
   useEffect(() => {

@@ -60,7 +60,14 @@ export const NewRunModal: React.FC<NewRunModalProps> = ({
   const [costLimit, setCostLimit] = useState(5.0);
   const [maxRounds, setMaxRounds] = useState(2);
 
-  // Synchronize form state when opened with initialData (cloning)
+  // Validation state (declared before the sync effect below, which calls setErrors)
+  const [errors, setErrors] = useState<FormErrors>({});
+
+  // Synchronize form state when opened with initialData (cloning).
+  // This sync is intentionally effect-based: deriving fields during render would risk
+  // cascading renders when initialData identity changes, and remounting on open would
+  // drop the exact default-value behavior this modal preserves.
+  // oxlint-disable react/set-state-in-effect
   useEffect(() => {
     if (isOpen && initialData) {
       setGoal(initialData.goal);
@@ -72,9 +79,7 @@ export const NewRunModal: React.FC<NewRunModalProps> = ({
       setErrors({});
     }
   }, [isOpen, initialData]);
-
-  // Validation state
-  const [errors, setErrors] = useState<FormErrors>({});
+  // oxlint-enable react/set-state-in-effect
 
   // Element refs for focus and scrolling
   const goalRef = useRef<HTMLTextAreaElement>(null);
