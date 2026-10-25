@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import type { CreateRunPayload } from '../types';
-import { X, Plus, Trash2, Sparkles, AlertCircle, Info } from 'lucide-react';
+import type { CreateRunPayload, CloneRunData } from '../types';
+import { X, Plus, Trash2, Sparkles, AlertCircle, Info, RotateCcw } from 'lucide-react';
 import { useI18n } from '../i18nContext';
 
 interface NewRunModalProps {
@@ -9,6 +9,7 @@ interface NewRunModalProps {
   onSubmit: (payload: CreateRunPayload, idempotencyKey: string) => Promise<void>;
   isSubmitting: boolean;
   error?: string | null;
+  initialData?: CloneRunData | null;
 }
 
 interface FormErrors {
@@ -43,6 +44,7 @@ export const NewRunModal: React.FC<NewRunModalProps> = ({
   onSubmit,
   isSubmitting,
   error,
+  initialData,
 }) => {
   const { t } = useI18n();
 
@@ -57,6 +59,19 @@ export const NewRunModal: React.FC<NewRunModalProps> = ({
   const [tokenLimit, setTokenLimit] = useState(250000);
   const [costLimit, setCostLimit] = useState(5.0);
   const [maxRounds, setMaxRounds] = useState(2);
+
+  // Synchronize form state when opened with initialData (cloning)
+  useEffect(() => {
+    if (isOpen && initialData) {
+      setGoal(initialData.goal);
+      setRequirements(initialData.requirements.length > 0 ? initialData.requirements : ['']);
+      setMode(initialData.mode);
+      setTokenLimit(initialData.token_limit);
+      setCostLimit(initialData.cost_limit);
+      setMaxRounds(initialData.max_rounds);
+      setErrors({});
+    }
+  }, [isOpen, initialData]);
 
   // Validation state
   const [errors, setErrors] = useState<FormErrors>({});
@@ -282,6 +297,7 @@ export const NewRunModal: React.FC<NewRunModalProps> = ({
       token_limit: Number(tokenLimit),
       cost_limit: Number(costLimit),
       max_rounds: Number(maxRounds),
+      parent_run_id: initialData?.parent_run_id,
     };
 
     await onSubmit(payload, idemKey);
@@ -300,9 +316,14 @@ export const NewRunModal: React.FC<NewRunModalProps> = ({
     >
       <div className="modal-container" role="dialog" aria-modal="true" aria-labelledby="new-run-title">
         <div className="modal-header">
-          <div className="modal-title-group">
+          <div className="modal-title-group flex items-center gap-2">
             <Sparkles className="text-sky-400" size={20} />
             <h2 id="new-run-title" className="modal-title">{t('modal_new_run_title')}</h2>
+            {initialData?.parent_run_id && (
+              <span className="px-2 py-0.5 text-xs font-mono rounded bg-sky-950/70 text-sky-300 border border-sky-800/60 flex items-center gap-1">
+                <RotateCcw size={11} /> {initialData.parent_run_id}
+              </span>
+            )}
           </div>
           <button
             onClick={onClose}

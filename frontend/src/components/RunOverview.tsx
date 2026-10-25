@@ -12,6 +12,7 @@ import {
   CheckCircle2,
   ListTodo,
   Trash2,
+  RotateCcw,
 } from 'lucide-react';
 import { useI18n } from '../i18nContext';
 
@@ -29,6 +30,7 @@ interface RunOverviewProps {
   isDeleting?: boolean;
   actionMessage?: string | null;
   onViewLogs?: () => void;
+  onCloneRun?: (run: RunDetail) => void;
 }
 
 export const RunOverview: React.FC<RunOverviewProps> = ({
@@ -45,6 +47,7 @@ export const RunOverview: React.FC<RunOverviewProps> = ({
   isDeleting,
   actionMessage,
   onViewLogs,
+  onCloneRun,
 }) => {
   const { t } = useI18n();
   const [answers, setAnswers] = useState<Record<string, string>>({});
@@ -92,15 +95,27 @@ export const RunOverview: React.FC<RunOverviewProps> = ({
               </div>
             </div>
 
-            {onViewLogs && (
-              <button
-                onClick={onViewLogs}
-                className="btn-danger-sm flex items-center gap-1.5 whitespace-nowrap self-center"
-              >
-                <span>{t('overview_view_logs')}</span>
-                <span>➔</span>
-              </button>
-            )}
+            <div className="flex items-center gap-2 self-center">
+              {onCloneRun && (run.status === 'FAILED' || run.status === 'CANCELLED') && (
+                <button
+                  onClick={() => onCloneRun(run)}
+                  className="px-3 py-1.5 rounded-lg bg-sky-600/90 hover:bg-sky-500 text-white text-xs font-semibold flex items-center gap-1.5 transition-colors shadow-sm whitespace-nowrap"
+                  title={t('overview_rerun')}
+                >
+                  <RotateCcw size={13} />
+                  <span>{t('overview_rerun')}</span>
+                </button>
+              )}
+              {onViewLogs && (
+                <button
+                  onClick={onViewLogs}
+                  className="btn-danger-sm flex items-center gap-1.5 whitespace-nowrap"
+                >
+                  <span>{t('overview_view_logs')}</span>
+                  <span>➔</span>
+                </button>
+              )}
+            </div>
           </div>
         </div>
       )}
@@ -173,7 +188,15 @@ export const RunOverview: React.FC<RunOverviewProps> = ({
       {/* Main Stats Grid */}
       <div className="stats-grid">
         <div className="stat-card">
-          <span className="stat-label">{t('overview_goal')}</span>
+          <div className="flex-between">
+            <span className="stat-label">{t('overview_goal')}</span>
+            {run.parent_run_id && (
+              <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700/60 flex items-center gap-1">
+                <RotateCcw size={11} className="text-sky-400" />
+                <span>{t('overview_cloned_from')}: {run.parent_run_id}</span>
+              </span>
+            )}
+          </div>
           <span className="stat-value text-base font-medium">{run.goal}</span>
         </div>
         <div className="stat-card">
@@ -230,6 +253,17 @@ export const RunOverview: React.FC<RunOverviewProps> = ({
       {/* Action Toolbar */}
       <div className="action-toolbar">
         <div className="toolbar-left">
+          {onCloneRun && (run.status === 'FAILED' || run.status === 'CANCELLED') && (
+            <button
+              onClick={() => onCloneRun(run)}
+              className="btn-secondary text-sky-300 hover:text-sky-200"
+              disabled={isProcessing}
+            >
+              <RotateCcw size={15} className="text-sky-400" />
+              <span>{t('overview_rerun')}</span>
+            </button>
+          )}
+
           {isWaiting && (
             <button
               onClick={onResumeRun}

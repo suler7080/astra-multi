@@ -43,6 +43,11 @@ export interface RunDetail {
   decisions_count: number;
   evidence_count: number;
   pending_questions: Question[];
+  mode?: 'greenfield' | 'repo';
+  token_limit?: number;
+  cost_limit?: number;
+  max_rounds?: number;
+  parent_run_id?: string | null;
 }
 
 export interface Issue {
@@ -141,6 +146,17 @@ export interface CreateRunPayload {
   call_limit?: number;
   max_rounds?: number;
   idempotency_key?: string;
+  parent_run_id?: string;
+}
+
+export interface CloneRunData {
+  goal: string;
+  requirements: string[];
+  mode: 'greenfield' | 'repo';
+  token_limit: number;
+  cost_limit: number;
+  max_rounds: number;
+  parent_run_id: string;
 }
 
 export interface StreamEvent {

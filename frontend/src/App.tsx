@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { api, classifyApiError } from './api';
 import type {
+  CloneRunData,
   CreateRunPayload,
   Decision,
   Evidence,
@@ -52,6 +53,7 @@ export const App: React.FC = () => {
 
   const [activeTab, setActiveTab] = useState<'overview' | 'discussion' | 'issues' | 'decisions' | 'evidence' | 'plan' | 'logs'>('overview');
   const [isNewRunOpen, setIsNewRunOpen] = useState(false);
+  const [cloneData, setCloneData] = useState<CloneRunData | null>(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [authMode, setAuthMode] = useState<'setup' | 'login'>('login');
@@ -538,12 +540,26 @@ export const App: React.FC = () => {
     void loadRunDetails(runId);
   };
 
+  const handleCloneRun = (run: RunDetail) => {
+    setCloneData({
+      goal: run.goal,
+      requirements: (run.requirements || []).map((r) => (typeof r === 'string' ? r : r.text || '')),
+      mode: run.mode === 'repo' ? 'repo' : 'greenfield',
+      token_limit: run.token_limit ?? 250000,
+      cost_limit: run.cost_limit ?? 5.0,
+      max_rounds: run.max_rounds ?? 2,
+      parent_run_id: run.run_id,
+    });
+    setIsNewRunOpen(true);
+  };
+
   const handleCreateRun = async (payload: CreateRunPayload, idempotencyKey: string) => {
     try {
       setIsSubmitting(true);
       setGenericError(null);
       const res = await api.createRun(payload, idempotencyKey);
       setIsNewRunOpen(false);
+      setCloneData(null);
       showFeedback(t('feedback_run_started').replace('{id}', res.run_id));
       await loadRuns(res.run_id);
     } catch (err: unknown) {
@@ -829,6 +845,7 @@ export const App: React.FC = () => {
                 isDeleting={isDeletingId === selectedRunId}
                 actionMessage={actionMessage}
                 onViewLogs={() => setActiveTab('logs')}
+                onCloneRun={handleCloneRun}
               />
             )}
 
@@ -871,7 +888,10 @@ export const App: React.FC = () => {
           runs={runs}
           onSelectRun={handleSelectRun}
           onDeleteRun={handleDeleteRun}
-          onOpenNewRun={() => setIsNewRunOpen(true)}
+          onOpenNewRun={() => {
+            setCloneData(null);
+            setIsNewRunOpen(true);
+          }}
           onOpenSettings={() => setIsSettingsOpen(true)}
           onRefresh={() => {
             void loadRuns();
@@ -886,10 +906,14 @@ export const App: React.FC = () => {
 
       <NewRunModal
         isOpen={isNewRunOpen}
-        onClose={() => setIsNewRunOpen(false)}
+        onClose={() => {
+          setIsNewRunOpen(false);
+          setCloneData(null);
+        }}
         onSubmit={handleCreateRun}
         isSubmitting={isSubmitting}
         error={genericError?.message || null}
+        initialData={cloneData}
       />
 
       <QualityGateModal

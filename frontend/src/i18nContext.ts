@@ -82,6 +82,8 @@ export const translations = {
     overview_delete_run: 'Delete Run',
     overview_confirm_delete: 'Permanently delete this run? This cannot be undone.',
     overview_confirm_delete_active: 'This run is still active. Force stop and permanently delete it?',
+    overview_rerun: 'Re-run / Clone',
+    overview_cloned_from: 'Cloned from',
 
     // Execution Logs
     logs_title: 'Execution Logs',
@@ -500,6 +502,8 @@ export const translations = {
     overview_delete_run: 'Xóa phiên',
     overview_confirm_delete: 'Xóa vĩnh viễn phiên này? Hành động không thể hoàn tác.',
     overview_confirm_delete_active: 'Phiên vẫn đang chạy. Dừng và xóa vĩnh viễn?',
+    overview_rerun: 'Chạy lại (Clone)',
+    overview_cloned_from: 'Khởi tạo từ',
 
     // Execution Logs
     logs_title: 'Nhật ký thực thi',
