@@ -16,7 +16,6 @@ from astra_multi.domain.models import (
     RunPhase,
     RunState,
 )
-
 from astra_multi.domain.policies import is_open_issue_status
 from astra_multi.domain.repositories import ArtifactStore
 

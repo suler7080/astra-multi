@@ -13,17 +13,15 @@ Establishes physical reality boundaries during INVESTIGATE and enforces them at 
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import hashlib
 import re
+from dataclasses import dataclass
 from typing import Any
 
 from astra_multi.domain.models import (
-    ID,
     Issue,
     IssueSeverity,
     IssueStatus,
-    PlanRevision,
     TaskSpec,
     TechStackTruthEntry,
     TechStackTruthTable,

@@ -1,10 +1,10 @@
 """Model gateway with retry, budget control, and output repair."""
 
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Callable
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from astra_multi.providers import (
     AuthError,

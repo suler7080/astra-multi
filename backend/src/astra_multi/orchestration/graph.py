@@ -26,6 +26,7 @@ from astra_multi.agents.roles import (
     IssueReport,
     IssueResolutionReport,
     ProposalOutput,
+    RequirementVerdict,
     ReviewOutput,
     SynthesizerOutput,
     format_independent_analysis_prompt,
@@ -1491,7 +1492,7 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> AstraStateGraph:
             and i.status in (IssueStatus.OPEN, IssueStatus.INVESTIGATING, IssueStatus.PROPOSED_RESOLUTION)
         ]
         if open_warnings:
-            problems.append(f"Còn {len(open_warnings)} issue mức warning chưa giải quyết ({', '.join(open_warnings)})")
+            problems.append(f"{len(open_warnings)} warning-severity issues remain unresolved ({', '.join(open_warnings)})")
 
         # Check semantic review assessment
         sem_assessment = None
@@ -1499,12 +1500,12 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> AstraStateGraph:
             sem_assessment = ctrl.get_semantic_review(curr_state.run.id)
         elif hasattr(ctrl.repository, "get_semantic_review"):
             sem_assessment = ctrl.repository.get_semantic_review(curr_state.run.id)
-        # C-3: None nghĩa là "chưa có semantic review assessment" → coi là FAIL,
-        # khớp FinalizationService.evaluate (finalization.py ~146-149: không có
-        # assessment thì rubric pillar fail, không được FINAL). Semantic review là
-        # phase bắt buộc của vòng lặp (revise -> semantic_review -> gate), không có
-        # cấu hình tắt; None chỉ xảy ra khi lưu/khôi phục assessment thất bại, nên
-        # gate phải fail-closed thay vì đóng mắt cho qua.
+        # C-3: None means "no semantic review assessment" -> treat as FAIL,
+        # matching FinalizationService.evaluate (finalization.py ~146-149: with no
+        # assessment the rubric pillar fails and FINAL is not allowed). Semantic
+        # review is a mandatory phase of the loop (revise -> semantic_review ->
+        # gate) with no opt-out; None can only happen when saving/restoring the
+        # assessment failed, so the gate must fail closed instead of looking away.
         if sem_assessment is None:
             problems.append("Semantic review assessment not provided")
         elif not sem_assessment.passed:

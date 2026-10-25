@@ -10,6 +10,7 @@ from collections.abc import Callable, Iterator
 from contextlib import closing, contextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import Any
 from uuid import uuid4
 
 from pydantic import TypeAdapter
@@ -398,8 +399,8 @@ class SQLiteStore:
                 sem_file.unlink()
             self.settings.delete_setting(f"semantic_review:{run_id}")
         except Exception:
-            # C-3: dọn dẹp best-effort khi delete run — không raise, nhưng phải
-            # để lại dấu vết thay vì nuốt lặng lẽ (trước đây là `except: pass`).
+            # C-3: best-effort cleanup on run delete — do not raise, but leave a
+            # trace instead of swallowing silently (previously `except: pass`).
             logger.warning("Best-effort cleanup failed for run %s", run_id, exc_info=True)
 
     def save_semantic_review(self, run_id: str, assessment: Any) -> None:

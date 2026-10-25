@@ -100,6 +100,14 @@ def _classify_error(provider: str, error: Exception, secret: str = "") -> Provid
         or "repeatedly failed" in lower
     ):
         return BadRequestError("BAD_REQUEST", message, provider)
+    if (
+        "server error" in lower
+        or "service_unavailable" in lower
+        or "502" in lower
+        or "503" in lower
+        or "504" in lower
+    ):
+        return ProviderError("SERVER_ERROR", message, provider)
     return ProviderError("UNKNOWN", message, provider)
 
 

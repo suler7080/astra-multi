@@ -10,7 +10,6 @@ to prevent superficial coverage ("phủ cho đủ") and ensure substantive imple
 
 from __future__ import annotations
 
-import re
 from typing import Sequence
 
 from astra_multi.agents.roles import RequirementVerdict
@@ -18,7 +17,6 @@ from astra_multi.domain.models import (
     ArtifactType,
     DesignArtifact,
     PlanRevision,
-    Requirement,
     RequirementType,
     TaskSpec,
 )

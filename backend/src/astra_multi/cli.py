@@ -158,6 +158,7 @@ def build_parser() -> argparse.ArgumentParser:
 def cmd_create(store: SQLiteStore, args: argparse.Namespace) -> int:
     import json
     import uuid
+
     from astra_multi.orchestration.contract_extractor import classify_all
 
     run_id = args.run_id or f"RUN-{uuid.uuid4().hex[:8]}"

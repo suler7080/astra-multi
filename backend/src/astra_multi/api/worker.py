@@ -133,7 +133,10 @@ class RunWorker:
             resolved_assignments: dict[str, dict[str, str | None]] = {}
             if role_mappings:
                 try:
-                    from astra_multi.security.crypto import decrypt_secret, ensure_master_encryption_key
+                    from astra_multi.security.crypto import (
+                        decrypt_secret,
+                        ensure_master_encryption_key,
+                    )
                     master_key = ensure_master_encryption_key(self.store.settings)
                 except Exception:
                     master_key = None

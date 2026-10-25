@@ -13,7 +13,14 @@ import json
 import re
 from typing import Any, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator, ValidationInfo
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationInfo,
+    field_validator,
+    model_validator,
+)
 
 from astra_multi.context.bundle import ContextBundle
 from astra_multi.domain.models import (

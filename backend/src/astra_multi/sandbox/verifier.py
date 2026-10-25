@@ -18,18 +18,15 @@ import hashlib
 import json
 import logging
 import os
-from pathlib import Path
-import re
 import subprocess
 import sys
 import tempfile
 import time
+from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
 from astra_multi.domain.models import (
-    ID,
-    ArtifactRef,
     Evidence,
     Issue,
     IssueSeverity,
@@ -47,8 +44,6 @@ from astra_multi.domain.repositories import ArtifactStore
 from astra_multi.orchestration.controller import WorkflowController
 from astra_multi.orchestration.technical_grounding import (
     build_tech_stack_truth_table,
-    extract_task_full_text,
-    is_negated_or_prohibition,
 )
 from astra_multi.persistence.artifacts import FileArtifactStore
 
