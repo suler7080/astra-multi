@@ -684,13 +684,24 @@ def create_app(
                 "message": f"Run is already in status {state.run.status.value}.",
             }
 
+        # Restore max_rounds persisted at creation (2 for runs created before it was saved)
+        max_rounds = 2
+        try:
+            meta_file = store.artifacts.root / "metadata" / f"{run_id}.json"
+            if meta_file.exists():
+                meta_data = json.loads(meta_file.read_text(encoding="utf-8"))
+                if "max_rounds" in meta_data and isinstance(meta_data["max_rounds"], int):
+                    max_rounds = meta_data["max_rounds"]
+        except Exception:
+            pass
+
         lease = store.acquire(run_id, owner="api-user", ttl=30)
         try:
             ctrl = WorkflowController(store, lease, actor="api-user")
             updated = ctrl.transition_phase(state.run.phase, RunStatus.RUNNING)
             # Re-enqueue run in worker if enabled
             if app.state.auto_start_worker:
-                worker.start_run(run_id)
+                worker.start_run(run_id, max_rounds=max_rounds)
             return {
                 "run_id": run_id,
                 "status": updated.run.status.value,

@@ -468,3 +468,108 @@ def test_api_clone_run_lineage_and_immutability():
             app.state.store.close()
 
 
+def _stage_run_for_resume(app, client, run_id: str) -> None:
+    """Moves a run into WAITING_FOR_INPUT via a blocking question and answers it."""
+    from astra_multi.domain.models import Question
+    from astra_multi.orchestration.controller import WorkflowController
+
+    store = app.state.store
+    req_id = store.load(run_id).task.requirements[0].id
+    lease = store.acquire(run_id, owner="test", ttl=30)
+    ctrl = WorkflowController(store, lease, actor="test")
+    q = Question(
+        id="Q-001",
+        run_id=run_id,
+        text="Which database should we use?",
+        blocking=True,
+        requirement_ids=[req_id],
+    )
+    ctrl.ask_question(q)
+    current_phase = ctrl.get_state().run.phase
+    ctrl.transition_phase(current_phase, RunStatus.WAITING_FOR_INPUT, reason="Waiting for clarification")
+    store.release(lease)
+
+    res_ans = client.post(f"/api/runs/{run_id}/answers", json={
+        "question_id": "Q-001",
+        "answer": "Use PostgreSQL 16",
+        "expected_revision": client.get(f"/api/runs/{run_id}").json()["revision"],
+    })
+    assert res_ans.status_code == 200
+
+
+def test_api_resume_passes_saved_max_rounds():
+    """C-2: resuming a run must reuse the max_rounds saved at creation."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = Path(tmpdir) / "api.db"
+        art_path = Path(tmpdir) / "artifacts"
+        app = create_app(db_path=db_path, artifacts_dir=art_path, auto_start_worker=True)
+        try:
+            start_calls = []
+
+            def _spy_start(run_id, max_rounds=2):
+                start_calls.append({"run_id": run_id, "max_rounds": max_rounds})
+
+            app.state.worker.start_run = _spy_start
+
+            with TestClient(app) as client:
+                res = client.post("/api/runs", json={
+                    "goal": "Resume Keeps Max Rounds",
+                    "requirements": ["Req M1"],
+                    "max_rounds": 5,
+                })
+                assert res.status_code == 202
+                run_id = res.json()["run_id"]
+
+                # Creation itself must have received max_rounds=5
+                assert start_calls == [{"run_id": run_id, "max_rounds": 5}]
+
+                _stage_run_for_resume(app, client, run_id)
+
+                res_resume = client.post(f"/api/runs/{run_id}/resume")
+                assert res_resume.status_code == 200
+                assert res_resume.json()["status"] == "RUNNING"
+
+                # Resume must pass the saved max_rounds=5 to the worker
+                assert len(start_calls) == 2
+                assert start_calls[-1] == {"run_id": run_id, "max_rounds": 5}
+        finally:
+            app.state.store.close()
+
+
+def test_api_resume_without_saved_max_rounds_defaults_to_2():
+    """C-2: legacy runs without persisted max_rounds resume with the default of 2."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = Path(tmpdir) / "api.db"
+        art_path = Path(tmpdir) / "artifacts"
+        app = create_app(db_path=db_path, artifacts_dir=art_path, auto_start_worker=True)
+        try:
+            start_calls = []
+
+            def _spy_start(run_id, max_rounds=2):
+                start_calls.append({"run_id": run_id, "max_rounds": max_rounds})
+
+            app.state.worker.start_run = _spy_start
+
+            with TestClient(app) as client:
+                res = client.post("/api/runs", json={
+                    "goal": "Legacy Resume Default Rounds",
+                    "requirements": ["Req L1"],
+                })
+                assert res.status_code == 202
+                run_id = res.json()["run_id"]
+
+                # Simulate a legacy run created before max_rounds was persisted
+                (art_path / "metadata" / f"{run_id}.json").unlink()
+
+                _stage_run_for_resume(app, client, run_id)
+
+                res_resume = client.post(f"/api/runs/{run_id}/resume")
+                assert res_resume.status_code == 200
+                assert res_resume.json()["status"] == "RUNNING"
+
+                # Worker default of 2 must be preserved
+                assert start_calls[-1] == {"run_id": run_id, "max_rounds": 2}
+        finally:
+            app.state.store.close()
+
+
