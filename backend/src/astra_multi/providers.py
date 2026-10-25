@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 from collections.abc import Mapping
 from typing import Annotated
@@ -82,6 +83,27 @@ class GenerationLimits(BaseModel):
     max_retries: Annotated[int, Field(ge=0, le=5)] = 0
 
 
+_SERVER_ERROR_PATTERN = re.compile(r"\b50[234]\b")
+
+
+def _numeric_status(error: Exception) -> int | None:
+    """Duck-typed HTTP status from common provider SDK exceptions.
+
+    - openai ``APIStatusError`` and subclasses expose ``status_code`` (int).
+    - google-genai ``APIError`` exposes ``code`` (int HTTP status).
+    - httpx ``HTTPStatusError`` exposes ``response.status_code``.
+    """
+    candidates = (
+        getattr(error, "status_code", None),
+        getattr(error, "code", None),
+        getattr(getattr(error, "response", None), "status_code", None),
+    )
+    for candidate in candidates:
+        if isinstance(candidate, int) and not isinstance(candidate, bool):
+            return candidate
+    return None
+
+
 def _classify_error(provider: str, error: Exception, secret: str = "") -> ProviderError:
     message = str(error).replace(secret, "[REDACTED]") if secret else str(error)
     lower = message.lower()
@@ -100,12 +122,12 @@ def _classify_error(provider: str, error: Exception, secret: str = "") -> Provid
         or "repeatedly failed" in lower
     ):
         return BadRequestError("BAD_REQUEST", message, provider)
+    status = _numeric_status(error)
     if (
-        "server error" in lower
+        (status is not None and 500 <= status <= 599)
+        or _SERVER_ERROR_PATTERN.search(lower) is not None
+        or "server error" in lower
         or "service_unavailable" in lower
-        or "502" in lower
-        or "503" in lower
-        or "504" in lower
     ):
         return ProviderError("SERVER_ERROR", message, provider)
     return ProviderError("UNKNOWN", message, provider)
