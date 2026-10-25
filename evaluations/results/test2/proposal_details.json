@@ -1,0 +1,22 @@
+{
+  "approach": "Thiết kế một lớp 'ApiClient' duy nhất (Singleton) sử dụng jQuery AJAX làm nền tảng, bao bọc toàn bộ logic gọi API. Lớp này sẽ quản lý vòng đời request: kích hoạt trạng thái loading toàn cục, thực thi gọi API, áp dụng cơ chế retry có kiểm soát (exponential backoff) cho các lỗi 429 và 500, và phân loại kết quả cuối cùng để trả về cho UI. UI chỉ chịu trách nhiệm lắng nghe kết quả từ wrapper để hiển thị Toast/Alert (Bootstrap 5) hoặc render dữ liệu/trạng thái rỗng, đảm bảo tách biệt hoàn toàn giữa logic nghiệp vụ mạng và trình bày.",
+  "alternatives": [
+    "Sử dụng Interceptor của jQuery AJAX ($.ajaxSetup): Đơn giản hơn nhưng khó quản lý trạng thái loading riêng biệt cho từng request cụ thể và dễ gây xung đột nếu có nhiều luồng xử lý khác nhau.",
+    "Viết hàm helper riêng cho từng endpoint: Dễ triển khai ban đầu nhưng vi phạm nguyên tắc DRY, khó bảo trì khi thay đổi chính sách retry hay cách xử lý lỗi chung.",
+    "Sử dụng Fetch API thuần thay vì jQuery: Phù hợp với xu hướng hiện đại nhưng yêu cầu viết thêm code polyfill hoặc xử lý bất đồng bộ phức tạp hơn so với jQuery đã có sẵn trong dự án."
+  ],
+  "tradeoffs": [
+    "Việc tập trung logic vào một wrapper duy nhất tăng độ phức tạp ban đầu của lớp ApiClient nhưng giảm đáng kể độ phức tạp và mã nguồn lặp lại ở các component UI.",
+    "Chiến lược retry tự động có thể làm tăng thời gian chờ tổng thể của người dùng khi server gặp sự cố kéo dài, cần có giới hạn thời gian timeout chặt chẽ.",
+    "Tách biệt hoàn toàn logic thông báo lỗi khỏi wrapper đòi hỏi cơ chế callback hoặc Promise chaining rõ ràng, nếu không sẽ dẫn đến việc UI không nhận được trạng thái chính xác."
+  ],
+  "coverage": {
+    "REQ-001": "Lớp ApiClient đóng vai trò là điểm vào duy nhất (single entry point), cung cấp phương thức chung (ví dụ: `request()`) để mọi component gọi API thông qua đó, đảm bảo quản lý tập trung vòng đời và trạng thái.",
+    "REQ-002": "Wrapper tích hợp logic kiểm tra mã trạng thái HTTP: nếu gặp 429 hoặc 500, hệ thống tự động kích hoạt chuỗi retry với thời gian chờ tăng dần; các lỗi 4xx khác (trừ 429) được đánh dấu là non-retryable và trả về ngay.",
+    "REQ-003": "Kết quả trả về từ wrapper bao gồm cờ trạng thái (success, error, empty). Component UI dựa vào cờ này để gọi hàm hiển thị Bootstrap Toast/Alert tương ứng hoặc chuyển sang giao diện 'Empty State', đảm bảo không chặn UI vô thời hạn nhờ cơ chế timeout.",
+    "REQ-004": "Kiến trúc tuân thủ luồng: Trigger (UI gọi wrapper) -> Set Loading (Global/Local) -> Execute Request -> (Retry Loop nếu cần) -> Phân loại kết quả (Success/Error/Empty) -> Render UI/Show Toast.",
+    "REQ-005": "Xây dựng bảng ánh xạ mã lỗi: 429 (Hiển thị 'Máy chủ bận, đang thử lại...'), 500 (Hiển thị 'Lỗi máy chủ sau khi thử lại'), 404 (Hiển thị 'Không tìm thấy'), Network Error (Hiển thị 'Mất kết nối'). Mỗi mã có thông điệp Bootstrap chuẩn hóa.",
+    "REQ-006": "Áp dụng chiến lược Exponential Backoff: Retry tối đa 3 lần. Lần 1 chờ 1s, lần 2 chờ 2s, lần 3 chờ 4s. Không retry đối với lỗi 4xx (ngoại trừ 429) và lỗi hủy bỏ từ phía người dùng.",
+    "REQ-007": "Cung cấp mã giả hàm `ApiClient.request(url, options)` trả về Promise, trong đó có tham số cấu hình `retryCount`, `onLoading`, `onSuccess`, `onError` để tái sử dụng linh hoạt."
+  }
+}

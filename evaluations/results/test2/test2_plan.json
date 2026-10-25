@@ -1,0 +1,251 @@
+{
+  "schema_version": 1,
+  "metadata": {
+    "run_id": "RUN-ARCH-TEST2-1791905954",
+    "plan_revision": 1,
+    "task_revision": 1,
+    "snapshot_id": null,
+    "status": "PARTIAL",
+    "stop_reason": "Max review/revise rounds reached: Còn 1 issue mức warning chưa giải quyết (ISSUE-7ce88cd2); [RULE-ISSUE-002] Issue [ISSUE-7ce88cd2] (severity: warning, status: open) remains open: Cơ chế 'Loading toàn cục' được đề xuất có thể gây xung đột UX khi nhiều request chạy đồng thời (ví dụ: load dữ liệu cho 2 component khác nhau cùng lúc), khiến trạng thái loading bị tắt sớm hoặc kéo dài không đúng.",
+    "created_at": "2026-10-13T15:39:14.417852+00:00"
+  },
+  "task": {
+    "id": "TASK-TEST2",
+    "goal": "Thiết kế cơ chế thống nhất xử lý loading, lỗi mạng, dữ liệu rỗng và hết hạn phiên cho MockAPI trong ứng dụng chợ freelancer.",
+    "requirements": [
+      {
+        "id": "REQ-001",
+        "text": "Cơ chế thống nhất xử lý loading, lỗi mạng, dữ liệu rỗng và hết hạn phiên cho toàn bộ ứng dụng",
+        "acceptance": "Có một điểm vào duy nhất (single entry point / API client wrapper) cho mọi request để quản lý vòng đời và trạng thái."
+      },
+      {
+        "id": "REQ-002",
+        "text": "Xử lý giới hạn tốc độ và lỗi MockAPI (429/500)",
+        "acceptance": "Phân biệt lỗi có thể thử lại (retryable) và lỗi không thể thử lại (non-retryable), áp dụng chiến lược retry có kiểm soát (số lần, khoảng chờ)."
+      },
+      {
+        "id": "REQ-003",
+        "text": "Giao diện phản hồi trạng thái bằng Bootstrap 5",
+        "acceptance": "Thông báo lỗi hiển thị bằng Bootstrap 5 (toast/alert), có xử lý trạng thái rỗng (empty state) và không chặn giao diện vô thời hạn."
+      },
+      {
+        "id": "REQ-004",
+        "text": "Sơ đồ luồng một request: gửi → loading → thành công/lỗi → render",
+        "acceptance": "Kế hoạch kiến trúc phải có mục thiết kế cụ thể đáp ứng: Sơ đồ luồng một request: gửi → loading → thành công/lỗi → render"
+      },
+      {
+        "id": "REQ-005",
+        "text": "Danh sách mã lỗi và cách phản hồi tương ứng trên UI",
+        "acceptance": "Kế hoạch kiến trúc phải có mục thiết kế cụ thể đáp ứng: Danh sách mã lỗi và cách phản hồi tương ứng trên UI"
+      },
+      {
+        "id": "REQ-006",
+        "text": "Chiến lược retry (số lần, thời gian chờ) và khi nào không retry",
+        "acceptance": "Kế hoạch kiến trúc phải có mục thiết kế cụ thể đáp ứng: Chiến lược retry (số lần, thời gian chờ) và khi nào không retry"
+      },
+      {
+        "id": "REQ-007",
+        "text": "Mẫu mã giả cho hàm bọc request dùng chung",
+        "acceptance": "Kế hoạch kiến trúc phải có mục thiết kế cụ thể đáp ứng: Mẫu mã giả cho hàm bọc request dùng chung"
+      }
+    ],
+    "constraints": [
+      "MockAPI giới hạn tốc độ và đôi khi trả 429/500.",
+      "Chỉ dùng jQuery AJAX hoặc fetch, không thêm thư viện ngoài (như Axios, TanStack Query, v.v.).",
+      "Thông báo lỗi hiển thị bằng Bootstrap 5 (toast/alert)."
+    ],
+    "non_goals": [
+      "Không sử dụng các thư viện quản lý state bên ngoài hay hệ thống backend telemetry.",
+      "Không thêm runtime dependencies ngoài jQuery, Bootstrap 5 và Vanilla JS."
+    ]
+  },
+  "architecture": {
+    "decisions": [
+      {
+        "id": "DEC-1",
+        "question": "Làm thế nào để xử lý xung đột UI khi nhiều request đồng thời cùng kích hoạt loading?",
+        "chosen": "Sử dụng bộ đếm tham chiếu (Reference Counter) toàn cục trong ApiClient.",
+        "rationale": "Giải pháp này đảm bảo trạng thái loading chỉ biến mất khi tất cả các request đang chạy hoàn tất, tránh hiện tượng flicker hoặc ẩn loading sớm khi vẫn còn dữ liệu chưa về. Đây là cách tiếp cận chuẩn cho các ứng dụng đơn trang (SPA) không dùng framework state management phức tạp.",
+        "alternatives": [
+          "Sử dụng loading cục bộ cho từng component (khó đồng bộ và dễ quên)",
+          "Dùng hàng đợi request (làm chậm trải nghiệm người dùng không cần thiết)"
+        ],
+        "evidence_ids": []
+      },
+      {
+        "id": "DEC-2",
+        "question": "Chiến lược xử lý cho mã lỗi 401/403 (hết hạn phiên) nên như thế nào?",
+        "chosen": "Phân loại là non-retryable, không áp dụng backoff, trả về trạng thái đặc biệt để UI điều hướng đăng nhập.",
+        "rationale": "Việc retry khi token hết hạn là vô nghĩa và lãng phí tài nguyên nếu không có cơ chế làm mới token tự động (không nằm trong phạm vi yêu cầu). Hành động đúng nhất là thông báo ngay cho người dùng để họ đăng nhập lại, tránh lặp lại request thất bại.",
+        "alternatives": [
+          "Coi 401/403 như lỗi 500 và retry (sai logic nghiệp vụ)",
+          "Tự động chuyển hướng sang trang login ngay trong lớp ApiClient (vi phạm nguyên tắc tách biệt logic UI)"
+        ],
+        "evidence_ids": []
+      }
+    ]
+  },
+  "design_artifacts": [
+    {
+      "id": "ART-1",
+      "kind": "sequence_flow",
+      "title": "Luồng xử lý Request với Loading Counter và Retry",
+      "content": "1. UI gọi ApiClient.request() -> 2. Increment Loading Counter (nếu =1 thì show loading) -> 3. Gửi AJAX -> 4. Nếu lỗi 429/500 và retry < 3: Wait (Backoff) -> Retry; Nếu lỗi 401/403: Dừng ngay, trả về {status: 'unauthorized'}; Nếu lỗi khác: Trả về {status: 'error'} -> 5. Decrement Loading Counter (nếu =0 thì hide loading) -> 6. UI nhận kết quả và render Toast/Redirect.",
+      "requirement_ids": [
+        "REQ-001",
+        "REQ-002",
+        "REQ-004"
+      ]
+    },
+    {
+      "id": "ART-2",
+      "kind": "failure_modes",
+      "title": "Bảng ánh xạ mã lỗi và hành động",
+      "content": "429: Retry (Exponential Backoff), Hiển thị Toast 'Máy chủ bận'.\n500: Retry (Exponential Backoff), Hiển thị Toast 'Lỗi server' sau khi retry hết.\n401/403: NO Retry, Trả về trạng thái 'unauthorized', UI redirect Login.\n404: NO Retry, Hiển thị Toast 'Không tìm thấy'.\nNetwork Error: NO Retry, Hiển thị Toast 'Mất kết nối'.",
+      "requirement_ids": [
+        "REQ-002",
+        "REQ-005",
+        "REQ-006"
+      ]
+    },
+    {
+      "id": "ART-3",
+      "kind": "state_machine",
+      "title": "Trạng thái vòng đời Loading",
+      "content": "States: [IDLE, ACTIVE]. Transitions: IDLE -> ACTIVE (khi counter 0->1); ACTIVE -> ACTIVE (khi counter >0 và có request mới/kết thúc); ACTIVE -> IDLE (khi counter 1->0). Action On Enter ACTIVE: Show Bootstrap Spinner. Action On Enter IDLE: Hide Spinner.",
+      "requirement_ids": [
+        "REQ-001",
+        "REQ-004"
+      ]
+    }
+  ],
+  "steps": [
+    {
+      "id": "STEP-1",
+      "objective": "Triển khai lớp ApiClient Singleton với cơ chế quản lý trạng thái loading dựa trên bộ đếm tham chiếu (reference counter) để xử lý đồng thời nhiều request.",
+      "requirement_ids": [
+        "REQ-001",
+        "REQ-004"
+      ],
+      "dependencies": [],
+      "targets": [
+        "src/js/api-client.js"
+      ],
+      "validation": "Kiểm tra unit test mô phỏng 3 request khởi động cùng lúc đảm bảo loading chỉ tắt khi cả 3 request đều hoàn tất (counter về 0).",
+      "deliverables": [
+        "Mã nguồn ApiClient với biến toàn cục `_loadingCounter`",
+        "Hàm helper `incrementLoading()` và `decrementLoading()`"
+      ],
+      "completion_criteria": [
+        "Bộ đếm loading tăng khi request bắt đầu",
+        "Bộ đếm loading giảm khi request kết thúc (thành công hoặc thất bại)",
+        "UI loading chỉ ẩn khi bộ đếm bằng 0"
+      ],
+      "evidence_ids": []
+    },
+    {
+      "id": "STEP-2",
+      "objective": "Cập nhật logic phân loại lỗi HTTP để xử lý đặc biệt mã 401/403 (hết hạn phiên) và bổ sung vào bảng ánh xạ lỗi.",
+      "requirement_ids": [
+        "REQ-002",
+        "REQ-005",
+        "REQ-006"
+      ],
+      "dependencies": [],
+      "targets": [
+        "src/js/api-client.js"
+      ],
+      "validation": "Kiểm tra tích hợp gửi request giả lập trả về 401/403, xác nhận không có retry xảy ra và callback onError nhận trạng thái 'unauthorized'.",
+      "deliverables": [
+        "Logic switch-case xử lý status 401/403 riêng biệt",
+        "Bảng thông báo lỗi cập nhật cho 401/403",
+        "Sự kiện custom 'session:expired' được kích hoạt"
+      ],
+      "completion_criteria": [
+        "Mã 401/403 được đánh dấu là non-retryable",
+        "Không áp dụng exponential backoff cho 401/403",
+        "Trả về đối tượng kết quả có cờ `isUnauthorized: true`"
+      ],
+      "evidence_ids": []
+    },
+    {
+      "id": "STEP-3",
+      "objective": "Hoàn thiện hàm wrapper `request()` tích hợp đầy đủ luồng: Loading -> Retry (cho 429/500) -> Xử lý lỗi (401/403/4xx/Network) -> Trả Promise.",
+      "requirement_ids": [
+        "REQ-001",
+        "REQ-002",
+        "REQ-003",
+        "REQ-007"
+      ],
+      "dependencies": [],
+      "targets": [
+        "src/js/api-client.js"
+      ],
+      "validation": "Chạy suite test bao gồm: request thành công, lỗi mạng, lỗi 429 (retry 3 lần), lỗi 500 (retry 3 lần), lỗi 401 (không retry), lỗi 404 (không retry).",
+      "deliverables": [
+        "Hàm `ApiClient.request(url, options)` hoàn chỉnh",
+        "Cơ chế Exponential Backoff (1s, 2s, 4s)",
+        "Xử lý timeout cứng cho toàn bộ quá trình"
+      ],
+      "completion_criteria": [
+        "Hàm trả về Promise luôn resolve (với metadata trạng thái) thay vì reject thô",
+        "Đảm bảo tách biệt hoàn toàn logic network và UI rendering"
+      ],
+      "evidence_ids": []
+    },
+    {
+      "id": "STEP-4",
+      "objective": "Xây dựng tài liệu thiết kế chi tiết bao gồm sơ đồ luồng, bảng mã lỗi và mẫu code giả.",
+      "requirement_ids": [
+        "REQ-004",
+        "REQ-005",
+        "REQ-007"
+      ],
+      "dependencies": [],
+      "targets": [
+        "docs/architecture/api-client-design.md"
+      ],
+      "validation": "Review tài liệu đảm bảo mô tả đúng cơ chế counter loading và quy trình điều hướng khi gặp 401.",
+      "deliverables": [
+        "Sơ đồ sequence diagram",
+        "Bảng mapping lỗi chi tiết",
+        "Mẫu code usage cho UI component"
+      ],
+      "completion_criteria": [
+        "Tài liệu phê duyệt bởi nhóm phát triển",
+        "Cover đầy đủ các case edge đã xác định"
+      ],
+      "evidence_ids": []
+    }
+  ],
+  "issues": [
+    {
+      "id": "ISSUE-e1d89b5b",
+      "severity": "blocking",
+      "status": "resolved",
+      "claim": "Proposal thiếu cơ chế xử lý cụ thể cho yêu cầu 'hết hạn phiên' (session expiration) thường tương ứng với mã lỗi 401 hoặc 403, dù đây là một phần của mục tiêu nhiệm vụ.",
+      "impact": "Ứng dụng sẽ không thể phản hồi đúng khi người dùng hết phiên đăng nhập, dẫn đến trải nghiệm người dùng kém (ví dụ: lặp lại request thất bại hoặc hiển thị lỗi chung chung thay vì chuyển hướng đăng nhập).",
+      "suggested_resolution": "Bổ sung vào bảng ánh xạ mã lỗi (REQ-005) và logic wrapper (REQ-002) cách xử lý đặc biệt cho lỗi 401/403: không retry, trả về trạng thái 'unauthorized' và kích hoạt sự kiện để UI điều hướng người dùng đến trang đăng nhập.",
+      "resolution": {
+        "schema_version": 1,
+        "text": "Đã giải quyết thông qua STEP-2 và DEC-2. Kế hoạch bổ sung logic phân loại lỗi 401/403 là non-retryable, không áp dụng exponential backoff, và trả về cờ trạng thái `isUnauthorized` để UI xử lý điều hướng đăng nhập lại thay vì lặp lại request vô ích.",
+        "evidence_ids": [],
+        "reviewed_revision": 1,
+        "reviewer": "reviewer",
+        "review_result": "PASS",
+        "review_note": "Cơ chế xử lý session expiration (401/403) đã được làm rõ và tích hợp đúng vào luồng wrapper request.",
+        "requirement_change": null
+      }
+    },
+    {
+      "id": "ISSUE-7ce88cd2",
+      "severity": "warning",
+      "status": "open",
+      "claim": "Cơ chế 'Loading toàn cục' được đề xuất có thể gây xung đột UX khi nhiều request chạy đồng thời (ví dụ: load dữ liệu cho 2 component khác nhau cùng lúc), khiến trạng thái loading bị tắt sớm hoặc kéo dài không đúng.",
+      "impact": "Giao diện có thể nhấp nháy (flicker) hoặc ẩn trạng thái loading trong khi vẫn còn request đang chạy, gây hiểu nhầm cho người dùng rằng dữ liệu đã tải xong.",
+      "suggested_resolution": "Làm rõ cơ chế quản lý vòng đời loading: sử dụng bộ đếm tham chiếu (reference counter) tăng/giảm khi bắt đầu/kết thúc request. Chỉ ẩn loading khi bộ đếm về 0.",
+      "resolution": null
+    }
+  ],
+  "evidence": []
+}

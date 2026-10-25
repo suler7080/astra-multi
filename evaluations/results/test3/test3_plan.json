@@ -1,0 +1,232 @@
+{
+  "schema_version": 1,
+  "metadata": {
+    "run_id": "RUN-ARCH-TEST3-1791906100",
+    "plan_revision": 1,
+    "task_revision": 1,
+    "snapshot_id": null,
+    "status": "PARTIAL",
+    "stop_reason": "MVP candidate generated (awaiting P4 quality certification)",
+    "created_at": "2026-10-13T15:41:40.554613+00:00"
+  },
+  "task": {
+    "id": "TASK-TEST3",
+    "goal": "Thiết kế cơ chế phân quyền cho 3 vai trò (khách, freelancer, nhà tuyển dụng) và bảo vệ trang client-side cho website chợ freelancer.",
+    "requirements": [
+      {
+        "id": "REQ-001",
+        "text": "Cơ chế phân quyền cho 3 vai trò: khách, freelancer, nhà tuyển dụng",
+        "acceptance": "Ma trận phân quyền đầy đủ: Vai trò × Trang × Hành động."
+      },
+      {
+        "id": "REQ-002",
+        "text": "Cơ chế bảo vệ trang và điều hướng trước khi render (Early Guard)",
+        "acceptance": "Guard chạy trước khi render DOM nội dung trang để tránh nháy nội dung cấm (flicker). Không dùng thư viện router ngoài."
+      },
+      {
+        "id": "REQ-003",
+        "text": "Minh bạch về giới hạn và rủi ro bảo mật client-side",
+        "acceptance": "Nêu rõ kiểm soát client-side chỉ là trải nghiệm giao diện người dùng, không phải bảo mật thực sự vì người dùng có thể can thiệp devtools/localStorage. Không gợi ý backend nằm ngoài ràng buộc."
+      },
+      {
+        "id": "REQ-004",
+        "text": "Ma trận vai trò × trang × hành động",
+        "acceptance": "Kế hoạch kiến trúc phải có mục thiết kế cụ thể đáp ứng: Ma trận vai trò × trang × hành động"
+      },
+      {
+        "id": "REQ-005",
+        "text": "Cơ chế chặn truy cập trang (guard) chạy trước khi render",
+        "acceptance": "Kế hoạch kiến trúc phải có mục thiết kế cụ thể đáp ứng: Cơ chế chặn truy cập trang (guard) chạy trước khi render"
+      },
+      {
+        "id": "REQ-006",
+        "text": "Cách ẩn/hiện thành phần UI theo vai trò",
+        "acceptance": "Kế hoạch kiến trúc phải có mục thiết kế cụ thể đáp ứng: Cách ẩn/hiện thành phần UI theo vai trò"
+      },
+      {
+        "id": "REQ-007",
+        "text": "Phần 'Giới hạn và rủi ro' nói thẳng rằng kiểm soát phía client chỉ là trải nghiệm, không phải bảo mật thật",
+        "acceptance": "Kế hoạch kiến trúc phải có mục thiết kế cụ thể đáp ứng: Phần 'Giới hạn và rủi ro' nói thẳng rằng kiểm soát phía client chỉ là trải nghiệm, không phải bảo mật thật"
+      }
+    ],
+    "constraints": [
+      "Không có backend; quyền được lưu trong dữ liệu MockAPI.",
+      "Phải nêu rõ giới hạn bảo mật của phía client.",
+      "Không dùng thư viện router (như React Router, Page.js, Navigo)."
+    ],
+    "non_goals": [
+      "Không thêm backend authentication server (như OAuth2/JWT signing server).",
+      "Không dùng thư viện router ngoài."
+    ]
+  },
+  "architecture": {
+    "decisions": [
+      {
+        "id": "DEC-1",
+        "question": "Làm thế nào để giảm thiểu rủi ro giả mạo vai trò từ biến toàn cục mà không có backend?",
+        "chosen": "Áp dụng cơ chế checksum đơn giản trên đối tượng phiên làm việc và coi biến toàn cục là 'untrusted', luôn validate lại từ nguồn MockAPI trước mỗi lần kiểm tra.",
+        "rationale": "Vì ràng buộc không có backend nên không thể có chữ ký số thực sự. Tuy nhiên, việc thêm checksum giúp phát hiện các can thiệp thô sơ qua Console và buộc quy trình phải đọc lại từ nguồn gốc (MockAPI) thay vì tin tưởng biến nhớ tạm, giải quyết ISSUE-023db3b6.",
+        "alternatives": [
+          "Tin tưởng hoàn toàn vào biến toàn cục sau khi khởi tạo lần đầu.",
+          "Mã hóa toàn bộ đối tượng session bằng một key cứng trong code."
+        ],
+        "evidence_ids": []
+      },
+      {
+        "id": "DEC-2",
+        "question": "Xử lý như thế nào khi người dùng nhấn nút Back sau khi bị Early Guard chặn?",
+        "chosen": "Sử dụng history.replaceState để thay thế trạng thái hiện tại bằng trạng thái của trang an toàn (ví dụ: trang chủ hoặc 403) thay vì đẩy thêm lịch sử.",
+        "rationale": "Cách tiếp cận này loại bỏ entry 'bị chặn' khỏi ngăn xếp lịch sử trình duyệt, ngăn chặn hoàn toàn khả năng người dùng quay lại trang đó và kích hoạt vòng lặp chuyển hướng vô tận, giải quyết ISSUE-5ffe1c88.",
+        "alternatives": [
+          "Vô hiệu hóa hoàn toàn nút Back của trình duyệt.",
+          "Cho phép quay lại nhưng hiển thị nội dung rỗng."
+        ],
+        "evidence_ids": []
+      }
+    ]
+  },
+  "design_artifacts": [
+    {
+      "id": "ART-1",
+      "kind": "state_machine",
+      "title": "Session State & Integrity Check",
+      "content": "States: [Uninitialized, Loading, Valid, Invalid/Tampered]. Transitions: Start -> Loading (fetch MockAPI); Loading -> Valid (if checksum matches source); Loading -> Invalid (if mismatch detected); Any -> Uninitialized (on logout). Action on Invalid: Force reload from MockAPI or redirect to safe zone.",
+      "requirement_ids": [
+        "REQ-001",
+        "REQ-003"
+      ]
+    },
+    {
+      "id": "ART-2",
+      "kind": "sequence_flow",
+      "title": "Navigation Guard & History Handling",
+      "content": "1. User triggers navigation (click or back button). 2. Router intercepts event. 3. Early Guard calls checkAccess(route, currentRole). 4. IF denied: Call history.replaceState(safeUrl) to overwrite current bad entry, then render 403 or redirect. 5. IF allowed: Call history.pushState(targetUrl) and renderPage().",
+      "requirement_ids": [
+        "REQ-002",
+        "REQ-005"
+      ]
+    },
+    {
+      "id": "ART-3",
+      "kind": "message_schema",
+      "title": "PermissionMatrix Structure",
+      "content": "Object format: { 'guest': { '/home': ['view'], '/profile': [] }, 'freelancer': { '/home': ['view'], '/jobs': ['view', 'apply'] }, 'employer': { '/home': ['view'], '/post-job': ['create', 'edit'] } }. Keys are roles, nested keys are routes, values are arrays of allowed action strings.",
+      "requirement_ids": [
+        "REQ-004"
+      ]
+    },
+    {
+      "id": "ART-4",
+      "kind": "failure_modes",
+      "title": "Client-Side Security Limitations",
+      "content": "Failure Mode: User modifies global role variable via Console. Impact: Unauthorized access to UI views. Mitigation: Documentation explicitly states this is UX protection only; Checksum logic adds a layer of difficulty but is not cryptographic security. System assumes MockAPI is the single source of truth for the current session.",
+      "requirement_ids": [
+        "REQ-003",
+        "REQ-007"
+      ]
+    }
+  ],
+  "steps": [
+    {
+      "id": "STEP-1",
+      "objective": "Thiết kế và định nghĩa Ma trận Phân quyền (PermissionMatrix) và cấu trúc dữ liệu phiên làm việc an toàn.",
+      "requirement_ids": [
+        "REQ-001",
+        "REQ-004"
+      ],
+      "dependencies": [],
+      "targets": [
+        "Tài liệu thiết kế PermissionMatrix",
+        "Spec cấu trúc Session Object với checksum"
+      ],
+      "validation": "Kiểm tra xem ma trận có phủ kín 3 vai trò và các trang đích hay không; xác nhận cấu trúc session bao gồm trường dữ liệu và trường checksum/signature giả lập.",
+      "deliverables": [
+        "Bảng ánh xạ Role-Page-Action",
+        "Mô tả đối tượng SessionManager"
+      ],
+      "completion_criteria": [
+        "Ma trận phân quyền được định nghĩa rõ ràng cho Khách, Freelancer, Nhà tuyển dụng.",
+        "Cơ chế tạo checksum đơn giản (ví dụ: hash chuỗi JSON vai trò + salt cố định) được mô tả để phát hiện thay đổi thô sơ."
+      ],
+      "evidence_ids": []
+    },
+    {
+      "id": "STEP-2",
+      "objective": "Thiết kế cơ chế Early Guard xử lý điều hướng và vòng lặp lịch sử (history loop).",
+      "requirement_ids": [
+        "REQ-002",
+        "REQ-005"
+      ],
+      "dependencies": [],
+      "targets": [
+        "Lưu đồ thuật toán Router",
+        "Quy tắc xử lý sự kiện popstate"
+      ],
+      "validation": "Xác nhận logic sử dụng history.replaceState khi phát hiện truy cập trái phép để ngăn chặn nút Back gây vòng lặp.",
+      "deliverables": [
+        "Spec lớp Router tùy chỉnh",
+        "Kịch bản xử lý lỗi điều hướng"
+      ],
+      "completion_criteria": [
+        "Guard chạy đồng bộ trước khi render DOM.",
+        "Logic xử lý popstate明确规定: nếu truy cập bị chặn, dùng replaceState đẩy người dùng về trang an toàn thay vì pushState."
+      ],
+      "evidence_ids": []
+    },
+    {
+      "id": "STEP-3",
+      "objective": "Thiết kế cơ chế hiển thị UI theo vai trò và tài liệu giới hạn bảo mật.",
+      "requirement_ids": [
+        "REQ-003",
+        "REQ-006",
+        "REQ-007"
+      ],
+      "dependencies": [],
+      "targets": [
+        "Spec hàm renderIfAuthorized",
+        "Chương 'Giới hạn và Rủi ro' trong tài liệu"
+      ],
+      "validation": "Đối chiếu lại các cảnh báo từ ISSUE-023db3b6 và ISSUE-5ffe1c88 đã được giải quyết trong thiết kế chi tiết.",
+      "deliverables": [
+        "Mô tả utility UI",
+        "Tuyên bố miễn trừ trách nhiệm bảo mật (Security Disclaimer)"
+      ],
+      "completion_criteria": [
+        "Hàm ẩn/hiện UI dựa trên vai trò hiện tại được định nghĩa.",
+        "Tài liệu nêu rõ biến toàn cục là 'untrusted' và cơ chế client-side chỉ mang tính UX.",
+        "Giải pháp thay thế history state để tránh redirect loop được ghi nhận."
+      ],
+      "evidence_ids": []
+    }
+  ],
+  "issues": [
+    {
+      "id": "ISSUE-023db3b6",
+      "severity": "warning",
+      "status": "resolved",
+      "claim": "Proposal lưu trữ vai trò trong biến toàn cục và đọc từ MockAPI mỗi lần tải mà không đề cập cơ chế chống giả mạo (tampering) ngay tại lớp Session Manager.",
+      "impact": "Người dùng có thể dễ dàng gán lại biến toàn cục hoặc sửa trả về của MockAPI qua DevTools để leo quyền ngay lập tức, làm vô hiệu hóa toàn bộ cơ chế Early Guard.",
+      "suggested_resolution": "Bổ sung cơ chế checksum hoặc signature đơn giản (dù là client-side) cho đối tượng phiên làm việc để ít nhất phát hiện được sự can thiệp thô sơ trước khi chạy guard, hoặc ghi rõ trong tài liệu rằng biến toàn cục là 'untrusted' và phải luôn được validate lại từ nguồn gốcMockAPI một cách nghiêm ngặt trước mỗi lần kiểm tra.",
+      "resolution": {
+        "schema_version": 1,
+        "text": "Đã giải quyết bằng DEC-1 và STEP-1: Áp dụng cơ chế checksum đơn giản trên session object và quy định rõ ràng coi biến toàn cục là 'untrusted', luôn phải validate lại từ MockAPI. Thiết kế bao gồm trạng thái 'Invalid/Tampered' để xử lý khi phát hiện thay đổi.",
+        "evidence_ids": [],
+        "reviewed_revision": 1,
+        "reviewer": "reviewer",
+        "review_result": "PASS",
+        "review_note": "Cơ chế mới đảm bảo tính toàn vẹn dữ liệu ở mức độ phù hợp với ràng buộc không có backend, đồng thời minh bạch về giới hạn bảo mật.",
+        "requirement_change": null
+      }
+    },
+    {
+      "id": "ISSUE-5ffe1c88",
+      "severity": "info",
+      "status": "open",
+      "claim": "Cơ chế Early Guard chuyển hướng hoặc hiển thị 403 ngay lập tức nhưng chưa định nghĩa hành vi cụ thể khi người dùng nhấn nút 'Back' trên trình duyệt sau khi bị chặn.",
+      "impact": "Có thể tạo ra vòng lặp điều hướng (redirect loop) nếu trang đích liên tục bị chặn và lịch sử trình duyệt không được xử lý đúng cách, gây trải nghiệm người dùng tệ hại.",
+      "suggested_resolution": "Làm rõ logic xử lý sự kiện `popstate`: nếu phát hiện điều hướng ngược lại vào vùng cấm, hệ thống cần thay thế trạng thái lịch sử (history.replaceState) thay vì đẩy thêm (pushState) để tránh loop.",
+      "resolution": null
+    }
+  ],
+  "evidence": []
+}

@@ -1,0 +1,23 @@
+{
+  "approach": "Xây dựng kiến trúc Multi-Page Application (MPA) thuần tĩnh sử dụng HTML, CSS, Vanilla JS, jQuery và Bootstrap 5. Dữ liệu được quản lý tập trung qua lớp API (js/api) giao tiếp với MockAPI. Giao diện chung (header/footer) được tải động vào các trang con thông qua jQuery để tái sử dụng mà không cần backend. Trạng thái đăng nhập và phiên làm việc được lưu trữ cục bộ bằng localStorage. Cấu trúc thư mục được phân tách rõ ràng theo chức năng (pages, components, api, utils, css) để cho phép 4 lập trình viên làm việc song song trên các module độc lập (Auth/Layout, Việc làm, Tìm kiếm, Hồ sơ/Nhắn tin) mà không gây xung đột file.",
+  "alternatives": [
+    "Sử dụng kỹ thuật Server-Side Includes (SSI) nếu hosting hỗ trợ, nhưng bị loại do yêu cầu 'thuần tĩnh' và không đảm bảo compatibility mọi nơi.",
+    "Nhúng trực tiếp code header/footer vào từng file HTML, nhưng phương án này vi phạm nguyên tắc DRY và gây khó khăn khi bảo trì.",
+    "Sử dụng Hash-based routing giả lập SPA bằng Vanilla JS, nhưng tăng độ phức tạp không cần thiết và rủi ro lỗi so với MPA truyền thống."
+  ],
+  "tradeoffs": [
+    "Việc tải lại toàn bộ trang khi chuyển đổi (MPA) có thể kém mượt mà hơn SPA, nhưng đổi lại là sự đơn giản tuyệt đối trong triển khai static và dễ debug.",
+    "Lưu trạng thái đăng nhập ở client (localStorage) tiềm ẩn rủi ro bảo mật nếu bị XSS, nhưng là giải pháp duy nhất khả thi trong môi trường không có backend server.",
+    "Tải header/footer qua AJAX có thể gây hiện tượng nháy trang nhỏ khi load, nhưng chấp nhận được để đạt được sự modular hóa code."
+  ],
+  "coverage": {
+    "REQ-001": "Sử dụng kiến trúc MPA với các file HTML độc lập, chỉ dùng thư viện CDN (jQuery, Bootstrap) và code thuần, đảm bảo chạy ngay trên bất kỳ static hosting nào mà không cần build step hay server xử lý.",
+    "REQ-002": "Triển khai module `js/api/mockApi.js` đóng gói tất cả các gọi fetch/AJAX tới MockAPI. Các trang chỉ gọi hàm từ module này, đảm bảo logic dữ liệu tập trung và không phân tán.",
+    "REQ-003": "Phân chia cấu trúc thư mục theo module dọc và chức năng ngang. Mỗi thành viên sở hữu một nhóm file riêng biệt (ví dụ: member 1 làm `auth.html`, `layout.js`; member 2 làm `jobs.html`, `job-utils.js`), triệt tiêu khả năng sửa cùng 1 file.",
+    "REQ-004": "Đề xuất sơ đồ cây thư mục chi tiết: `/pages` (các file html chính), `/components` (header.html, footer.html), `/js/api` (lớp gọi dữ liệu), `/js/utils` (xử lý logic), `/css` (style tùy chỉnh).",
+    "REQ-005": "Áp dụng quy ước 3 lớp rõ ràng: Lớp API (trả về Promise data thô), Lớp Utils (biến đổi data, format ngày/giá), Lớp Page (nhận data đã xử lý và render vào DOM). Không trộn lẫn logic gọi fetch và thao tác DOM.",
+    "REQ-006": "Sử dụng jQuery `$('#header-container').load('components/header.html')` trong file JS chung hoặc từng trang để nạp phần đầu/cuối trang động từ các file HTML riêng biệt.",
+    "REQ-007": "Sử dụng `localStorage.setItem('user_token', ...)` khi đăng nhập thành công. Tạo hàm `checkAuth()` trong `js/utils/auth.js` để kiểm tra token này ở đầu mỗi trang, nếu thiếu thì redirect về login.",
+    "REQ-008": "Xác định bảng phân công: Member 1 (Core, Layout, Auth), Member 2 (Module Đăng việc & Danh sách việc), Member 3 (Module Tìm kiếm & Lọc việc), Member 4 (Module Hồ sơ cá nhân & Nhắn tin)."
+  }
+}

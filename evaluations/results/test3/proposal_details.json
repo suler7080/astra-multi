@@ -1,0 +1,22 @@
+{
+  "approach": "Triển khai cơ chế phân quyền Client-side thuần túy sử dụng Vanilla JS và History API để tự quản lý điều hướng mà không cần thư viện router. Hệ thống sẽ khởi tạo một 'Session Manager' đọc dữ liệu vai trò từ MockAPI (giả lập trạng thái đăng nhập) và lưu vào biến trạng thái toàn cục. Cơ chế 'Early Guard' sẽ được gắn vào sự kiện `popstate` và các hàm điều hướng chủ động, thực hiện kiểm tra ma trận phân quyền trước khi gọi hàm render DOM của trang đích; nếu không đủ quyền, hệ thống sẽ chuyển hướng ngay lập tức hoặc hiển thị trang 403 để ngăn chặn flicker. Giao diện sẽ sử dụng các hàm helper để ẩn/hiện thành phần UI dựa trên vai trò hiện tại. Tài liệu thiết kế sẽ bao gồm một mục riêng biệt nhấn mạnh rằng đây chỉ là lớp bảo vệ trải nghiệm người dùng (UX), không phải bảo mật thực sự, vì người dùng có thể can thiệp qua DevTools.",
+  "alternatives": [
+    "Sử dụng Hash-based navigation (#route) thay vì History API để đơn giản hóa việc lắng nghe thay đổi trạng thái mà không cần server config, dù URL kém thẩm mỹ hơn.",
+    "Lưu trữ trạng thái vai trò trực tiếp trong localStorage thay vì giả lập từ MockAPI mỗi lần tải, giúp tăng tốc độ truy xuất nhưng đòi hỏi cơ chế đồng bộ hóa phức tạp hơn khi dữ liệu MockAPI thay đổi.",
+    "Sử dụng thuộc tính data-role trên các phần tử DOM và dùng CSS để ẩn hiện, thay vì xử lý logic ẩn/hiện bằng JavaScript, tuy nhiên cách này kém linh hoạt cho các hành động động."
+  ],
+  "tradeoffs": [
+    "Việc tự xây dựng router thủ công tốn nhiều công sức bảo trì hơn so với dùng thư viện, nhưng đáp ứng đúng ràng buộc 'không dùng thư viện ngoài' và giảm kích thước bundle.",
+    "Kiểm tra quyền ở client-side cung cấp trải nghiệm người dùng mượt mà (không reload trang) nhưng hoàn toàn không an toàn trước các cuộc tấn công từ phía người dùng có kiến thức kỹ thuật.",
+    "Dùng Early Guard ngăn chặn hiệu quả hiện tượng nháy nội dung (flicker) nhưng đòi hỏi cấu trúc code phải tách biệt rõ ràng giữa logic kiểm tra quyền và logic render giao diện."
+  ],
+  "coverage": {
+    "REQ-001": "Thiết kế Session Manager lưu trữ 3 trạng thái vai trò (khách, freelancer, nhà tuyển dụng) lấy từ MockAPI, làm đầu vào cho mọi quyết định phân quyền.",
+    "REQ-002": "Triển khai hàm `checkAccess(route, role)` chạy đồng bộ trước khi gọi `renderPage()`. Nếu kiểm tra thất bại, hàm trả về false và bộ điều hướng sẽ chặn việc cập nhật DOM, đảm bảo không có nội dung nào bị render rồi mới ẩn đi.",
+    "REQ-003": "Tài liệu thiết kế sẽ có chương 'Giới hạn bảo mật', tuyên bố rõ ràng rằng mọi kiểm soát đều nằm ở trình duyệt khách, dễ dàng bị vô hiệu hóa qua Console hoặc sửa đổi LocalStorage, và không nên tin tưởng cho dữ liệu nhạy cảm.",
+    "REQ-004": "Xây dựng một đối tượng cấu hình `PermissionMatrix` dạng bảng ánh xạ: { Role: { Page: [AllowedActions] } }, dùng làm nguồn sự thật duy nhất cho các quyết định truy cập.",
+    "REQ-005": "Cơ chế Guard được tích hợp vào lớp `Router` tùy chỉnh, lắng nghe sự kiện điều hướng và thực thi logic chặn trước khi bất kỳ mã HTML nào của trang đích được tạo ra.",
+    "REQ-006": "Cung cấp hàm utility `renderIfAuthorized(element, requiredRole)` để bọc các thành phần UI, tự động thêm class `hidden` hoặc loại bỏ khỏi DOM nếu vai trò hiện tại không khớp.",
+    "REQ-007": "Phần kết luận của bản thiết kế sẽ nhắc lại yêu cầu REQ-003, khẳng định ranh giới giữa 'bảo vệ giao diện' và 'bảo mật hệ thống', phù hợp với bối cảnh không có backend."
+  }
+}
