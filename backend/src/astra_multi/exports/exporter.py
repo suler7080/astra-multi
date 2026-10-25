@@ -83,6 +83,16 @@ class PlanExporter:
                 {
                     "id": s.id,
                     "objective": s.objective,
+                    "phase_type": getattr(s, "phase_type", "core_module").value if hasattr(getattr(s, "phase_type", None), "value") else str(getattr(s, "phase_type", "core_module")),
+                    "requirement_fulfillments": [
+                        {
+                            "req_id": rf.req_id,
+                            "fulfilled_by_section": rf.fulfilled_by_section,
+                            "concrete_deliverable": rf.concrete_deliverable,
+                            "verification_method": rf.verification_method,
+                        }
+                        for rf in (getattr(s, "requirement_fulfillments", []) or [])
+                    ],
                     "requirement_ids": s.requirement_ids,
                     "dependencies": s.dependencies,
                     "targets": s.targets,
@@ -200,17 +210,31 @@ class PlanExporter:
 
         if plan:
             for step in plan.steps:
-                lines.extend([
+                phase_str = getattr(step, "phase_type", "core_module")
+                if hasattr(phase_str, "value"):
+                    phase_str = phase_str.value
+                step_lines = [
                     f"### {step.id} — {escape_markdown(step.objective)}",
                     "",
+                    f"- **Pha:** `{phase_str}`",
                     f"- **Mục tiêu:** {escape_markdown(step.objective)}",
                     f"- **Requirements:** {', '.join(f'`{r}`' for r in step.requirement_ids)}",
                     f"- **Phụ thuộc:** {', '.join(f'`{d}`' for d in step.dependencies) if step.dependencies else 'không có'}",
                     f"- **Đầu ra bàn giao:** {', '.join(escape_markdown(d) for d in step.deliverables)}",
                     f"- **Cách xác minh:** {escape_markdown(step.validation)}",
                     f"- **Tiêu chí hoàn thành:** {', '.join(escape_markdown(c) for c in step.completion_criteria)}",
-                    "",
-                ])
+                ]
+                rfs = getattr(step, "requirement_fulfillments", []) or []
+                if rfs:
+                    step_lines.append("- **Chi tiết đáp ứng Requirements (Fulfillments):**")
+                    for rf in rfs:
+                        step_lines.append(
+                            f"  - `{rf.req_id}`: *{escape_markdown(rf.fulfilled_by_section)}*\n"
+                            f"    - **Bàn giao cụ thể:** {escape_markdown(rf.concrete_deliverable)}\n"
+                            f"    - **Cách xác minh:** {escape_markdown(rf.verification_method)}"
+                        )
+                step_lines.append("")
+                lines.extend(step_lines)
         else:
             lines.append("*Chưa có bước kế hoạch nào được commit.*")
             lines.append("")

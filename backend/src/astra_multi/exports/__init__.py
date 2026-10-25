@@ -4,6 +4,7 @@ from astra_multi.exports.exporter import PlanExporter, escape_markdown
 from astra_multi.exports.finalization import (
     FinalizationDecision,
     FinalizationService,
+    PillarResult,
     SemanticReviewAssessment,
 )
 from astra_multi.exports.quality_validator import (
@@ -16,6 +17,7 @@ from astra_multi.exports.quality_validator import (
 __all__ = [
     "FinalizationDecision",
     "FinalizationService",
+    "PillarResult",
     "PlanExporter",
     "QualityReport",
     "QualityViolation",

@@ -70,6 +70,10 @@ class ContextOverflowError(ProviderError):
     pass
 
 
+class BadRequestError(ProviderError):
+    pass
+
+
 class GenerationLimits(BaseModel):
     model_config = ConfigDict(extra="forbid")
     model: Annotated[str, Field(min_length=1)] | None = None
@@ -89,6 +93,13 @@ def _classify_error(provider: str, error: Exception, secret: str = "") -> Provid
         return TimeoutError("TIMEOUT", message, provider)
     if "context" in lower or "token limit" in lower or "too long" in lower:
         return ContextOverflowError("CONTEXT_OVERFLOW", message, provider)
+    if (
+        "invalid_request" in lower
+        or "400" in lower
+        or "bad request" in lower
+        or "repeatedly failed" in lower
+    ):
+        return BadRequestError("BAD_REQUEST", message, provider)
     return ProviderError("UNKNOWN", message, provider)
 
 
@@ -130,14 +141,21 @@ def _parse_content(
 def _messages(
     role: str, messages: list[dict[str, str]], schema: type[BaseModel] | str | None
 ) -> list[dict[str, str]]:
-    system = f"You are a {role}."
+    schema_instruction = ""
     if schema is not None:
         specification = (
             json.dumps(schema.model_json_schema())
             if isinstance(schema, type)
             else schema
         )
-        system += f"\nRespond in JSON matching this schema: {specification}"
+        schema_instruction = f"\nRespond in JSON matching this schema: {specification}"
+
+    if messages and messages[0].get("role") == "system":
+        existing_sys = messages[0].get("content", "")
+        combined_sys = f"{existing_sys}{schema_instruction}"
+        return [{"role": "system", "content": combined_sys}, *messages[1:]]
+
+    system = f"You are a {role}.{schema_instruction}"
     return [{"role": "system", "content": system}, *messages]
 
 

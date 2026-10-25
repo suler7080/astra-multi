@@ -3,6 +3,7 @@
 from astra_multi.orchestration.budget import BudgetExhaustedError, BudgetService
 from astra_multi.orchestration.controller import WorkflowController
 from astra_multi.orchestration.graph import (
+    AstraStateGraph,
     OrchestrationState,
     WorkflowContext,
     create_workflow_graph,
@@ -10,6 +11,7 @@ from astra_multi.orchestration.graph import (
 from astra_multi.orchestration.termination import StagnationDetector, StopReason
 
 __all__ = [
+    "AstraStateGraph",
     "BudgetExhaustedError",
     "BudgetService",
     "OrchestrationState",

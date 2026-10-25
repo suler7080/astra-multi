@@ -15,7 +15,13 @@ from astra_multi.domain.models import (
     PlanStep,
     Proposal,
     Requirement,
+    RequirementFulfillment,
+    RubricChecklist,
+    RubricItem,
+    StepPhaseType,
     TaskSpec,
+    TechStackTruthEntry,
+    TechStackTruthTable,
 )
 
 __all__ = [
@@ -27,7 +33,13 @@ __all__ = [
     "PlanStep",
     "Proposal",
     "Requirement",
+    "RequirementFulfillment",
+    "RubricChecklist",
+    "RubricItem",
+    "StepPhaseType",
     "TaskSpec",
+    "TechStackTruthEntry",
+    "TechStackTruthTable",
     "Phase",
     "IndependentAnalysis",
     "ModelResult",

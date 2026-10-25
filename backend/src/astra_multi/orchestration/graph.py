@@ -5,7 +5,7 @@ P3.3 Production multi-agent discussion workflow graph:
   -> PROPOSE -> REVIEW -> VERIFY -> REVISE -> QUALITY_GATE -> EXPORT
 - Bounded loop: review -> verify -> revise -> gate -> (repeat or export/partial)
 - Domain state commits exclusively through controller / P1 commands.
-- Checkpoint persistence through CheckpointBridge.
+- Persistence is handled exclusively by SQLiteStore commits (no LangGraph checkpoint).
 """
 
 from __future__ import annotations
@@ -35,8 +35,9 @@ from astra_multi.agents.roles import (
     format_synthesize_prompt,
 )
 from astra_multi.context.bundle import ContextBuilder, orchestration_limits
-from astra_multi.context.evidence import EvidenceLedger
 from astra_multi.domain.models import (
+    ArtifactType,
+    Claim,
     Decision,
     DesignArtifact,
     Issue,
@@ -45,8 +46,12 @@ from astra_multi.domain.models import (
     PlanRevision,
     PlanStep,
     Proposal,
+    RequirementFulfillment,
+    RequirementType,
     RunPhase,
     RunStatus,
+    StepPhaseType,
+    TechStackTruthTable,
 )
 from astra_multi.exports.finalization import SemanticReviewAssessment
 from astra_multi.exports.quality_validator import (
@@ -55,9 +60,22 @@ from astra_multi.exports.quality_validator import (
 )
 from astra_multi.gateway.model_gateway import ModelGateway
 from astra_multi.orchestration.budget import BudgetService
+from astra_multi.orchestration.contract_extractor import (
+    ClassifiedRequirement,
+    classify_requirement,
+    detect_deliverable_gaps,
+    generate_evaluation_rubric,
+    reconcile_intake_contracts,
+)
 from astra_multi.orchestration.controller import WorkflowController
 from astra_multi.orchestration.roles import ROLE_GROUP
+from astra_multi.orchestration.rubric_checker import evaluate_semantic_rubrics
+from astra_multi.orchestration.technical_grounding import (
+    build_tech_stack_truth_table,
+    verify_technical_grounding,
+)
 from astra_multi.orchestration.termination import StagnationDetector, StopReason
+from astra_multi.sandbox.verifier import PlanSandboxVerifier
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +93,12 @@ class OrchestrationState(TypedDict, total=False):
     run_id: str
     round: int
     max_rounds: int
+    intake_passed: bool
+    intake_retries: int
+    pending_intake_gaps: list[str]
+    rubric_checklist: list[dict[str, Any]]
+    tech_stack_truth_table: dict[str, Any] | None
+    verification_violations: list[dict[str, Any]]
     analyses: Annotated[list[dict[str, Any]], _merge_analyses]
     proposal: dict[str, Any] | None
     review: dict[str, Any] | None
@@ -184,7 +208,6 @@ class WorkflowContext:
         controller: WorkflowController,
         gateway: ModelGateway,
         context_builder: ContextBuilder,
-        evidence_ledger: EvidenceLedger | None = None,
         budget_service: BudgetService | None = None,
         provider: str | None = None,
         role_assignments: dict[str, dict[str, str | None]] | None = None,
@@ -192,7 +215,6 @@ class WorkflowContext:
         self.controller = controller
         self.gateway = gateway
         self.context_builder = context_builder
-        self.evidence_ledger = evidence_ledger
         self.budget_service = budget_service
         self.stagnation_detector = StagnationDetector()
         self.provider = provider or os.environ.get("ASTRA_MULTI_PROVIDER", "fake")
@@ -229,7 +251,15 @@ class WorkflowContext:
         return None
 
 
-def create_workflow_graph(wf_ctx: WorkflowContext) -> StateGraph:
+class AstraStateGraph(StateGraph):
+    """Specialized StateGraph that automatically applies a safe production recursion limit (150)."""
+
+    def compile(self, *args: Any, recursion_limit: int = 150, **kwargs: Any) -> Any:
+        compiled = super().compile(*args, **kwargs)
+        return compiled.with_config({"recursion_limit": recursion_limit})
+
+
+def create_workflow_graph(wf_ctx: WorkflowContext) -> AstraStateGraph:
     """Builds the full multi-agent discussion workflow graph."""
     ctrl = wf_ctx.controller
     gateway = wf_ctx.gateway
@@ -352,12 +382,83 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> StateGraph:
                 budget.release(reservation_id)
 
     def intake_node(state: OrchestrationState) -> dict:
-        ctrl.transition_phase(RunPhase.SNAPSHOT)
+        pending_gaps = state.get("pending_intake_gaps", [])
+        events = [f"[INTAKE] Started run {ctrl.lease.run_id}"]
+        if pending_gaps:
+            curr_state = ctrl.get_state()
+            gaps_to_add: list[ClassifiedRequirement] = []
+            for g in pending_gaps:
+                if isinstance(g, dict):
+                    gaps_to_add.append(
+                        ClassifiedRequirement(
+                            text=g["text"],
+                            req_type=RequirementType(g["req_type"]),
+                            expected_artifact_type=ArtifactType(g["expected_artifact_type"]),
+                            acceptance_criteria=g.get("acceptance_criteria", []),
+                            verifiable_deliverable=g.get("verifiable_deliverable"),
+                        )
+                    )
+                else:
+                    gaps_to_add.append(classify_requirement(str(g), is_expected_output=True))
+
+            new_task, added = reconcile_intake_contracts(curr_state.task, gaps_to_add)
+            if added:
+                ctrl.revise_task(
+                    new_task,
+                    reason=f"Intake rerun added {len(added)} missing deliverable contracts: {[r.id for r in added]}",
+                )
+                events.append(
+                    f"[INTAKE] Synthesized {len(added)} missing contracts: {', '.join(r.id for r in added)}"
+                )
         return {
             "round": 0,
             "max_rounds": state.get("max_rounds", 2),
-            "events": [f"[INTAKE] Started run {ctrl.lease.run_id}"],
+            "pending_intake_gaps": [],
+            "events": events,
         }
+
+    def intake_gate_node(state: OrchestrationState) -> dict:
+        curr_state = ctrl.get_state()
+        gaps = detect_deliverable_gaps(curr_state.task)
+        intake_retries = state.get("intake_retries", 0)
+        max_intake_retries = 2
+
+        if gaps and intake_retries < max_intake_retries:
+            gap_data = [
+                {
+                    "text": g.text,
+                    "req_type": g.req_type.value,
+                    "expected_artifact_type": g.expected_artifact_type.value,
+                    "acceptance_criteria": g.acceptance_criteria,
+                    "verifiable_deliverable": g.verifiable_deliverable,
+                }
+                for g in gaps
+            ]
+            return {
+                "intake_passed": False,
+                "intake_retries": intake_retries + 1,
+                "pending_intake_gaps": gap_data,
+                "events": [
+                    f"[INTAKE_GATE] Gate REJECTED: {len(gaps)} deliverable noun(s) in spec lack REQ-DELIV/ORG: {[g.text for g in gaps]}. Rerunning INTAKE node."
+                ],
+            }
+
+        # Passed or max retries reached: transition to SNAPSHOT phase and generate Evaluation Rubric
+        ctrl.transition_phase(RunPhase.SNAPSHOT)
+        rubric_checklist_obj = generate_evaluation_rubric(curr_state.task)
+        checklist_items = rubric_checklist_obj.model_dump(mode="json").get("items", [])
+        return {
+            "intake_passed": True,
+            "rubric_checklist": checklist_items,
+            "events": [
+                f"[INTAKE_GATE] Contract Gate PASSED: Generated RubricChecklist with {len(checklist_items)} items for {len(curr_state.task.requirements)} requirements."
+            ],
+        }
+
+    def should_rerun_intake_or_snapshot(state: OrchestrationState) -> str:
+        if state.get("intake_passed"):
+            return "snapshot"
+        return "intake"
 
     def snapshot_node(state: OrchestrationState) -> dict:
         ctrl.transition_phase(RunPhase.INVESTIGATE)
@@ -365,7 +466,46 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> StateGraph:
 
     def investigate_node(state: OrchestrationState) -> dict:
         ctrl.transition_phase(RunPhase.INDEPENDENT_ANALYSIS)
-        return {"events": ["[INVESTIGATE] Initial inspection complete"]}
+        curr_state = ctrl.get_state()
+
+        is_greenfield = (
+            curr_state.run.mode in ("greenfield", "design")
+            or not curr_state.run.snapshot_id
+            or not curr_state.snapshot
+            or len(curr_state.snapshot.file_hashes) == 0
+        )
+
+        events = ["[INVESTIGATE] Initial inspection complete"]
+        truth_table_dict = state.get("tech_stack_truth_table")
+
+        if is_greenfield or not truth_table_dict:
+            truth_table = build_tech_stack_truth_table(curr_state.task)
+            truth_table_dict = truth_table.model_dump(mode="json")
+
+            for entry in truth_table.entries:
+                claim_id = f"CLAIM-TRUTH-{entry.tech_id.lower()}"
+                claim = Claim(
+                    id=claim_id,
+                    run_id=curr_state.run.id,
+                    text=f"[{entry.technology}] Physical limitation: {entry.physical_limitation} Mandate: {entry.mandated_pattern}",
+                    kind="fact",
+                    evidence_ids=[],
+                    snapshot_id=curr_state.run.snapshot_id,
+                )
+                try:
+                    ctrl.record_claim(claim)
+                except Exception as e:
+                    logger.warning("Could not record truth table claim %s: %s", claim_id, e)
+
+            if truth_table.entries:
+                events.append(
+                    f"[INVESTIGATE] Environment Grounding: established Truth Table with {len(truth_table.entries)} technical physical constraints"
+                )
+
+        return {
+            "tech_stack_truth_table": truth_table_dict,
+            "events": events,
+        }
 
     def planner_analysis_node(state: OrchestrationState) -> dict:
         curr_state = ctrl.get_state()
@@ -523,8 +663,23 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> StateGraph:
             round_num=state.get("round", 0),
             events=state.get("events", []),
         )
+        rubric_checklist_data = state.get("rubric_checklist")
+        if not rubric_checklist_data:
+            rubric_checklist_obj = generate_evaluation_rubric(curr_state.task)
+            rubric_checklist_data = rubric_checklist_obj.model_dump(mode="json").get("items", [])
+
+        plan_dict = curr_state.plan.model_dump(mode="json") if curr_state.plan else None
+        if plan_dict:
+            for s in plan_dict.get("steps", []):
+                if isinstance(s, dict):
+                    s.pop("requirement_fulfillments", None)
         prop = ProposalOutput.model_validate(state["proposal"])
-        messages = format_review_prompt(bundle, prop, curr_state.plan.model_dump(mode="json") if curr_state.plan else None)
+        messages = format_review_prompt(
+            bundle,
+            prop,
+            plan_dict,
+            rubric_checklist=rubric_checklist_data,
+        )
 
         call_id = f"CALL-REVIEW-{state.get('round', 0)}"
         res = _call_model_with_budget(
@@ -552,10 +707,58 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> StateGraph:
         valid_evidence = {e.id for e in curr_state.evidence}
         existing_issue_ids = {i.id for i in curr_state.issues}
         issue_round = state.get("round", 0)
+
+        # 1. Mandatory Rubric Audit: auto-elevate MISSING or PARTIAL to BLOCKING issues
+        for ra in review_out.rubric_audits:
+            if ra.status in ("MISSING", "PARTIAL"):
+                matched_req = ra.req_id if ra.req_id in valid_reqs else None
+                req_list = [matched_req] if matched_req else []
+                claim_text = f"Rubric item [{ra.rubric_id}] is {ra.status}: {ra.notes or 'Requirement not met in plan'}"
+                audit_ir = IssueReport(
+                    claim=claim_text,
+                    impact=f"Mandatory rubric audit failed for requirement {ra.req_id}",
+                    severity=IssueSeverity.BLOCKING,
+                    verification_request=f"Verify evidence: {ra.evidence_quote[:100]}" if ra.evidence_quote else f"Verify rubric {ra.rubric_id}",
+                    suggested_resolution=f"Provide concrete implementation deliverable for {ra.rubric_id} ({ra.req_id})",
+                    requirement_ids=req_list,
+                )
+                review_out.issues.append(audit_ir)
+
+        # 2. Constraint Conflict Audit: auto-elevate detected conflicts to BLOCKING issues
+        for ca in review_out.constraint_audits:
+            if ca.conflict_detected:
+                matched_req = ca.tech_req_id if ca.tech_req_id in valid_reqs else None
+                req_list = [matched_req] if matched_req else []
+                conflict_detail = ca.conflict_details or ca.solution_analyzed or "Conflict with technical constraint"
+                conflict_ir = IssueReport(
+                    claim=f"Constraint conflict with {ca.tech_req_id}: {conflict_detail}",
+                    impact=f"Violates technical constraint {ca.tech_req_id}",
+                    severity=IssueSeverity.BLOCKING,
+                    verification_request=f"Verify compatibility with {ca.tech_req_id}",
+                    suggested_resolution=ca.suggested_fix or f"Adjust solution to comply with {ca.tech_req_id}",
+                    requirement_ids=req_list,
+                )
+                review_out.issues.append(conflict_ir)
+
+        # 3. Out-of-Scope Issue Filter & Commit domain issues
+        task_corpus = " ".join(r.text for r in curr_state.task.requirements)
         enriched_issues: list[IssueReport] = []
         for idx, ir in enumerate(review_out.issues):
             filtered_req_ids = [rid for rid in ir.requirement_ids if rid in valid_reqs]
             filtered_evi_ids = [eid for eid in ir.evidence_ids if eid in valid_evidence]
+
+            is_unrequested_tech = bool(
+                re.search(r"\b(redux|zustand|mobx|vuex|recoil)\b", (ir.claim or "") + " " + (ir.suggested_resolution or ""), re.IGNORECASE)
+                and not re.search(r"\b(redux|zustand|mobx|vuex|recoil)\b", task_corpus, re.IGNORECASE)
+            )
+
+            # If not mapped to any valid requirement OR complains about unrequested state management, downgrade to NITPICK
+            if not filtered_req_ids or is_unrequested_tech:
+                ir = ir.model_copy(update={
+                    "severity": IssueSeverity.NITPICK,
+                    "impact": f"[Out-of-Scope / Nitpick] {ir.impact}",
+                })
+
             verif_req = ir.verification_request
             if not filtered_evi_ids and not verif_req:
                 verif_req = f"Verification required: {ir.claim[:100]}"
@@ -626,7 +829,104 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> StateGraph:
 
     def verify_node(state: OrchestrationState) -> dict:
         ctrl.transition_phase(RunPhase.VERIFY)
-        return {"events": ["[VERIFY] Verification completed"]}
+        curr_state = ctrl.get_state()
+
+        truth_table_data = state.get("tech_stack_truth_table")
+        if truth_table_data:
+            truth_table = TechStackTruthTable.model_validate(truth_table_data)
+        else:
+            truth_table = build_tech_stack_truth_table(curr_state.task)
+
+        proposal_data = state.get("proposal")
+        plan = curr_state.plan
+
+        # 1. Static technical grounding check
+        violations = verify_technical_grounding(
+            task=curr_state.task,
+            proposal=proposal_data,
+            plan=plan,
+            truth_table=truth_table,
+        )
+
+        events = [f"[VERIFY] Technical Grounding verification checked against {len(truth_table.entries)} constraints"]
+        round_num = state.get("round", 0)
+        base_rev = plan.revision if plan else 0
+        new_issues: list[Issue] = []
+
+        valid_reqs = {r.id for r in curr_state.task.requirements}
+        for v in violations:
+            raw_hash = hashlib.sha256(
+                f"{curr_state.run.id}:{round_num}:{v.tech_id}:{v.prohibited_pattern_matched}".encode("utf-8")
+            ).hexdigest()[:8]
+            iss_id = f"ISSUE-TECH-{raw_hash}"
+            filtered_rids = [r for r in v.related_req_ids if r in valid_reqs]
+            if not filtered_rids and valid_reqs:
+                filtered_rids = [next(iter(valid_reqs))]
+
+            issue = Issue(
+                id=iss_id,
+                run_id=curr_state.run.id,
+                severity=v.severity,
+                status=IssueStatus.OPEN,
+                based_on_revision=base_rev,
+                claim=v.claim,
+                impact=v.impact,
+                verification_request=f"Verify against physical constraints of {v.technology}: {v.prohibited_pattern_matched}",
+                suggested_resolution=v.suggested_resolution,
+                requirement_ids=filtered_rids,
+            )
+            try:
+                ctrl.record_issue(issue)
+                new_issues.append(issue)
+                events.append(f"[VERIFY] Violation detected: [{v.tech_id}] {v.claim[:60]}")
+            except Exception as e:
+                logger.warning("Could not record verification issue %s: %s", iss_id, e)
+
+        # 2. Executable Sandbox Verification
+        sandbox_artifacts = getattr(builder, "artifacts", None)
+        sandbox_verifier = PlanSandboxVerifier(artifacts=sandbox_artifacts)
+        sandbox_outcome, tool_call, evidence, validation, sandbox_issues = sandbox_verifier.verify(
+            task=curr_state.task,
+            plan=plan,
+            proposal=proposal_data,
+            truth_table=truth_table,
+            controller=ctrl,
+            snapshot_id=curr_state.run.snapshot_id,
+        )
+
+        if not sandbox_outcome.passed:
+            events.append(
+                f"[VERIFY] Executable Sandbox Verification FAILED with {len(sandbox_outcome.violations)} violation(s)"
+            )
+            for iss in sandbox_issues:
+                new_issues.append(iss)
+                events.append(f"[VERIFY] Sandbox blocker: {iss.claim[:60]}")
+        else:
+            events.append("[VERIFY] Executable Sandbox Verification PASSED (exit code 0)")
+
+        review_dict = state.get("review")
+        if review_dict and new_issues:
+            curr_issues_list = list(review_dict.get("issues", []))
+            for iss in new_issues:
+                curr_issues_list.append({
+                    "id": iss.id,
+                    "claim": iss.claim,
+                    "impact": iss.impact,
+                    "severity": iss.severity.value,
+                    "verification_request": iss.verification_request,
+                    "suggested_resolution": iss.suggested_resolution,
+                    "requirement_ids": iss.requirement_ids,
+                    "evidence_ids": iss.evidence_ids,
+                })
+            review_dict["issues"] = curr_issues_list
+
+        return {
+            "events": events,
+            "verification_violations": [v.__dict__ for v in violations],
+            "sandbox_violations": sandbox_outcome.violations,
+            "sandbox_passed": sandbox_outcome.passed,
+            "review": review_dict if review_dict else state.get("review"),
+        }
 
     def revise_node(state: OrchestrationState) -> dict:
         ctrl.transition_phase(RunPhase.REVISE)
@@ -643,11 +943,17 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> StateGraph:
         )
         prop = ProposalOutput.model_validate(state["proposal"])
         rev = ReviewOutput.model_validate(state["review"])
+        baseline_plan_dict = None
+        if curr_state.plan:
+            baseline_plan_dict = curr_state.plan.model_dump(mode="json")
+            for s in baseline_plan_dict.get("steps", []):
+                if isinstance(s, dict):
+                    s.pop("requirement_fulfillments", None)
         messages = format_synthesize_prompt(
             bundle,
             prop,
             rev,
-            curr_state.plan.model_dump(mode="json") if curr_state.plan else None,
+            baseline_plan_dict,
             mode=curr_state.run.mode,
         )
 
@@ -688,10 +994,64 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> StateGraph:
             filtered_evis = [eid for eid in s.evidence_ids if eid in valid_evidence]
             prior_step_ids = {f"STEP-{j + 1}" for j in range(idx)}
             filtered_deps = [dep for dep in s.dependencies if dep in prior_step_ids]
+
+            # Parse and map fulfillments
+            fulfillments: list[RequirementFulfillment] = []
+            for rf in getattr(s, "requirement_fulfillments", []) or []:
+                raw_rid = rf.req_id if hasattr(rf, "req_id") else rf.get("req_id", "")
+                r_id = raw_rid.strip() if isinstance(raw_rid, str) else str(raw_rid)
+                if r_id in valid_reqs:
+                    cd = rf.concrete_deliverable if hasattr(rf, "concrete_deliverable") else rf.get("concrete_deliverable", "")
+                    sec = rf.fulfilled_by_section if hasattr(rf, "fulfilled_by_section") else rf.get("fulfilled_by_section", "")
+                    vm = rf.verification_method if hasattr(rf, "verification_method") else rf.get("verification_method", "")
+                    fulfillments.append(
+                        RequirementFulfillment(
+                            req_id=r_id,
+                            fulfilled_by_section=sec or s.objective,
+                            concrete_deliverable=cd or (s.deliverables[0] if s.deliverables else "Deliverable output"),
+                            verification_method=vm or s.validation,
+                        )
+                    )
+            # Ensure every filtered_req has a fulfillment
+            existing_f_rids = {f.req_id for f in fulfillments}
+            for rid in filtered_reqs:
+                if rid not in existing_f_rids:
+                    deliv_text = s.deliverables[0] if s.deliverables else "Deliverable output"
+                    if len(deliv_text) < 15:
+                        deliv_text = f"{deliv_text} implementation deliverable"
+                    verif_text = s.validation
+                    if len(verif_text) < 5:
+                        verif_text = f"Verify: {verif_text}"
+                    fulfillments.append(
+                        RequirementFulfillment(
+                            req_id=rid,
+                            fulfilled_by_section=s.objective,
+                            concrete_deliverable=deliv_text,
+                            verification_method=verif_text,
+                        )
+                    )
+
+            # Determine phase_type:
+            raw_phase = getattr(s, "phase_type", None) or StepPhaseType.CORE_MODULE
+            if isinstance(raw_phase, str):
+                raw_phase_lower = raw_phase.lower()
+                if "setup" in raw_phase_lower or "init" in raw_phase_lower:
+                    phase_type = StepPhaseType.SETUP
+                elif "integrat" in raw_phase_lower or "api" in raw_phase_lower:
+                    phase_type = StepPhaseType.INTEGRATION
+                elif "verif" in raw_phase_lower or "test" in raw_phase_lower or "qa" in raw_phase_lower:
+                    phase_type = StepPhaseType.VERIFICATION
+                else:
+                    phase_type = StepPhaseType.CORE_MODULE
+            else:
+                phase_type = raw_phase
+
             plan_steps.append(
                 PlanStep(
                     id=step_id,
                     objective=s.objective,
+                    phase_type=phase_type,
+                    requirement_fulfillments=fulfillments,
                     requirement_ids=filtered_reqs,
                     dependencies=filtered_deps,
                     targets=s.targets,
@@ -836,9 +1196,19 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> StateGraph:
             round_num=state.get("round", 0),
             events=state.get("events", []),
         )
+        rubric_checklist_data = state.get("rubric_checklist")
+        if not rubric_checklist_data:
+            rubric_checklist_obj = generate_evaluation_rubric(curr_state.task)
+            rubric_checklist_data = rubric_checklist_obj.model_dump(mode="json").get("items", [])
+
         plan_dict = curr_state.plan.model_dump(mode="json")
+        for s in plan_dict.get("steps", []):
+            if isinstance(s, dict):
+                s.pop("requirement_fulfillments", None)
         open_issues_dict = [i.model_dump(mode="json") for i in open_issues]
-        messages = format_semantic_review_prompt(bundle, plan_dict, open_issues_dict)
+        messages = format_semantic_review_prompt(
+            bundle, plan_dict, open_issues_dict, rubric_checklist=rubric_checklist_data
+        )
 
         call_id = f"CALL-SEMANTIC-REVIEW-{state.get('round', 0)}"
         res = _call_model_with_budget(
@@ -913,10 +1283,58 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> StateGraph:
         valid_evidence = {e.id for e in curr_state.evidence}
         existing_issue_ids = {i.id for i in curr_state.issues}
         issue_round = state.get("round", 0)
+
+        # 1. Mandatory Rubric Audit: auto-elevate MISSING or PARTIAL to BLOCKING issues
+        for ra in review_out.rubric_audits:
+            if ra.status in ("MISSING", "PARTIAL"):
+                matched_req = ra.req_id if ra.req_id in valid_reqs else None
+                req_list = [matched_req] if matched_req else []
+                claim_text = f"Rubric item [{ra.rubric_id}] is {ra.status}: {ra.notes or 'Requirement not met in plan'}"
+                audit_ir = IssueReport(
+                    claim=claim_text,
+                    impact=f"Mandatory rubric audit failed for requirement {ra.req_id}",
+                    severity=IssueSeverity.BLOCKING,
+                    verification_request=f"Verify evidence: {ra.evidence_quote[:100]}" if ra.evidence_quote else f"Verify rubric {ra.rubric_id}",
+                    suggested_resolution=f"Provide concrete implementation deliverable for {ra.rubric_id} ({ra.req_id})",
+                    requirement_ids=req_list,
+                )
+                review_out.issues.append(audit_ir)
+
+        # 2. Constraint Conflict Audit: auto-elevate detected conflicts to BLOCKING issues
+        for ca in review_out.constraint_audits:
+            if ca.conflict_detected:
+                matched_req = ca.tech_req_id if ca.tech_req_id in valid_reqs else None
+                req_list = [matched_req] if matched_req else []
+                conflict_detail = ca.conflict_details or ca.solution_analyzed or "Conflict with technical constraint"
+                conflict_ir = IssueReport(
+                    claim=f"Constraint conflict with {ca.tech_req_id}: {conflict_detail}",
+                    impact=f"Violates technical constraint {ca.tech_req_id}",
+                    severity=IssueSeverity.BLOCKING,
+                    verification_request=f"Verify compatibility with {ca.tech_req_id}",
+                    suggested_resolution=ca.suggested_fix or f"Adjust solution to comply with {ca.tech_req_id}",
+                    requirement_ids=req_list,
+                )
+                review_out.issues.append(conflict_ir)
+
+        # 3. Out-of-Scope Issue Filter & Commit domain issues
+        task_corpus = " ".join(r.text for r in curr_state.task.requirements)
         enriched_semantic_issues: list[IssueReport] = []
         for idx, ir in enumerate(review_out.issues):
             filtered_req_ids = [rid for rid in ir.requirement_ids if rid in valid_reqs]
             filtered_evi_ids = [eid for eid in ir.evidence_ids if eid in valid_evidence]
+
+            is_unrequested_tech = bool(
+                re.search(r"\b(redux|zustand|mobx|vuex|recoil)\b", (ir.claim or "") + " " + (ir.suggested_resolution or ""), re.IGNORECASE)
+                and not re.search(r"\b(redux|zustand|mobx|vuex|recoil)\b", task_corpus, re.IGNORECASE)
+            )
+
+            # If not mapped to any valid requirement OR complains about unrequested state management, downgrade to NITPICK
+            if not filtered_req_ids or is_unrequested_tech:
+                ir = ir.model_copy(update={
+                    "severity": IssueSeverity.NITPICK,
+                    "impact": f"[Out-of-Scope / Nitpick] {ir.impact}",
+                })
+
             verif_req = ir.verification_request
             if not filtered_evi_ids and not verif_req:
                 verif_req = f"Verification required: {ir.claim[:100]}"
@@ -939,8 +1357,45 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> StateGraph:
             )
             ctrl.record_issue(domain_issue)
 
+        # Run rubric checker against plan concrete deliverables and acceptance criteria
+        rubric_verdicts = evaluate_semantic_rubrics(
+            curr_state.task,
+            curr_state.plan,
+            getattr(curr_state.plan, "design_artifacts", []) if curr_state.plan else [],
+        )
+        rubric_by_req = {v.requirement_id: v for v in rubric_verdicts}
+        model_verdicts_by_req = {v.requirement_id: v for v in review_out.requirement_verdicts}
+
+        merged_verdicts: list[RequirementVerdict] = []
+        for req in curr_state.task.requirements:
+            rid = req.id
+            rubric_v = rubric_by_req.get(rid)
+            model_v = model_verdicts_by_req.get(rid)
+
+            if rubric_v and rubric_v.verdict == "FAIL":
+                chosen_v = rubric_v
+            elif model_v and model_v.verdict == "PASS":
+                chosen_v = model_v
+            elif rubric_v:
+                chosen_v = rubric_v
+            elif model_v:
+                chosen_v = model_v
+            else:
+                chosen_v = RequirementVerdict(
+                    requirement_id=rid,
+                    restated=req.text,
+                    mechanism="Unverified",
+                    verdict="FAIL",
+                    gap=f"No review verdict provided for {rid}",
+                )
+            merged_verdicts.append(chosen_v)
+
         review_out = review_out.model_copy(
-            update={"issues": enriched_semantic_issues, "resolutions": mapped_resolutions}
+            update={
+                "issues": enriched_semantic_issues,
+                "resolutions": mapped_resolutions,
+                "requirement_verdicts": merged_verdicts,
+            }
         )
 
         # Check stagnation after resolutions are evaluated
@@ -958,13 +1413,24 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> StateGraph:
             v for v in review_out.requirement_verdicts
             if v.verdict != "PASS"
         ]
-        assessment_passed = (len(open_warning_or_blocker) == 0) and (len(failed_verdicts) == 0)
+        rubric_audit_items = getattr(review_out, "rubric_audits", []) or []
+        rubric_failures = [
+            ra for ra in rubric_audit_items
+            if getattr(ra, "status", None) in ("MISSING", "PARTIAL")
+        ]
+        assessment_passed = (
+            (len(open_warning_or_blocker) == 0)
+            and (len(failed_verdicts) == 0)
+            and (len(rubric_failures) == 0)
+        )
         concerns = [f"[{i.id}] {i.claim}" for i in open_warning_or_blocker]
         for v in failed_verdicts:
             concerns.append(f"[{v.requirement_id}] Verdict {v.verdict}: {v.gap or v.mechanism}")
+        for ra in rubric_failures:
+            concerns.append(f"[RUBRIC-{getattr(ra, 'rubric_id', 'R')}] Status {getattr(ra, 'status', 'FAIL')} for {getattr(ra, 'req_id', '')}")
         if assessment_passed:
             feedback = review_out.summary or (
-                "Tất cả issue mức warning trở lên đã được giải quyết và mọi requirement đạt PASS"
+                "Tất cả issue mức warning trở lên đã được giải quyết, mọi rubric đạt MET và mọi requirement đạt PASS"
             )
         else:
             reasons = []
@@ -972,12 +1438,19 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> StateGraph:
                 reasons.append(f"Còn {len(open_warning_or_blocker)} issue mức warning trở lên chưa giải quyết")
             if failed_verdicts:
                 reasons.append(f"Có {len(failed_verdicts)} requirement chưa đạt PASS ({', '.join(v.requirement_id for v in failed_verdicts)})")
+            if rubric_failures:
+                reasons.append(f"Có {len(rubric_failures)} rubric item chưa đạt MET ({', '.join(getattr(ra, 'rubric_id', 'R') for ra in rubric_failures)})")
             feedback = review_out.summary or "; ".join(reasons)
+        audits_payload = [
+            ra.model_dump(mode="json") if hasattr(ra, "model_dump") else (ra if isinstance(ra, dict) else ra.__dict__)
+            for ra in rubric_audit_items
+        ]
         assessment = SemanticReviewAssessment(
             passed=assessment_passed,
             reviewed_plan_revision=plan_rev,
             feedback=feedback,
             concerns=concerns,
+            rubric_audits=audits_payload,
         )
         if hasattr(ctrl, "save_semantic_review"):
             ctrl.save_semantic_review(assessment)
@@ -1018,6 +1491,17 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> StateGraph:
         ]
         if open_warnings:
             problems.append(f"Còn {len(open_warnings)} issue mức warning chưa giải quyết ({', '.join(open_warnings)})")
+
+        # Check semantic review assessment
+        sem_assessment = None
+        if hasattr(ctrl, "get_semantic_review"):
+            sem_assessment = ctrl.get_semantic_review(curr_state.run.id)
+        elif hasattr(ctrl.repository, "get_semantic_review"):
+            sem_assessment = ctrl.repository.get_semantic_review(curr_state.run.id)
+        if sem_assessment and not sem_assessment.passed:
+            problems.append(
+                f"Semantic review did not pass: {'; '.join(sem_assessment.concerns) or sem_assessment.feedback}"
+            )
 
         # Check requirement coverage
         if plan:
@@ -1086,8 +1570,9 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> StateGraph:
         return "propose"
 
     # Assemble StateGraph
-    graph = StateGraph(OrchestrationState)
+    graph = AstraStateGraph(OrchestrationState)
     graph.add_node("intake", intake_node)
+    graph.add_node("intake_gate", intake_gate_node)
     graph.add_node("snapshot", snapshot_node)
     graph.add_node("investigate", investigate_node)
     graph.add_node("planner_analysis", planner_analysis_node)
@@ -1102,7 +1587,15 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> StateGraph:
 
     # Edge connections
     graph.set_entry_point("intake")
-    graph.add_edge("intake", "snapshot")
+    graph.add_edge("intake", "intake_gate")
+    graph.add_conditional_edges(
+        "intake_gate",
+        should_rerun_intake_or_snapshot,
+        {
+            "snapshot": "snapshot",
+            "intake": "intake",
+        },
+    )
     graph.add_edge("snapshot", "investigate")
     graph.add_edge("investigate", "planner_analysis")
     graph.add_edge("investigate", "reviewer_analysis")

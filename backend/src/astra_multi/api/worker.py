@@ -209,8 +209,10 @@ class RunWorker:
                 "events": [],
             }
 
+            invoke_config = {"recursion_limit": 150}
+
             try:
-                await loop.run_in_executor(None, app.invoke, initial_state)
+                await loop.run_in_executor(None, app.invoke, initial_state, invoke_config)
             finally:
                 if heartbeat_task is not None:
                     heartbeat_task.cancel()

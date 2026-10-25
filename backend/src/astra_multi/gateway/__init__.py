@@ -1,10 +1,5 @@
-"""Model gateway for role-based provider routing and capability management."""
+"""Model gateway for role-based provider routing and budget control."""
 
-from astra_multi.gateway.capabilities import (
-    Capability,
-    CapabilityRegistry,
-    ModelCapability,
-)
 from astra_multi.gateway.model_gateway import (
     AttemptTrace,
     BudgetExceededError,
@@ -14,12 +9,9 @@ from astra_multi.gateway.model_gateway import (
 )
 
 __all__ = [
-    "Capability",
-    "CapabilityRegistry",
-    "ModelCapability",
+    "AttemptTrace",
     "ModelGateway",
     "GatewayConfig",
     "BudgetHook",
     "BudgetExceededError",
-    "AttemptTrace",
 ]

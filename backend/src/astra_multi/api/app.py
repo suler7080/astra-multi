@@ -36,6 +36,7 @@ from astra_multi.domain.models import (
     RunStatus,
     TaskSpec,
 )
+from astra_multi.orchestration.contract_extractor import classify_all
 from astra_multi.domain.policies import InvalidState, LeaseLost, RevisionConflict
 from astra_multi.exports.exporter import PlanExporter
 from astra_multi.exports.finalization import (
@@ -219,42 +220,42 @@ def create_app(
         task_id = f"TASK-{run_id}"
 
         requirements: list[Requirement] = []
-        for req in payload.requirements:
-            req_id = f"REQ-{len(requirements) + 1:03d}"
-            if isinstance(req, str):
-                r_text = req.strip()
-                r_acc = None
-            elif isinstance(req, dict):
-                r_text = str(req.get("text", "")).strip()
-                r_acc = req.get("acceptance")
-            else:
-                r_text = req.text.strip()
-                r_acc = req.acceptance
+
+        # Classify all raw requirements + expected_outputs into typed groups
+        classified_items = classify_all(payload.requirements, payload.expected_outputs)
+        for req_id, classified in classified_items:
+            # Determine custom acceptance from original payload (by position)
+            # Only explicit `requirements` entries may carry a custom acceptance field.
+            custom_acc: str | None = None
+            req_index = len(requirements)
+            if req_index < len(payload.requirements):
+                raw = payload.requirements[req_index]
+                if isinstance(raw, str):
+                    custom_acc = None
+                elif isinstance(raw, dict):
+                    raw_acc = raw.get("acceptance")
+                    custom_acc = raw_acc.strip() if (raw_acc and isinstance(raw_acc, str) and raw_acc.strip()) else None
+                else:
+                    raw_acc = raw.acceptance
+                    custom_acc = raw_acc.strip() if (raw_acc and isinstance(raw_acc, str) and raw_acc.strip()) else None
 
             acc = (
-                r_acc.strip()
-                if (r_acc and isinstance(r_acc, str) and r_acc.strip())
-                else f"Plan nêu cơ chế cụ thể đáp ứng yêu cầu này và cách kiểm chứng: {r_text}"
+                custom_acc
+                if custom_acc
+                else f"Plan nêu cơ chế cụ thể đáp ứng yêu cầu này và cách kiểm chứng: {classified.text}"
             )
             requirements.append(
                 Requirement(
                     id=req_id,
-                    text=r_text,
+                    text=classified.text,
                     acceptance=acc,
+                    req_type=classified.req_type,
+                    expected_artifact_type=classified.expected_artifact_type,
+                    acceptance_criteria=classified.acceptance_criteria,
+                    verifiable_deliverable=classified.verifiable_deliverable,
                 )
             )
 
-        for out_text in payload.expected_outputs:
-            req_id = f"REQ-{len(requirements) + 1:03d}"
-            out_cleaned = str(out_text).strip()
-            acc = f"Plan nêu cơ chế cụ thể đáp ứng yêu cầu này và cách kiểm chứng: {out_cleaned}"
-            requirements.append(
-                Requirement(
-                    id=req_id,
-                    text=out_cleaned,
-                    acceptance=acc,
-                )
-            )
 
         task = TaskSpec(
             id=task_id,
@@ -264,8 +265,23 @@ def create_app(
             non_goals=payload.non_goals,
         )
 
+        if payload.parent_run_id:
+            try:
+                parent_state = store.load(payload.parent_run_id)
+            except KeyError:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Parent run {payload.parent_run_id} not found.",
+                )
+            if parent_state.run.status not in TERMINAL:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Parent run {payload.parent_run_id} is in status {parent_state.run.status.value}; only terminal runs can be cloned.",
+                )
+
         run = Run(
             id=run_id,
+            parent_run_id=payload.parent_run_id,
             task_id=task.id,
             task_revision=1,
             snapshot_id=None,
@@ -295,7 +311,11 @@ def create_app(
                 if isinstance(v, dict)
             }
             (meta_dir / f"{run_id}.json").write_text(
-                json.dumps({"role_mappings": sanitized_meta}), encoding="utf-8"
+                json.dumps({
+                    "role_mappings": sanitized_meta,
+                    "max_rounds": payload.max_rounds,
+                }),
+                encoding="utf-8",
             )
         except Exception:
             pass
@@ -360,6 +380,16 @@ def create_app(
                 detail=f"Run {run_id} not found.",
             )
 
+        max_rounds = 2
+        try:
+            meta_file = store.artifacts.root / "metadata" / f"{run_id}.json"
+            if meta_file.exists():
+                meta_data = json.loads(meta_file.read_text(encoding="utf-8"))
+                if "max_rounds" in meta_data and isinstance(meta_data["max_rounds"], int):
+                    max_rounds = meta_data["max_rounds"]
+        except Exception:
+            pass
+
         return RunDetailResponse(
             run_id=state.run.id,
             task_id=state.task.id,
@@ -382,6 +412,11 @@ def create_app(
             pending_questions=[
                 q.model_dump(mode="json") for q in state.questions if q.answer is None
             ],
+            mode=state.run.mode,
+            token_limit=state.run.budget.token_limit,
+            cost_limit=state.run.budget.cost_limit,
+            max_rounds=max_rounds,
+            parent_run_id=state.run.parent_run_id,
         )
 
     @app.get(
@@ -831,6 +866,16 @@ def create_app(
                     "reason": decision.reason,
                     "message": "Run finalized as FINAL.",
                     "blockers": [],
+                    "pillar_results": {
+                        k: {
+                            "pillar_id": p.pillar_id,
+                            "name": p.name,
+                            "passed": p.passed,
+                            "details": p.details,
+                            "diagnostics": p.diagnostics,
+                        }
+                        for k, p in decision.pillar_results.items()
+                    },
                 }
             finally:
                 store.release(lease)
@@ -848,6 +893,16 @@ def create_app(
                 "can_finalize": False,
                 "reason": decision.reason,
                 "blockers": blocker_msgs,
+                "pillar_results": {
+                    k: {
+                        "pillar_id": p.pillar_id,
+                        "name": p.name,
+                        "passed": p.passed,
+                        "details": p.details,
+                        "diagnostics": p.diagnostics,
+                    }
+                    for k, p in decision.pillar_results.items()
+                },
             }
 
     # Mount static files if frontend build exists

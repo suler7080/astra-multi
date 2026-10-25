@@ -19,6 +19,7 @@ from astra_multi.context.bundle import ContextBundle
 from astra_multi.domain.models import (
     ID,
     IssueSeverity,
+    StepPhaseType,
     Text,
 )
 
@@ -93,6 +94,24 @@ class IssueResolutionReport(AgentContract):
     evidence_ids: list[ID] = Field(default_factory=list)
 
 
+class RubricAuditItem(AgentContract):
+    """Part 1: Mandatory audit of an individual rubric item."""
+    rubric_id: ID
+    req_id: ID
+    status: Literal["MET", "PARTIAL", "MISSING"]
+    evidence_quote: str = ""
+    notes: str = ""
+
+
+class ConstraintAuditItem(AgentContract):
+    """Part 2: Audit of technical constraints vs proposed solutions."""
+    tech_req_id: ID
+    solution_analyzed: Text
+    conflict_detected: bool = False
+    conflict_details: str = ""
+    suggested_fix: str = ""
+
+
 class RequirementVerdict(AgentContract):
     requirement_id: ID
     restated: Text
@@ -104,6 +123,14 @@ class RequirementVerdict(AgentContract):
 class ReviewOutput(AgentContract):
     """Output schema for Reviewer in REVIEW phase."""
 
+    rubric_audits: list[RubricAuditItem] = Field(
+        default_factory=list,
+        description="Part 1: Mandatory audit of each item in RubricChecklist (MET / PARTIAL / MISSING)",
+    )
+    constraint_audits: list[ConstraintAuditItem] = Field(
+        default_factory=list,
+        description="Part 2: Audit of technical constraints (REQ-TECH-xxx) vs plan solutions for conflicts",
+    )
     issues: list[IssueReport] = Field(default_factory=list)
     summary: Text
     reviewed_evidence_ids: list[ID] = Field(default_factory=list)
@@ -129,15 +156,64 @@ class ReviewOutput(AgentContract):
         return self
 
 
+class RequirementFulfillmentDraft(AgentContract):
+    req_id: ID
+    fulfilled_by_section: Text
+    concrete_deliverable: Text
+    verification_method: Text
+
+
 class StepDraft(AgentContract):
     objective: Text
-    requirement_ids: list[ID] = Field(min_length=1)
+    phase_type: StepPhaseType = StepPhaseType.CORE_MODULE
+    requirement_fulfillments: list[RequirementFulfillmentDraft] = Field(default_factory=list)
+    requirement_ids: list[ID] = Field(default_factory=list)
     dependencies: list[str] = Field(default_factory=list)
     targets: list[Text] = Field(default_factory=list)
     validation: Text
     deliverables: list[Text] = Field(min_length=1)
     completion_criteria: list[Text] = Field(min_length=1)
     evidence_ids: list[ID] = Field(default_factory=list)
+
+    @model_validator(mode="before")
+    @classmethod
+    def sync_draft_fulfillments(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            rf = data.get("requirement_fulfillments")
+            rids = data.get("requirement_ids")
+            obj = data.get("objective", "Step Objective")
+            val = data.get("validation", "Verification check")
+            delivs = data.get("deliverables")
+            first_deliv = delivs[0] if isinstance(delivs, list) and delivs else "Deliverable output"
+
+            if rf and not rids:
+                extracted: list[str] = []
+                for item in rf:
+                    if isinstance(item, dict) and "req_id" in item:
+                        extracted.append(str(item["req_id"]).strip())
+                    elif hasattr(item, "req_id"):
+                        extracted.append(str(item.req_id).strip())
+                data["requirement_ids"] = extracted
+            elif rids and not rf:
+                synthesized: list[dict[str, str]] = []
+                if isinstance(rids, list):
+                    for r in rids:
+                        s_r = str(r).strip()
+                        if s_r:
+                            concrete_text = str(first_deliv)
+                            if len(concrete_text) < 15:
+                                concrete_text = f"{concrete_text} implementation deliverable"
+                            verif_text = str(val)
+                            if len(verif_text) < 5:
+                                verif_text = f"Verify: {verif_text}"
+                            synthesized.append({
+                                "req_id": s_r,
+                                "fulfilled_by_section": str(obj),
+                                "concrete_deliverable": concrete_text,
+                                "verification_method": verif_text,
+                            })
+                data["requirement_fulfillments"] = synthesized
+        return data
 
     @field_validator("requirement_ids", mode="before")
     @classmethod
@@ -315,6 +391,7 @@ def format_review_prompt(
     bundle: ContextBundle,
     proposal: ProposalOutput,
     current_plan: dict | None = None,
+    rubric_checklist: list[dict] | None = None,
 ) -> list[dict[str, str]]:
     """Prompt for Reviewer in REVIEW phase."""
     system_message = (
@@ -322,11 +399,11 @@ def format_review_prompt(
         f"Prompt Version: {PROMPT_VERSION_V1}\n"
         "Phase: REVIEW\n"
         "Rules:\n"
-        "1. Critique proposal/plan for feasibility, edge cases, and missing requirements.\n"
-        "2. Với mỗi requirement, diễn đạt lại yêu cầu, chỉ ra cơ chế trong plan, rồi phán xét. Nếu cơ chế giải quyết vấn đề khác với requirement, kết luận FAIL và chỉ ra gap.\n"
-        "3. For each issue, provide claim, impact, severity, and suggested resolution.\n"
-        "4. Kiểm tra issue đã tồn tại trước khi tạo mới (tránh duplicate); nếu trùng, dùng review_result='DUPLICATE' và duplicate_of.\n"
-        "5. Output strictly according to ReviewOutput schema, including requirement_verdicts."
+        "1. Critique proposal/plan; state mechanism in plan vs requirement; fail if mismatch.\n"
+        "2. Audit RubricChecklist (status: MET/PARTIAL/MISSING) & flag conflicts with REQ-TECH.\n"
+        "3. Out-of-scope: issues must attach valid requirement_ids; no unrequested libraries.\n"
+        "4. Avoid duplicate issues (review_result='DUPLICATE', duplicate_of).\n"
+        "5. Output strictly ReviewOutput schema (rubric_audits, constraint_audits, requirement_verdicts)."
     )
     user_message = (
         f"Context:\n{bundle.content}\n\n"
@@ -334,11 +411,38 @@ def format_review_prompt(
     )
     if current_plan and '"plan":' not in bundle.content:
         user_message += f"Current Plan:\n{json.dumps(current_plan, ensure_ascii=False, separators=(',', ': '))}\n\n"
-    user_message += "Please provide your review and issues."
+    if rubric_checklist:
+        checklist_summary = [
+            f"{item.get('rubric_id')}:{item.get('criterion')}"
+            for item in rubric_checklist
+        ]
+        user_message += f"Rubrics:\n{json.dumps(checklist_summary, ensure_ascii=False, separators=(',', ': '))}\n\n"
+    user_message += "Please provide your review, rubric_audits, constraint_audits, and issues."
     return [
         {"role": "system", "content": system_message},
         {"role": "user", "content": user_message},
     ]
+
+
+def compact_plan_baseline(current_plan: dict[str, Any]) -> dict[str, Any]:
+    """Compacts baseline plan for synthesize prompt to reduce prompt bloat."""
+    steps = []
+    for s in current_plan.get("steps", []):
+        if not isinstance(s, dict):
+            continue
+        step_dict: dict[str, Any] = {
+            "id": s.get("id"),
+            "phase_type": s.get("phase_type"),
+            "objective": s.get("objective"),
+            "dependencies": s.get("dependencies", []),
+            "requirement_ids": s.get("requirement_ids", []),
+            "deliverables": s.get("deliverables", []),
+        }
+        steps.append(step_dict)
+    return {
+        "revision": current_plan.get("revision", 1),
+        "steps": steps,
+    }
 
 
 def format_synthesize_prompt(
@@ -364,9 +468,9 @@ def format_synthesize_prompt(
         "Phase: REVISE\n"
         "Rules:\n"
         f"{rule1}\n"
-        "2. Step dependencies must form a strict Directed Acyclic Graph (DAG).\n"
-        "3. Every step must have objective, requirement_ids, validation, deliverables, and completion_criteria.\n"
-        "4. In issues_addressed, list the exact issue IDs from Review Issues that this plan revision resolves (e.g. ['ISSUE-3a8c1f0d'] or []). Do NOT put sentences or descriptions into issues_addressed.\n"
+        "2. Connected DAG: edges >= N-1, max 2 roots, depth >= 2. Assign phase_type: 'setup' -> 'core_module' -> 'integration' -> 'verification'. Integration depends on setup.\n"
+        "3. Requirement Fulfillment: Each step must provide requirement_fulfillments with substantive concrete_deliverable (no placeholders) and verification_method.\n"
+        "4. In issues_addressed, list exact issue IDs this revision resolves (e.g. ['ISSUE-3a8c1f0d'] or []). No descriptions.\n"
         "5. Output strictly according to SynthesizerOutput schema."
     )
     user_message = (
@@ -375,7 +479,8 @@ def format_synthesize_prompt(
         f"Review Issues:\n{json.dumps(review.model_dump(mode='json'), ensure_ascii=False, separators=(',', ': '))}\n\n"
     )
     if current_plan and '"plan":' not in bundle.content:
-        user_message += f"Current Plan Baseline:\n{json.dumps(current_plan, ensure_ascii=False, separators=(',', ': '))}\n\n"
+        compact_plan = compact_plan_baseline(current_plan)
+        user_message += f"Current Plan Baseline:\n{json.dumps(compact_plan, ensure_ascii=False, separators=(',', ': '))}\n\n"
     user_message += "Please produce the synthesized revision."
     return [
         {"role": "system", "content": system_message},
@@ -387,6 +492,7 @@ def format_semantic_review_prompt(
     bundle: ContextBundle,
     current_plan: dict,
     open_issues: list[dict],
+    rubric_checklist: list[dict] | None = None,
 ) -> list[dict[str, str]]:
     """Prompt for Reviewer in SEMANTIC_REVIEW phase."""
     system_message = (
@@ -394,19 +500,26 @@ def format_semantic_review_prompt(
         f"Prompt Version: {PROMPT_VERSION_V1}\n"
         "Phase: SEMANTIC_REVIEW\n"
         "Rules:\n"
-        "1. Evaluate synthesized plan revision against previous issues and task requirements.\n"
-        "2. Với mỗi requirement, diễn đạt lại yêu cầu, chỉ ra cơ chế trong plan, rồi phán xét. Nếu cơ chế giải quyết vấn đề khác với requirement, kết luận FAIL và chỉ ra gap.\n"
-        "3. If an issue is addressed, produce a resolution with exact issue_id, review_result='PASS', review_note.\n"
-        "4. Kiểm tra issue đã tồn tại trước khi tạo mới; nếu trùng (duplicate), dùng review_result='DUPLICATE' và duplicate_of.\n"
-        "5. If new problems remain, report them as issues.\n"
-        "6. Output strictly according to ReviewOutput schema, including requirement_verdicts."
+        "1. Evaluate plan revision against previous issues and task requirements.\n"
+        "2. Verify concrete mechanisms against acceptance criteria; fail if deliverable lacks substance.\n"
+        "3. Audit RubricChecklist and verify no conflict with REQ-TECH constraints.\n"
+        "4. Out-of-Scope: attach valid requirement_ids; do not demand unrequested libraries.\n"
+        "5. If issue addressed, produce resolution (exact issue_id, review_result='PASS', review_note).\n"
+        "6. Check existing issues; if duplicate, set review_result='DUPLICATE' and duplicate_of.\n"
+        "7. Output ReviewOutput schema (requirement_verdicts, rubric_audits, constraint_audits)."
     )
     user_message = (
         f"Context:\n{bundle.content}\n\n"
-        f"Current Plan Revision to Evaluate:\n{json.dumps(current_plan, ensure_ascii=False, separators=(',', ': '))}\n\n"
+        f"Current Plan Revision to Evaluate:\n{json.dumps(current_plan, ensure_ascii=False, separators=(',', ':'))}\n\n"
     )
     if open_issues and '"open_issues":' not in bundle.content:
-        user_message += f"Open Issues to evaluate:\n{json.dumps(open_issues, ensure_ascii=False, separators=(',', ': '))}\n\n"
+        user_message += f"Open Issues to evaluate:\n{json.dumps(open_issues, ensure_ascii=False, separators=(',', ':'))}\n\n"
+    if rubric_checklist:
+        checklist_summary = [
+            f"{item.get('rubric_id')}:{item.get('criterion')}"
+            for item in rubric_checklist
+        ]
+        user_message += f"Rubrics:\n{json.dumps(checklist_summary, ensure_ascii=False, separators=(',', ':'))}\n\n"
     user_message += "Please provide your review, new issues (if any), and resolutions for addressed issues."
     return [
         {"role": "system", "content": system_message},

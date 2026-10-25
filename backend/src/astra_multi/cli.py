@@ -158,56 +158,54 @@ def build_parser() -> argparse.ArgumentParser:
 def cmd_create(store: SQLiteStore, args: argparse.Namespace) -> int:
     import json
     import uuid
+    from astra_multi.orchestration.contract_extractor import classify_all
 
     run_id = args.run_id or f"RUN-{uuid.uuid4().hex[:8]}"
     task_id = f"TASK-{run_id}"
 
-    reqs: list[Requirement] = []
-    for item in args.requirements:
-        req_id = f"REQ-{len(reqs) + 1:03d}"
-        r_text = str(item).strip()
-        r_acc = None
+    raw_requirements = list(args.requirements)
+    expected_outputs = list(getattr(args, "expected_outputs", []) or [])
+
+    # Build per-item custom acceptance map before classification (position-based)
+    custom_acc_by_index: dict[int, str | None] = {}
+    for idx, item in enumerate(raw_requirements):
+        r_acc: str | None = None
         if isinstance(item, str):
             item_s = item.strip()
             if item_s.startswith("{") and item_s.endswith("}"):
                 try:
                     parsed = json.loads(item_s)
                     if isinstance(parsed, dict) and "text" in parsed:
-                        r_text = str(parsed["text"]).strip()
+                        raw_requirements[idx] = parsed  # replace with dict for extractor
                         r_acc = parsed.get("acceptance")
                 except Exception:
                     pass
         elif isinstance(item, dict):
-            r_text = str(item.get("text", "")).strip()
             r_acc = item.get("acceptance")
-        elif hasattr(item, "text"):
-            r_text = str(item.text).strip()
-            r_acc = getattr(item, "acceptance", None)
+        custom_acc_by_index[idx] = r_acc.strip() if (r_acc and isinstance(r_acc, str) and r_acc.strip()) else None
 
+    classified_items = classify_all(raw_requirements, expected_outputs)
+    reqs: list[Requirement] = []
+    for req_id, classified in classified_items:
+        idx = len(reqs)
+        custom_acc = custom_acc_by_index.get(idx)
         acc = (
-            r_acc.strip()
-            if (r_acc and isinstance(r_acc, str) and r_acc.strip())
-            else f"Plan nêu cơ chế cụ thể đáp ứng yêu cầu này và cách kiểm chứng: {r_text}"
+            custom_acc
+            if custom_acc
+            else f"Plan nêu cơ chế cụ thể đáp ứng yêu cầu này và cách kiểm chứng: {classified.text}"
         )
         reqs.append(
             Requirement(
                 id=req_id,
-                text=r_text,
+                text=classified.text,
                 acceptance=acc,
+                req_type=classified.req_type,
+                expected_artifact_type=classified.expected_artifact_type,
+                acceptance_criteria=classified.acceptance_criteria,
+                verifiable_deliverable=classified.verifiable_deliverable,
             )
         )
 
-    for out_text in getattr(args, "expected_outputs", []) or []:
-        req_id = f"REQ-{len(reqs) + 1:03d}"
-        out_cleaned = str(out_text).strip()
-        acc = f"Plan nêu cơ chế cụ thể đáp ứng yêu cầu này và cách kiểm chứng: {out_cleaned}"
-        reqs.append(
-            Requirement(
-                id=req_id,
-                text=out_cleaned,
-                acceptance=acc,
-            )
-        )
 
     task = TaskSpec(
         id=task_id,

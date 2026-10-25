@@ -23,7 +23,9 @@ from astra_multi.domain.commands import (
     TransitionRun,
 )
 from astra_multi.domain.models import (
+    Claim,
     Decision,
+    Evidence,
     Issue,
     IssueResolution,
     IssueStatus,
@@ -36,6 +38,8 @@ from astra_multi.domain.models import (
     RunState,
     RunStatus,
     TaskSpec,
+    ToolCall,
+    ValidationResult,
 )
 from astra_multi.domain.policies import RevisionConflict
 from astra_multi.domain.repositories import RunRepository
@@ -89,6 +93,86 @@ class WorkflowController:
         )
         self.repository.commit(self.lease.run_id, cmd, self.lease)
         return self.get_state()
+
+    def record_claim(self, claim: Claim) -> RunState:
+        with self._lock:
+            for attempt in range(15):
+                state = self.get_state()
+                if any(c.id == claim.id for c in state.claims):
+                    return state
+                cmd = AddRecord(
+                    expected_revision=state.run.revision,
+                    node="investigate",
+                    logical_operation_id=f"claim-{claim.id}",
+                    actor=self.actor,
+                    record=claim,
+                )
+                try:
+                    self.repository.commit(self.lease.run_id, cmd, self.lease)
+                    return self.get_state()
+                except RevisionConflict:
+                    time.sleep(0.005 * (attempt + 1))
+            raise RuntimeError(f"Failed to record claim {claim.id} due to revision conflicts")
+
+    def record_validation_result(self, validation: ValidationResult) -> RunState:
+        with self._lock:
+            for attempt in range(15):
+                state = self.get_state()
+                if any(v.id == validation.id for v in state.validations):
+                    return state
+                cmd = AddRecord(
+                    expected_revision=state.run.revision,
+                    node="verify",
+                    logical_operation_id=f"validation-{validation.id}",
+                    actor=self.actor,
+                    record=validation,
+                )
+                try:
+                    self.repository.commit(self.lease.run_id, cmd, self.lease)
+                    return self.get_state()
+                except RevisionConflict:
+                    time.sleep(0.005 * (attempt + 1))
+            raise RuntimeError(f"Failed to record validation {validation.id} due to revision conflicts")
+
+    def record_tool_call(self, tool_call: ToolCall) -> RunState:
+        with self._lock:
+            for attempt in range(15):
+                state = self.get_state()
+                if any(t.id == tool_call.id for t in state.tool_calls):
+                    return state
+                cmd = AddRecord(
+                    expected_revision=state.run.revision,
+                    node="verify",
+                    logical_operation_id=f"tool-call-{tool_call.id}",
+                    actor=self.actor,
+                    record=tool_call,
+                )
+                try:
+                    self.repository.commit(self.lease.run_id, cmd, self.lease)
+                    return self.get_state()
+                except RevisionConflict:
+                    time.sleep(0.005 * (attempt + 1))
+            raise RuntimeError(f"Failed to record tool call {tool_call.id} due to revision conflicts")
+
+    def record_evidence(self, evidence: Evidence) -> RunState:
+        with self._lock:
+            for attempt in range(15):
+                state = self.get_state()
+                if any(e.id == evidence.id for e in state.evidence):
+                    return state
+                cmd = AddRecord(
+                    expected_revision=state.run.revision,
+                    node="verify",
+                    logical_operation_id=f"evidence-{evidence.id}",
+                    actor=self.actor,
+                    record=evidence,
+                )
+                try:
+                    self.repository.commit(self.lease.run_id, cmd, self.lease)
+                    return self.get_state()
+                except RevisionConflict:
+                    time.sleep(0.005 * (attempt + 1))
+            raise RuntimeError(f"Failed to record evidence {evidence.id} due to revision conflicts")
 
     def record_issue(self, issue: Issue) -> RunState:
         state = self.get_state()

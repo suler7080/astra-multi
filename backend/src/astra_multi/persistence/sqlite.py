@@ -426,6 +426,7 @@ class SQLiteStore:
                     reviewed_plan_revision=int(data.get("reviewed_plan_revision", 0)),
                     feedback=str(data.get("feedback", "")),
                     concerns=list(data.get("concerns", [])),
+                    rubric_audits=list(data.get("rubric_audits", [])),
                 )
         except Exception:
             pass
@@ -440,6 +441,7 @@ class SQLiteStore:
                     reviewed_plan_revision=int(data.get("reviewed_plan_revision", 0)),
                     feedback=str(data.get("feedback", "")),
                     concerns=list(data.get("concerns", [])),
+                    rubric_audits=list(data.get("rubric_audits", [])),
                 )
         except Exception:
             pass

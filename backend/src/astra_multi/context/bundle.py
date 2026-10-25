@@ -142,6 +142,7 @@ def _summarize_plan(plan: dict[str, Any], max_text: int = 200) -> dict[str, Any]
             ns["completion_criteria"] = [_truncate_text(v, max_text) for v in ns["completion_criteria"][:2]]
         if isinstance(ns.get("targets"), list):
             ns["targets"] = ns["targets"][:5]
+        ns.pop("requirement_fulfillments", None)
         steps.append(ns)
     out["steps"] = steps
     decs = []
@@ -282,7 +283,33 @@ class ContextBuilder:
              "excluded_patterns": run.snapshot.excluded_patterns}
             if run.snapshot else None
         )
-        task_dict = run.task.model_dump(mode="json")
+        task_dict = {
+            "id": run.task.id,
+            "goal": run.task.goal,
+            "requirements": [
+                {
+                    k: v
+                    for k, v in {
+                        "id": r.id,
+                        "text": r.text,
+                        "acceptance": r.acceptance,
+                        "req_type": getattr(r.req_type, "value", str(r.req_type)) if getattr(r, "req_type", None) else None,
+                        "expected_artifact_type": (
+                            getattr(r.expected_artifact_type, "value", str(r.expected_artifact_type))
+                            if getattr(r, "expected_artifact_type", None)
+                            and getattr(r.expected_artifact_type, "value", str(r.expected_artifact_type)) != "narrative"
+                            else None
+                        ),
+                        "acceptance_criteria": r.acceptance_criteria if getattr(r, "acceptance_criteria", None) else None,
+                        "verifiable_deliverable": r.verifiable_deliverable if getattr(r, "verifiable_deliverable", None) else None,
+                    }.items()
+                    if v is not None
+                }
+                for r in run.task.requirements
+            ],
+            "constraints": run.task.constraints,
+            "non_goals": run.task.non_goals,
+        }
         essential_sources = [
             {"id": key, "locator": by_id[key].locator,
              "hash": by_id[key].content_hash,
@@ -298,7 +325,11 @@ class ContextBuilder:
         older_events_summary: dict[str, Any] | None = None
 
         if phase != RunPhase.INDEPENDENT_ANALYSIS:
-            full_plan = run.plan.model_dump(mode="json") if run.plan else None
+            if run.plan:
+                full_plan = run.plan.model_dump(mode="json")
+                for s in full_plan.get("steps", []):
+                    if isinstance(s, dict):
+                        s.pop("requirement_fulfillments", None)
             full_proposal = run.proposals[-1].model_dump(mode="json") if run.proposals else None
             full_issues = [
                 {

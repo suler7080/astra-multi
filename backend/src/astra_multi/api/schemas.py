@@ -31,6 +31,7 @@ class CreateRunRequest(BaseModel):
     token_limit: int = Field(default=0, ge=0)
     cost_limit: float = Field(default=0.0, ge=0.0)
     call_limit: int = Field(default=0, ge=0)
+    parent_run_id: str | None = None
 
 
 class RunSummaryResponse(BaseModel):
@@ -61,6 +62,11 @@ class RunDetailResponse(BaseModel):
     decisions_count: int
     evidence_count: int
     pending_questions: list[dict[str, Any]]
+    mode: str = "greenfield"
+    token_limit: int = 0
+    cost_limit: float = 0.0
+    max_rounds: int = 2
+    parent_run_id: str | None = None
 
 
 class AnswerQuestionRequest(BaseModel):

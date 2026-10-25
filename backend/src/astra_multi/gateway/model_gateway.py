@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 
 from astra_multi.providers import (
     AuthError,
+    BadRequestError,
     ContextOverflowError,
     GenerationLimits,
     ProviderError,
@@ -213,16 +214,27 @@ class ModelGateway:
 
             attempt += 1
             attempt_start = time.perf_counter()
+            attempt_messages = messages
+            if attempt > 1 and messages:
+                attempt_messages = [dict(m) for m in messages]
+                for i in reversed(range(len(attempt_messages))):
+                    if attempt_messages[i].get("role") == "user":
+                        attempt_messages[i]["content"] = (
+                            f"{attempt_messages[i]['content']}\n\n<!-- attempt {attempt} -->"
+                        )
+                        break
+
+            attempt_limits = limits.model_copy(update={"max_retries": 0})
             try:
                 if self.provider_adapter is not None:
                     try:
                         result = self.provider_adapter(
                             provider=provider,
                             role=role,
-                            messages=messages,
+                            messages=attempt_messages,
                             output_schema=output_schema,
                             tool_specs=tool_specs,
-                            limits=limits,
+                            limits=attempt_limits,
                             settings=settings,
                             credentials=credentials,
                             api_key_override=api_key_override,
@@ -231,10 +243,10 @@ class ModelGateway:
                         result = self.provider_adapter(
                             provider=provider,
                             role=role,
-                            messages=messages,
+                            messages=attempt_messages,
                             output_schema=output_schema,
                             tool_specs=tool_specs,
-                            limits=limits,
+                            limits=attempt_limits,
                             settings=settings,
                             credentials=credentials,
                         )
@@ -242,10 +254,10 @@ class ModelGateway:
                     result = generate(
                         provider=provider,
                         role=role,
-                        messages=messages,
+                        messages=attempt_messages,
                         output_schema=output_schema,
                         tool_specs=tool_specs,
-                        limits=limits,
+                        limits=attempt_limits,
                         settings=settings,
                         credentials=credentials,
                         api_key_override=api_key_override,
@@ -331,6 +343,17 @@ class ModelGateway:
 
             except AuthError as e:
                 # Auth errors should not be retried
+                self._attempt_traces.append(
+                    AttemptTrace(
+                        attempt_number=attempt,
+                        timestamp=time.time(),
+                        provider=provider,
+                        error=str(e),
+                    )
+                )
+                raise _attach_cumulative(e)
+            except BadRequestError as e:
+                # Client-side 400 bad request / invalid request error - retrying unchanged will not help
                 self._attempt_traces.append(
                     AttemptTrace(
                         attempt_number=attempt,

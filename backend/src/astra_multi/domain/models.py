@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Annotated, Literal, Self
+from typing import Annotated, Any, Literal, Self
 
 from pydantic import (
     AfterValidator,
@@ -89,6 +89,32 @@ class IssueSeverity(str, Enum):
     BLOCKING = "blocking"
     WARNING = "warning"
     INFO = "info"
+    NITPICK = "nitpick"
+
+
+class RubricItem(Contract):
+    rubric_id: ID
+    req_id: ID
+    category: Literal["TECH", "DELIV", "ORG"]
+    criterion: Text
+    expected_artifact: Text | None = None
+
+
+class RubricChecklist(Contract):
+    items: list[RubricItem] = Field(default_factory=list)
+
+
+class TechStackTruthEntry(Contract):
+    tech_id: ID
+    technology: str
+    physical_limitation: str
+    mandated_pattern: str
+    prohibited_patterns: list[str] = Field(default_factory=list)
+    related_req_ids: list[ID] = Field(default_factory=list)
+
+
+class TechStackTruthTable(Contract):
+    entries: list[TechStackTruthEntry] = Field(default_factory=list)
 
 
 class IssueStatus(str, Enum):
@@ -100,9 +126,44 @@ class IssueStatus(str, Enum):
     DUPLICATE = "duplicate"
 
 
+class RequirementType(str, Enum):
+    TECH = "TECH"    # REQ-TECH-xxx: Technical / environment constraints
+    DELIV = "DELIV"  # REQ-DELIV-xxx: Concrete deliverable outputs
+    ORG = "ORG"      # REQ-ORG-xxx: Organisational / operational requirements
+
+
+class ArtifactType(str, Enum):
+    CODE_SNIPPET = "code_snippet"
+    DIRECTORY_TREE = "directory_tree"
+    ASSIGNMENT_TABLE = "assignment_table"
+    ARCHITECTURE_DIAGRAM = "architecture_diagram"
+    SEQUENCE_FLOW = "sequence_flow"
+    STATE_MACHINE = "state_machine"
+    API_SCHEMA = "api_schema"
+    NARRATIVE = "narrative"  # fallback / prose
+
+
+class StepPhaseType(str, Enum):
+    SETUP = "setup"
+    CORE_MODULE = "core_module"
+    INTEGRATION = "integration"
+    VERIFICATION = "verification"
+
+
+class RequirementFulfillment(Contract):
+    req_id: ID
+    fulfilled_by_section: Text
+    concrete_deliverable: Text
+    verification_method: Text
+
+
 class Requirement(Entity):
     text: Text
     acceptance: Text
+    req_type: RequirementType = RequirementType.TECH
+    expected_artifact_type: ArtifactType = ArtifactType.NARRATIVE
+    acceptance_criteria: list[str] = Field(default_factory=list)
+    verifiable_deliverable: str | None = None
 
 
 class TaskSpec(Entity):
@@ -302,13 +363,60 @@ class Decision(RunEntity):
 
 class PlanStep(Entity):
     objective: Text
-    requirement_ids: list[ID] = Field(min_length=1)
+    phase_type: StepPhaseType = StepPhaseType.CORE_MODULE
+    requirement_fulfillments: list[RequirementFulfillment] = Field(default_factory=list)
+    requirement_ids: list[ID] = Field(default_factory=list)
     dependencies: list[ID] = Field(default_factory=list)
     targets: list[Text] = Field(default_factory=list)
     validation: Text
     deliverables: list[Text] = Field(min_length=1)
     completion_criteria: list[Text] = Field(min_length=1)
     evidence_ids: list[ID] = Field(default_factory=list)
+
+    @model_validator(mode="before")
+    @classmethod
+    def sync_fulfillments_and_req_ids(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            rf = data.get("requirement_fulfillments")
+            rids = data.get("requirement_ids")
+            obj = data.get("objective", "Step Objective")
+            val = data.get("validation", "Verification check")
+            delivs = data.get("deliverables")
+            first_deliv = delivs[0] if isinstance(delivs, list) and delivs else "Deliverable output"
+
+            if rf and not rids:
+                extracted_rids: list[str] = []
+                for item in rf:
+                    if isinstance(item, dict) and "req_id" in item:
+                        extracted_rids.append(str(item["req_id"]))
+                    elif hasattr(item, "req_id"):
+                        extracted_rids.append(str(item.req_id))
+                data["requirement_ids"] = extracted_rids
+            elif rids and not rf:
+                synthesized_rf: list[dict[str, str]] = []
+                for rid in rids:
+                    concrete_text = str(first_deliv)
+                    if len(concrete_text) < 15:
+                        concrete_text = f"{concrete_text} implementation deliverable"
+                    verif_text = str(val)
+                    if len(verif_text) < 5:
+                        verif_text = f"Verify: {verif_text}"
+                    synthesized_rf.append(
+                        {
+                            "req_id": str(rid),
+                            "fulfilled_by_section": str(obj),
+                            "concrete_deliverable": concrete_text,
+                            "verification_method": verif_text,
+                        }
+                    )
+                data["requirement_fulfillments"] = synthesized_rf
+        return data
+
+    @model_validator(mode="after")
+    def validate_fulfillments(self) -> Self:
+        if not self.requirement_fulfillments and not self.requirement_ids:
+            raise ValueError("PlanStep must specify at least one requirement_fulfillment or requirement_id")
+        return self
 
 
 class DesignArtifact(Entity):
