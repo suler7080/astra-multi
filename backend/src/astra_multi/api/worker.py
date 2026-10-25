@@ -8,7 +8,7 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 from astra_multi.context.bundle import ContextBuilder
-from astra_multi.domain.models import RunStatus
+from astra_multi.domain.models import Event, RunStatus
 from astra_multi.gateway.model_gateway import GatewayConfig, ModelGateway
 from astra_multi.orchestration.budget import BudgetService
 from astra_multi.orchestration.controller import WorkflowController
@@ -301,32 +301,45 @@ class RunWorker:
             await asyncio.gather(*tasks, return_exceptions=True)
         self._active_tasks.clear()
 
+    @staticmethod
+    def _sse_event(ev: Event) -> dict[str, Any]:
+        """Format a persisted Event in the SSE payload shape used by :meth:`event_stream`."""
+        return {
+            "id": ev.sequence,
+            "event": ev.type,
+            "data": {
+                "id": ev.id,
+                "sequence": ev.sequence,
+                "type": ev.type,
+                "actor": ev.actor,
+                "timestamp": ev.timestamp.isoformat(),
+                "payload": ev.payload,
+            },
+        }
+
     async def event_stream(self, run_id: str, last_event_id: int = 0) -> AsyncIterator[dict[str, Any]]:
-        """Yields events starting after last_event_id and streams new events until run completes."""
+        """Yields events starting after last_event_id and streams new events until run completes.
+
+        Every persistence access is guarded: an unexpected failure (e.g. SQLite
+        OperationalError, corrupt event JSON) is logged with full detail on the
+        server and then reported to the client as a final ``stream_error`` event,
+        instead of dropping the SSE connection silently.
+        """
         current_seq = last_event_id
         while True:
-            # Fetch events from persistence
-            events = self.store.events(run_id, after=current_seq)
-            for ev in events:
-                current_seq = max(current_seq, ev.sequence)
-                yield {
-                    "id": ev.sequence,
-                    "event": ev.type,
-                    "data": {
-                        "id": ev.id,
-                        "sequence": ev.sequence,
-                        "type": ev.type,
-                        "actor": ev.actor,
-                        "timestamp": ev.timestamp.isoformat(),
-                        "payload": ev.payload,
-                    },
-                }
-
-            # Check if run reached terminal status using lightweight query
             try:
+                # Fetch events from persistence
+                events = self.store.events(run_id, after=current_seq)
+                for ev in events:
+                    current_seq = max(current_seq, ev.sequence)
+                    yield self._sse_event(ev)
+
+                # Check if run reached terminal status using lightweight query
                 if hasattr(self.store, "get_run_status_info"):
                     status_info = self.store.get_run_status_info(run_id)
                     if status_info is None:
+                        # Run does not exist (or was deleted): exit silently,
+                        # pinned by tests/integration/test_fix06_sse_lightweight_polling.py.
                         break
                     raw_status, raw_phase, stop_reason = status_info
                     status_str = str(raw_status).upper()
@@ -347,18 +360,7 @@ class RunWorker:
                     final_events = self.store.events(run_id, after=current_seq)
                     for ev in final_events:
                         current_seq = max(current_seq, ev.sequence)
-                        yield {
-                            "id": ev.sequence,
-                            "event": ev.type,
-                            "data": {
-                                "id": ev.id,
-                                "sequence": ev.sequence,
-                                "type": ev.type,
-                                "actor": ev.actor,
-                                "timestamp": ev.timestamp.isoformat(),
-                                "payload": ev.payload,
-                            },
-                        }
+                        yield self._sse_event(ev)
                     # Send completion event and exit stream
                     yield {
                         "id": current_seq + 1,
@@ -371,6 +373,18 @@ class RunWorker:
                     }
                     break
             except Exception:
-                break
+                # H-1: never end the stream silently. Log the full traceback for
+                # the server, then send one explicit terminal error event to the
+                # client (short message only, no stack trace) and stop.
+                logger.exception("SSE event stream for run %s failed", run_id)
+                yield {
+                    "id": current_seq + 1,
+                    "event": "stream_error",
+                    "data": {
+                        "run_id": run_id,
+                        "message": "Event stream terminated due to an internal error.",
+                    },
+                }
+                return
 
             await asyncio.sleep(0.5)
