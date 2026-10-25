@@ -52,19 +52,21 @@ def test_api_intake_constraints_non_goals_expected_outputs_and_coverage():
         # 2. Check requirements count: 2 requirements + 3 expected_outputs = 5 requirements
         assert len(task.requirements) == 5
         req_ids = [r.id for r in task.requirements]
-        assert req_ids == ["REQ-001", "REQ-002", "REQ-003", "REQ-004", "REQ-005"]
+        # 2 plain requirements → TECH (no strong DELIV/ORG keywords)
+        # 3 expected_outputs → DELIV (output-biased, keyword matches)
+        assert req_ids == ["REQ-TECH-001", "REQ-TECH-002", "REQ-DELIV-001", "REQ-DELIV-002", "REQ-DELIV-003"]
 
         # 3. Check acceptance format
-        # REQ-001 (default acceptance without hardcode)
+        # REQ-TECH-001 (default acceptance without hardcode)
         assert task.requirements[0].text == "Agent coordination with leader election"
         assert task.requirements[0].acceptance == "Plan nêu cơ chế cụ thể đáp ứng yêu cầu này và cách kiểm chứng: Agent coordination with leader election"
         assert "Verified by design and candidate test steps" not in task.requirements[0].acceptance
 
-        # REQ-002 (custom acceptance)
+        # REQ-TECH-002 (custom acceptance)
         assert task.requirements[1].text == "State persistence in SQLite"
         assert task.requirements[1].acceptance == "All state transitions stored"
 
-        # REQ-003, REQ-004, REQ-005 (expected outputs)
+        # REQ-DELIV-001, REQ-DELIV-002, REQ-DELIV-003 (expected outputs)
         assert task.requirements[2].text == "Architecture specification markdown"
         assert task.requirements[2].acceptance == "Plan nêu cơ chế cụ thể đáp ứng yêu cầu này và cách kiểm chứng: Architecture specification markdown"
 
@@ -74,7 +76,15 @@ def test_api_intake_constraints_non_goals_expected_outputs_and_coverage():
         assert task.requirements[4].text == "Recovery runbook"
         assert task.requirements[4].acceptance == "Plan nêu cơ chế cụ thể đáp ứng yêu cầu này và cách kiểm chứng: Recovery runbook"
 
-        # 4. RULE-COV-001: Plan missing 3rd expected_output (REQ-005) MUST FAIL
+        # Also verify req_type is set correctly
+        from astra_multi.domain.models import RequirementType, ArtifactType
+        assert task.requirements[0].req_type == RequirementType.TECH
+        assert task.requirements[1].req_type == RequirementType.TECH
+        assert task.requirements[2].req_type == RequirementType.DELIV
+        assert task.requirements[3].req_type == RequirementType.DELIV
+        assert task.requirements[4].req_type == RequirementType.DELIV
+
+        # 4. RULE-COV-001: Plan missing 3rd expected_output (REQ-DELIV-003) MUST FAIL
         plan_missing_req5 = PlanRevision(
             id="PLAN-1",
             run_id=run_id,
@@ -86,7 +96,7 @@ def test_api_intake_constraints_non_goals_expected_outputs_and_coverage():
                 PlanStep(
                     id="STEP-1",
                     objective="Leader election",
-                    requirement_ids=["REQ-001"],
+                    requirement_ids=["REQ-TECH-001"],
                     validation="test 1",
                     deliverables=["leader.py"],
                     completion_criteria=["tests pass"],
@@ -94,7 +104,7 @@ def test_api_intake_constraints_non_goals_expected_outputs_and_coverage():
                 PlanStep(
                     id="STEP-2",
                     objective="SQLite state",
-                    requirement_ids=["REQ-002"],
+                    requirement_ids=["REQ-TECH-002"],
                     validation="test 2",
                     deliverables=["db.py"],
                     completion_criteria=["tests pass"],
@@ -102,7 +112,7 @@ def test_api_intake_constraints_non_goals_expected_outputs_and_coverage():
                 PlanStep(
                     id="STEP-3",
                     objective="Arch doc",
-                    requirement_ids=["REQ-003"],
+                    requirement_ids=["REQ-DELIV-001"],
                     validation="test 3",
                     deliverables=["arch.md"],
                     completion_criteria=["tests pass"],
@@ -110,12 +120,12 @@ def test_api_intake_constraints_non_goals_expected_outputs_and_coverage():
                 PlanStep(
                     id="STEP-4",
                     objective="Schema contracts",
-                    requirement_ids=["REQ-004"],
+                    requirement_ids=["REQ-DELIV-002"],
                     validation="test 4",
                     deliverables=["schemas.py"],
                     completion_criteria=["tests pass"],
                 ),
-                # REQ-005 is missing!
+                # REQ-DELIV-003 is missing!
             ],
         )
 
@@ -124,9 +134,9 @@ def test_api_intake_constraints_non_goals_expected_outputs_and_coverage():
         assert not report.passed
         cov_violations = [v for v in report.violations if v.rule_id == "RULE-COV-001"]
         assert len(cov_violations) == 1
-        assert "REQ-005" in cov_violations[0].message
+        assert "REQ-DELIV-003" in cov_violations[0].message
 
-        # Now add step covering REQ-005
+        # Now add step covering REQ-DELIV-003
         plan_complete = PlanRevision(
             id="PLAN-2",
             run_id=run_id,
@@ -138,7 +148,7 @@ def test_api_intake_constraints_non_goals_expected_outputs_and_coverage():
                 PlanStep(
                     id="STEP-5",
                     objective="Recovery runbook",
-                    requirement_ids=["REQ-005"],
+                    requirement_ids=["REQ-DELIV-003"],
                     validation="test 5",
                     deliverables=["runbook.md"],
                     completion_criteria=["tests pass"],
@@ -149,6 +159,7 @@ def test_api_intake_constraints_non_goals_expected_outputs_and_coverage():
         report_complete = validator.validate(run_state.model_copy(update={"plans": [plan_complete]}))
         assert not any(v.rule_id == "RULE-COV-001" for v in report_complete.violations)
         app.state.store.close()
+
 
 
 def test_cli_cmd_create_with_constraints_non_goals_and_expected_outputs():

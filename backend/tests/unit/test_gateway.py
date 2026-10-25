@@ -1,66 +1,100 @@
 """Unit tests for model gateway components."""
 
+import time
+from dataclasses import dataclass
+from typing import Any, Union
+
 import pytest
 
-from astra_multi.gateway.capabilities import Capability, CapabilityRegistry, ModelCapability
-from astra_multi.gateway.fake import FakeProvider, FakeProviderConfig
 from astra_multi.gateway.model_gateway import (
     BudgetExceededError,
     BudgetHook,
     GatewayConfig,
     ModelGateway,
 )
-from astra_multi.providers import AuthError, RateLimitError, SchemaError
+from astra_multi.providers import AuthError, ProviderError, RateLimitError, SchemaError
+from astra_multi.schemas import ModelResult
 
 
-def test_capability_registry():
-    registry = CapabilityRegistry()
+@dataclass
+class FakeProviderConfig:
+    """Configuration for fake provider behavior."""
 
-    # Register model
-    capability = ModelCapability(
-        model_id="gpt-4",
-        provider="openai",
-        capabilities={Capability.JSON_MODE, Capability.TOOL_CALLING},
-        max_tokens=8192,
-        input_cost_per_1k_tokens=0.03,
-        output_cost_per_1k_tokens=0.06,
-    )
-    registry.register(capability)
-
-    # Retrieve model
-    retrieved = registry.get_model("openai", "gpt-4")
-    assert retrieved is not None
-    assert retrieved.model_id == "gpt-4"
-    assert Capability.JSON_MODE in retrieved.capabilities
-
-    # Check capability
-    assert registry.has_capability("openai", "gpt-4", Capability.JSON_MODE)
-    assert not registry.has_capability("openai", "gpt-4", Capability.MULTIMODAL)
-
-    # Find by capability
-    json_models = registry.find_by_capability(Capability.JSON_MODE)
-    assert len(json_models) == 1
-    assert json_models[0].model_id == "gpt-4"
+    should_fail: bool = False
+    error_type: str = "UNKNOWN"
+    delay_seconds: float = 0.0
+    empty_response: bool = False
+    invalid_json: bool = False
+    rate_limit_after: int = 999  # Fail after this many calls
 
 
-def test_role_mapping():
-    registry = CapabilityRegistry()
+class FakeProvider:
+    """Fake provider for testing gateway behavior."""
 
-    # Register role mapping
-    registry.register_role("planner", ["openai:gpt-4", "google:gemini-pro"])
-    registry.register_role("reviewer", ["google:gemini-pro"])
+    def __init__(self, config: FakeProviderConfig | None = None) -> None:
+        self.config = config or FakeProviderConfig()
+        self._call_count = 0
 
-    # Get role models
-    planner_models = registry.get_role_models("planner")
-    assert len(planner_models) == 2
-    assert "openai:gpt-4" in planner_models
+    def generate(
+        self,
+        role: str,
+        messages: list[dict[str, str]],
+        output_schema: Any = None,
+        **kwargs: Any,
+    ) -> ModelResult:
+        """Generate a fake model response."""
+        self._call_count += 1
 
-    reviewer_models = registry.get_role_models("reviewer")
-    assert len(reviewer_models) == 1
-    assert "google:gemini-pro" in reviewer_models
+        # Simulate delay
+        if self.config.delay_seconds > 0:
+            time.sleep(self.config.delay_seconds)
+
+        # Check for rate limit
+        if self._call_count > self.config.rate_limit_after:
+            raise RateLimitError(
+                "RATE_LIMIT", "Fake rate limit exceeded", "fake"
+            )
+
+        # Check for failure
+        if self.config.should_fail:
+            if self.config.error_type == "AUTH":
+                raise AuthError("AUTH_ERROR", "Fake auth error", "fake")
+            elif self.config.error_type == "SCHEMA":
+                raise SchemaError("INVALID_SCHEMA", "Fake schema error", "fake")
+            else:
+                raise ProviderError(
+                    self.config.error_type, "Fake provider error", "fake"
+                )
+
+        # Check for empty response
+        if self.config.empty_response:
+            raise SchemaError("EMPTY_RESPONSE", "Fake empty response", "fake")
+
+        # Generate fake content
+        content: Union[str, dict[str, Any]]
+        if output_schema is not None:
+            if self.config.invalid_json:
+                content = "not valid json"
+            else:
+                content = {"findings": ["fake finding"], "risks": [], "assumptions": []}
+        else:
+            content = "Fake response content"
+
+        return ModelResult(
+            content=content,
+            usage={
+                "prompt_tokens": 100,
+                "completion_tokens": 50,
+                "total_tokens": 150,
+            },
+            model_id="fake-model",
+            attempts=1,
+            provider="fake",
+            latency_seconds=self.config.delay_seconds,
+        )
 
 
-def test_budget_hook():
+def test_budget_hook() -> None:
     hook = BudgetHook(max_calls=2, max_total_tokens=1000, max_total_cost_usd=1.0)
 
     # First call should pass
@@ -82,7 +116,7 @@ def test_budget_hook():
     assert stats["call_count"] == 2
 
 
-def test_budget_hook_token_limit():
+def test_budget_hook_token_limit() -> None:
     hook = BudgetHook(max_total_tokens=100)
 
     # Should pass
@@ -94,7 +128,7 @@ def test_budget_hook_token_limit():
         hook.check_reservation(estimated_tokens=60)
 
 
-def test_budget_hook_cost_limit():
+def test_budget_hook_cost_limit() -> None:
     hook = BudgetHook(max_total_cost_usd=0.5)
 
     # Should pass
@@ -106,7 +140,7 @@ def test_budget_hook_cost_limit():
         hook.check_reservation(estimated_cost_usd=0.3)
 
 
-def test_fake_provider():
+def test_fake_provider() -> None:
     provider = FakeProvider()
 
     # Normal call
@@ -117,7 +151,7 @@ def test_fake_provider():
     assert result.usage["total_tokens"] == 150
 
 
-def test_fake_provider_failure():
+def test_fake_provider_failure() -> None:
     config = FakeProviderConfig(should_fail=True, error_type="AUTH")
     provider = FakeProvider(config)
 
@@ -125,7 +159,7 @@ def test_fake_provider_failure():
         provider.generate("planner", [{"role": "user", "content": "test"}])
 
 
-def test_fake_provider_schema_error():
+def test_fake_provider_schema_error() -> None:
     config = FakeProviderConfig(should_fail=True, error_type="SCHEMA")
     provider = FakeProvider(config)
 
@@ -133,7 +167,7 @@ def test_fake_provider_schema_error():
         provider.generate("planner", [{"role": "user", "content": "test"}])
 
 
-def test_fake_provider_empty_response():
+def test_fake_provider_empty_response() -> None:
     config = FakeProviderConfig(empty_response=True)
     provider = FakeProvider(config)
 
@@ -141,7 +175,7 @@ def test_fake_provider_empty_response():
         provider.generate("planner", [{"role": "user", "content": "test"}])
 
 
-def test_fake_provider_rate_limit():
+def test_fake_provider_rate_limit() -> None:
     config = FakeProviderConfig(rate_limit_after=1)
     provider = FakeProvider(config)
 
@@ -153,7 +187,7 @@ def test_fake_provider_rate_limit():
         provider.generate("planner", [{"role": "user", "content": "test"}])
 
 
-def test_fake_provider_with_schema():
+def test_fake_provider_with_schema() -> None:
     provider = FakeProvider()
 
     result = provider.generate(
@@ -165,7 +199,7 @@ def test_fake_provider_with_schema():
     assert "findings" in result.content
 
 
-def test_gateway_config():
+def test_gateway_config() -> None:
     config = GatewayConfig(
         default_max_retries=3,
         default_timeout=60,
@@ -178,7 +212,7 @@ def test_gateway_config():
     assert not config.enable_budget_hook
 
 
-def test_gateway_initialization():
+def test_gateway_initialization() -> None:
     gateway = ModelGateway()
     assert gateway.config.default_max_retries == 2
     assert gateway.config.default_timeout == 120
@@ -190,7 +224,7 @@ def test_gateway_initialization():
     assert gateway.config.default_max_retries == 5
 
 
-def test_gateway_with_budget_hook():
+def test_gateway_with_budget_hook() -> None:
     budget = BudgetHook(max_calls=1)
     gateway = ModelGateway(budget_hook=budget)
 

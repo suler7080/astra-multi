@@ -33,6 +33,7 @@ from astra_multi.domain.models import (
     Run,
     RunPhase,
     RunStatus,
+    StepPhaseType,
     TaskSpec,
 )
 from astra_multi.exports.exporter import PlanExporter
@@ -219,7 +220,9 @@ def test_test7_design_mode_execution_and_finalization():
             minimal_steps = [
                 StepDraft(
                     objective="Minimal verification harness for engine architecture",
+                    phase_type=StepPhaseType.SETUP,
                     requirement_ids=req_ids[:2],
+                    dependencies=[],
                     targets=["engine.py"],
                     validation="pytest tests/",
                     deliverables=["architecture_spec.md"],
@@ -227,7 +230,9 @@ def test_test7_design_mode_execution_and_finalization():
                 ),
                 StepDraft(
                     objective="Verify lease fencing and recovery protocol",
+                    phase_type=StepPhaseType.VERIFICATION,
                     requirement_ids=req_ids[2:],
+                    dependencies=["STEP-1"],
                     targets=["recovery.py"],
                     validation="pytest tests/recovery/",
                     deliverables=["recovery_protocol.md"],

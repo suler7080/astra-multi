@@ -25,6 +25,7 @@ def _setup_run_with_plan(client: TestClient, app) -> str:
     })
     run_id = res.json()["run_id"]
     store = app.state.store
+    req_id = store.load(run_id).task.requirements[0].id
 
     lease = store.acquire(run_id, owner="test", ttl=30)
     ctrl = WorkflowController(store, lease, actor="test")
@@ -36,7 +37,7 @@ def _setup_run_with_plan(client: TestClient, app) -> str:
     step = PlanStep(
         id="STEP-1",
         objective="Step 1 objective",
-        requirement_ids=["REQ-001"],
+        requirement_ids=[req_id],
         validation="pytest",
         deliverables=["Artifact 1"],
         completion_criteria=["All tests pass"],

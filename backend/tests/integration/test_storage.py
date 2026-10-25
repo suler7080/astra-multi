@@ -5,11 +5,18 @@ from threading import Barrier
 
 import pytest
 
-from astra_multi.domain.commands import AddRecord, CommitPlan, TransitionRun
-from astra_multi.domain.fixtures import sample_plan, sample_state
+from astra_multi.domain.commands import (
+    AddRecord,
+    ChangeIssue,
+    CommitPlan,
+    TransitionRun,
+)
+from astra_multi.domain.fixtures import sample_issue, sample_plan, sample_state
 from astra_multi.domain.models import (
     ArtifactRef,
     Evidence,
+    IssueResolution,
+    IssueStatus,
     RunPhase,
     RunStatus,
     utc_now,
@@ -22,7 +29,6 @@ from astra_multi.domain.policies import (
 )
 from astra_multi.domain.repositories import RunRepository
 from astra_multi.persistence import FileArtifactStore, SQLiteStore
-from astra_multi.persistence_demo import write_example
 
 
 def create(store):
@@ -312,11 +318,74 @@ def test_partial_run_can_be_acquired_by_quality_service_and_finalized(tmp_path):
             store.acquire(state.run.id, "quality-service")
 
 
+def _run_protocol_example(repository: RunRepository, lease_owner: SQLiteStore) -> str:
+    """Command sequence formerly provided by the (removed) persistence_demo module."""
+    state = sample_state()
+    repository.create(state.task, state.run)
+    lease = lease_owner.acquire(state.run.id, "demo")
+    issue = sample_issue(state)
+    commands = [
+        AddRecord(
+            expected_revision=1,
+            node="review",
+            logical_operation_id="issue",
+            actor="reviewer",
+            record=issue,
+        ),
+        ChangeIssue(
+            expected_revision=2,
+            node="review",
+            logical_operation_id="investigate",
+            actor="controller",
+            issue_id=issue.id,
+            status=IssueStatus.INVESTIGATING,
+            reason="Investigate failure behavior",
+        ),
+        CommitPlan(
+            expected_revision=3,
+            node="revise",
+            logical_operation_id="candidate",
+            actor="planner",
+            plan=sample_plan(state.model_copy(update={"issues": [issue]})),
+        ),
+        ChangeIssue(
+            expected_revision=4,
+            node="review",
+            logical_operation_id="propose_resolution",
+            actor="planner",
+            issue_id=issue.id,
+            status=IssueStatus.PROPOSED_RESOLUTION,
+            reason="Specify HTTP failure contract",
+            resolution=IssueResolution(text="Health route and failure validation specified"),
+        ),
+        ChangeIssue(
+            expected_revision=5,
+            node="review",
+            logical_operation_id="resolve",
+            actor="controller",
+            issue_id=issue.id,
+            status=IssueStatus.RESOLVED,
+            reason="Reviewer accepted candidate",
+            resolution=IssueResolution(
+                text="Health route and failure validation specified",
+                reviewed_revision=1,
+                reviewer="reviewer",
+                review_result="PASS",
+                review_note="Candidate covers HTTP contract",
+            ),
+        ),
+    ]
+    for command in commands:
+        repository.commit(state.run.id, command, lease)
+    lease_owner.release(lease)
+    return state.run.id
+
+
 def test_sample_client_uses_repository_protocol_and_reopens(tmp_path):
     path = tmp_path / "domain.sqlite"
     with SQLiteStore(path) as store:
         repository: RunRepository = store
-        run_id = write_example(repository, store)
+        run_id = _run_protocol_example(repository, store)
     with SQLiteStore(path) as store:
         state = store.load(run_id)
         assert state.run.revision == 6

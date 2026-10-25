@@ -124,6 +124,7 @@ def test_api_export_and_validate():
 
                 # Commit a plan directly via store
                 store = app.state.store
+                req_id = store.load(run_id).task.requirements[0].id
                 plan = PlanRevision(
                     id="PLAN-EXP",
                     run_id=run_id,
@@ -135,7 +136,7 @@ def test_api_export_and_validate():
                         PlanStep(
                             id="STEP-1",
                             objective="Implement feature",
-                            requirement_ids=["REQ-001"],
+                            requirement_ids=[req_id],
                             validation="pytest",
                             deliverables=["feature.py"],
                             completion_criteria=["tests pass"],
@@ -215,6 +216,7 @@ def test_api_questions_and_resume():
 
                 # Ask a question FIRST, then transition to WAITING_FOR_INPUT
                 store = app.state.store
+                req_id = store.load(run_id).task.requirements[0].id
                 lease = store.acquire(run_id, owner="test", ttl=30)
                 ctrl = WorkflowController(store, lease, actor="test")
                 q = Question(
@@ -222,7 +224,7 @@ def test_api_questions_and_resume():
                     run_id=run_id,
                     text="Which database should we use?",
                     blocking=True,
-                    requirement_ids=["REQ-001"],
+                    requirement_ids=[req_id],
                 )
                 ctrl.ask_question(q)
                 current_phase = ctrl.get_state().run.phase
@@ -278,6 +280,7 @@ def test_api_entity_queries_and_sse():
 
                 # Add issue and decision
                 store = app.state.store
+                req_id = store.load(run_id).task.requirements[0].id
                 lease = store.acquire(run_id, owner="test", ttl=30)
                 ctrl = WorkflowController(store, lease, actor="test")
                 issue = Issue(
@@ -289,7 +292,7 @@ def test_api_entity_queries_and_sse():
                     impact="Potential OOM in constrained environments",
                     suggested_resolution="Tune memory limits or use Redis",
                     verification_request="Run load test",
-                    requirement_ids=["REQ-001"],
+                    requirement_ids=[req_id],
                 )
                 ctrl.record_issue(issue)
                 decision = Decision(
@@ -388,4 +391,80 @@ def test_api_get_run_logs():
                 assert any("Test cancel reason" in l["message"] for l in logs_after)
         finally:
             app.state.store.close()
+
+
+def test_api_clone_run_lineage_and_immutability():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = Path(tmpdir) / "api.db"
+        art_path = Path(tmpdir) / "artifacts"
+        app = create_app(db_path=db_path, artifacts_dir=art_path, auto_start_worker=False)
+        try:
+            with TestClient(app) as client:
+                # 1. Create parent run
+                parent_payload = {
+                    "goal": "Build Distributed Cache",
+                    "requirements": ["In-memory LRU eviction", "Replication over TCP"],
+                    "mode": "greenfield",
+                    "max_rounds": 4,
+                    "token_limit": 150000,
+                    "cost_limit": 3.5,
+                }
+                res_parent = client.post("/api/runs", json=parent_payload)
+                assert res_parent.status_code == 202
+                parent_id = res_parent.json()["run_id"]
+
+                # Verify get_run returns detailed parameters
+                detail_parent = client.get(f"/api/runs/{parent_id}").json()
+                assert detail_parent["mode"] == "greenfield"
+                assert detail_parent["token_limit"] == 150000
+                assert detail_parent["cost_limit"] == 3.5
+                assert detail_parent["max_rounds"] == 4
+                assert detail_parent["parent_run_id"] is None
+
+                # 2. Reject clone while parent is still RUNNING (status 400)
+                child_payload = {
+                    "goal": "Build Distributed Cache (retry)",
+                    "requirements": ["In-memory LRU eviction", "Replication over TCP"],
+                    "parent_run_id": parent_id,
+                }
+                res_active = client.post("/api/runs", json=child_payload)
+                assert res_active.status_code == 400
+                assert "only terminal runs can be cloned" in res_active.json()["detail"]
+
+                # 3. Reject non-existent parent_run_id (status 404)
+                bad_payload = {
+                    "goal": "Nonexistent parent clone",
+                    "requirements": ["Req 1"],
+                    "parent_run_id": "RUN-DOES-NOT-EXIST",
+                }
+                res_not_found = client.post("/api/runs", json=bad_payload)
+                assert res_not_found.status_code == 404
+                assert "RUN-DOES-NOT-EXIST not found" in res_not_found.json()["detail"]
+
+                # 4. Cancel parent run to transition into terminal state
+                client.post(f"/api/runs/{parent_id}/cancel", json={"reason": "Parent cancelled for retry"})
+                parent_before = client.get(f"/api/runs/{parent_id}").json()
+                assert parent_before["status"] == "CANCELLED"
+                events_before = app.state.store.events(parent_id)
+
+                # 5. Successfully clone from cancelled parent run
+                res_child = client.post("/api/runs", json=child_payload)
+                assert res_child.status_code == 202
+                child_id = res_child.json()["run_id"]
+
+                # Verify child has lineage linked
+                child_detail = client.get(f"/api/runs/{child_id}").json()
+                assert child_detail["parent_run_id"] == parent_id
+                assert child_detail["goal"] == "Build Distributed Cache (retry)"
+
+                # 6. Verify parent run immutability
+                parent_after = client.get(f"/api/runs/{parent_id}").json()
+                assert parent_after["status"] == parent_before["status"]
+                assert parent_after["revision"] == parent_before["revision"]
+                assert parent_after["stop_reason"] == parent_before["stop_reason"]
+                events_after = app.state.store.events(parent_id)
+                assert len(events_after) == len(events_before)
+        finally:
+            app.state.store.close()
+
 

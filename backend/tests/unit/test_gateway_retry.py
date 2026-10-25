@@ -2,7 +2,6 @@
 
 import pytest
 
-from astra_multi.gateway.fake import FakeProvider
 from astra_multi.gateway.model_gateway import (
     AttemptTrace,
     BudgetExceededError,

@@ -2,10 +2,11 @@
 
 import tempfile
 from pathlib import Path
+
 import pytest
 
-from astra_multi.domain.fixtures import sample_plan, sample_state
 from astra_multi.domain.commands import ChangeIssue
+from astra_multi.domain.fixtures import sample_plan, sample_state
 from astra_multi.domain.models import (
     Issue,
     IssueResolution,
@@ -17,8 +18,8 @@ from astra_multi.domain.models import (
 )
 from astra_multi.domain.policies import InvalidState, apply_mutation
 from astra_multi.orchestration.controller import WorkflowController
-from astra_multi.orchestration.roles import ROLE_GROUP
 from astra_multi.orchestration.graph import WorkflowContext
+from astra_multi.orchestration.roles import ROLE_GROUP
 from astra_multi.persistence.sqlite import SQLiteStore
 
 
@@ -30,7 +31,6 @@ def test_semantic_review_role_group_mapping_is_reviewer():
         controller=None,  # type: ignore
         gateway=None,  # type: ignore
         context_builder=None,  # type: ignore
-        evidence_ledger=None,  # type: ignore
         budget_service=None,  # type: ignore
         role_assignments={
             "synthesizer": {"provider": "provider-synth", "model": "model-synth"},

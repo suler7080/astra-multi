@@ -568,3 +568,21 @@ def test_scenario_d_semantic_review_does_not_increment_round():
             assert loop_nodes == ["revise", "semantic_review", "revise", "semantic_review"]
 
 
+def test_compiled_graph_default_recursion_limit():
+    """Verify AstraStateGraph compiles with default recursion_limit of 150 (not default 25)."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = Path(tmpdir) / "test_rec.db"
+        with SQLiteStore(db_path) as store:
+            state = sample_state(repo=False)
+            store.create(state.task, state.run, state.snapshot)
+            lease = store.acquire(state.run.id, owner="worker", ttl=60)
+            controller = WorkflowController(store, lease)
+            context_builder = ContextBuilder(store.artifacts)
+            wf_ctx = WorkflowContext(controller=controller, gateway=None, context_builder=context_builder)
+            graph = create_workflow_graph(wf_ctx)
+            app = graph.compile()
+            # Verify app has recursion_limit == 150 in its bound config
+            assert getattr(app, "config", {}).get("recursion_limit") == 150
+
+
+
