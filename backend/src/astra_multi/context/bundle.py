@@ -17,6 +17,7 @@ from astra_multi.domain.models import (
     RunState,
 )
 
+from astra_multi.domain.policies import is_open_issue_status
 from astra_multi.domain.repositories import ArtifactStore
 
 logger = logging.getLogger(__name__)
@@ -343,7 +344,7 @@ class ContextBuilder:
                     "verification_request": issue.verification_request,
                 }
                 for issue in run.issues
-                if issue.status not in {IssueStatus.RESOLVED, IssueStatus.REJECTED, IssueStatus.DUPLICATE}
+                if is_open_issue_status(issue.status)
             ]
 
             # Blocking issues first so truncation keeps the most important ones.

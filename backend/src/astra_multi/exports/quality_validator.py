@@ -22,6 +22,7 @@ from astra_multi.domain.models import (
     StepPhaseType,
     ValidationStatus,
 )
+from astra_multi.domain.policies import is_open_issue_status
 
 
 class ViolationSeverity(str, Enum):
@@ -337,7 +338,7 @@ class StructuralQualityValidator:
 
         # 3. Check unresolved blocking and warning issues
         for issue in state.issues:
-            if issue.severity == IssueSeverity.BLOCKING and issue.status != IssueStatus.RESOLVED:
+            if issue.severity == IssueSeverity.BLOCKING and is_open_issue_status(issue.status):
                 unresolved_blockers.append(issue.id)
                 violations.append(
                     QualityViolation(

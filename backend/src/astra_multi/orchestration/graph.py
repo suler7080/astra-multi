@@ -53,6 +53,7 @@ from astra_multi.domain.models import (
     StepPhaseType,
     TechStackTruthTable,
 )
+from astra_multi.domain.policies import is_open_issue_status
 from astra_multi.exports.finalization import SemanticReviewAssessment
 from astra_multi.exports.quality_validator import (
     StructuralQualityValidator,
@@ -1407,7 +1408,7 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> AstraStateGraph:
         open_warning_or_blocker = [
             i for i in latest_state.issues
             if i.severity in (IssueSeverity.BLOCKING, IssueSeverity.WARNING)
-            and i.status not in (IssueStatus.RESOLVED, IssueStatus.DUPLICATE, IssueStatus.REJECTED)
+            and is_open_issue_status(i.status)
         ]
         failed_verdicts = [
             v for v in review_out.requirement_verdicts
@@ -1479,7 +1480,7 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> AstraStateGraph:
         # Check blocking and warning issues
         unresolved_blocking = [
             i.id for i in curr_state.issues
-            if i.severity == IssueSeverity.BLOCKING and i.status != IssueStatus.RESOLVED
+            if i.severity == IssueSeverity.BLOCKING and is_open_issue_status(i.status)
         ]
         if unresolved_blocking:
             problems.append(f"{len(unresolved_blocking)} unresolved blocking issues")
@@ -1498,7 +1499,15 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> AstraStateGraph:
             sem_assessment = ctrl.get_semantic_review(curr_state.run.id)
         elif hasattr(ctrl.repository, "get_semantic_review"):
             sem_assessment = ctrl.repository.get_semantic_review(curr_state.run.id)
-        if sem_assessment and not sem_assessment.passed:
+        # C-3: None nghĩa là "chưa có semantic review assessment" → coi là FAIL,
+        # khớp FinalizationService.evaluate (finalization.py ~146-149: không có
+        # assessment thì rubric pillar fail, không được FINAL). Semantic review là
+        # phase bắt buộc của vòng lặp (revise -> semantic_review -> gate), không có
+        # cấu hình tắt; None chỉ xảy ra khi lưu/khôi phục assessment thất bại, nên
+        # gate phải fail-closed thay vì đóng mắt cho qua.
+        if sem_assessment is None:
+            problems.append("Semantic review assessment not provided")
+        elif not sem_assessment.passed:
             problems.append(
                 f"Semantic review did not pass: {'; '.join(sem_assessment.concerns) or sem_assessment.feedback}"
             )

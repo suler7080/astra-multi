@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import math
 import sqlite3
 import threading
@@ -41,6 +42,8 @@ from .migrations import migrate
 from .settings_store import SettingsStore
 
 mutation_adapter: TypeAdapter[Mutation] = TypeAdapter(Mutation)
+
+logger = logging.getLogger(__name__)
 
 
 class SQLiteStore:
@@ -395,23 +398,23 @@ class SQLiteStore:
                 sem_file.unlink()
             self.settings.delete_setting(f"semantic_review:{run_id}")
         except Exception:
-            pass
+            # C-3: dọn dẹp best-effort khi delete run — không raise, nhưng phải
+            # để lại dấu vết thay vì nuốt lặng lẽ (trước đây là `except: pass`).
+            logger.warning("Best-effort cleanup failed for run %s", run_id, exc_info=True)
 
     def save_semantic_review(self, run_id: str, assessment: Any) -> None:
         from dataclasses import asdict
         data = asdict(assessment)
-        try:
-            self.settings.set_setting(f"semantic_review:{run_id}", json.dumps(data, ensure_ascii=False))
-        except Exception:
-            pass
-        try:
-            rev_dir = self.artifacts.root / "semantic_reviews"
-            rev_dir.mkdir(parents=True, exist_ok=True)
-            (rev_dir / f"{run_id}.json").write_text(
-                json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
-            )
-        except Exception:
-            pass
+        # C-3: never swallow write failures here. The gate treats a missing
+        # assessment as fail-closed, so a silently failed save would make an
+        # assessment vanish and mislead every reader afterwards — let the
+        # error propagate to the caller instead.
+        self.settings.set_setting(f"semantic_review:{run_id}", json.dumps(data, ensure_ascii=False))
+        rev_dir = self.artifacts.root / "semantic_reviews"
+        rev_dir.mkdir(parents=True, exist_ok=True)
+        (rev_dir / f"{run_id}.json").write_text(
+            json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
 
     def get_semantic_review(self, run_id: str) -> Any:
         from astra_multi.exports.finalization import SemanticReviewAssessment

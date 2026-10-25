@@ -85,6 +85,24 @@ ISSUE_TRANSITIONS: dict[IssueStatus, frozenset[IssueStatus]] = {
 }
 
 
+# Definition of "closed issue" standardized (A-1): an issue is closed and no longer
+# blocking FINAL when the status is in RESOLVED / DUPLICATE / REJECTED. OPEN ->
+# REJECTED and OPEN -> DUPLICATE are valid transitions (see ISSUE_TRANSITIONS), so
+# both statuses are closing in nature, not only RESOLVED.
+CLOSED_ISSUE_STATUSES: frozenset[IssueStatus] = frozenset(
+    {IssueStatus.RESOLVED, IssueStatus.REJECTED, IssueStatus.DUPLICATE}
+)
+
+
+def is_open_issue_status(status: IssueStatus) -> bool:
+    """True if the status is not yet closed (not in CLOSED_ISSUE_STATUSES).
+
+    All places that determine "whether the issue is currently blocking" must be
+    used uniformly here, not rewriting the status condition themselves.
+    """
+    return status not in CLOSED_ISSUE_STATUSES
+
+
 def change_issue(state: RunState, command: ChangeIssue, now: datetime) -> Issue:
     issue = next((item for item in state.issues if item.id == command.issue_id), None)
     if issue is None or command.status not in ISSUE_TRANSITIONS[issue.status]:
