@@ -12,7 +12,7 @@ Hệ thống đa tác nhân (Multi-Agent System) phân tích kiến trúc phần
 ![React](https://img.shields.io/badge/React-18.x-61DAFB?logo=react)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6?logo=typescript)
 ![Vite](https://img.shields.io/badge/Vite-5.x-646CFF?logo=vite)
-![Tests](https://img.shields.io/badge/tests-524%20passed%20%7C%205%20skipped-success)
+![Tests](https://img.shields.io/badge/tests-543%20passed%20%7C%205%20skipped-success)
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-lightgrey)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
@@ -246,7 +246,7 @@ Dự án duy trì tỷ lệ kiểm thử nghiêm ngặt trên môi trường nat
 cd backend
 .\.venv\Scripts\python -m pytest tests -v
 ```
-*(Kết quả hiện tại: 524 passed, 5 skipped, 0 failed).*
+*(Kết quả hiện tại: 543 passed, 5 skipped, 0 failed).*
 
 ---
 
@@ -271,7 +271,7 @@ astra-multi/
 │   │   ├── provider_smoke.py       # Smoke kiểm tra live một provider profile (opt-in)
 │   │   ├── sandbox/                # PlanSandboxVerifier (subprocess độc lập)
 │   │   └── cli.py                  # Entrypoint giao diện dòng lệnh CLI
-│   └── tests/                      # Bộ kiểm thử tích hợp, unit (529 tests)
+│   └── tests/                      # Bộ kiểm thử tích hợp, unit (548 tests)
 │
 ├── frontend/                       # Giao diện người dùng Web (React + Vite)
 │   ├── src/
