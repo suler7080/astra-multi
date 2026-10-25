@@ -1432,16 +1432,16 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> AstraStateGraph:
             concerns.append(f"[RUBRIC-{getattr(ra, 'rubric_id', 'R')}] Status {getattr(ra, 'status', 'FAIL')} for {getattr(ra, 'req_id', '')}")
         if assessment_passed:
             feedback = review_out.summary or (
-                "Tất cả issue mức warning trở lên đã được giải quyết, mọi rubric đạt MET và mọi requirement đạt PASS"
+                "All warning-or-higher issues are resolved, every rubric item is MET and every requirement is PASS"
             )
         else:
             reasons = []
             if open_warning_or_blocker:
-                reasons.append(f"Còn {len(open_warning_or_blocker)} issue mức warning trở lên chưa giải quyết")
+                reasons.append(f"{len(open_warning_or_blocker)} warning-or-higher issue(s) remain unresolved")
             if failed_verdicts:
-                reasons.append(f"Có {len(failed_verdicts)} requirement chưa đạt PASS ({', '.join(v.requirement_id for v in failed_verdicts)})")
+                reasons.append(f"{len(failed_verdicts)} requirement(s) are not PASS ({', '.join(v.requirement_id for v in failed_verdicts)})")
             if rubric_failures:
-                reasons.append(f"Có {len(rubric_failures)} rubric item chưa đạt MET ({', '.join(getattr(ra, 'rubric_id', 'R') for ra in rubric_failures)})")
+                reasons.append(f"{len(rubric_failures)} rubric item(s) are not MET ({', '.join(getattr(ra, 'rubric_id', 'R') for ra in rubric_failures)})")
             feedback = review_out.summary or "; ".join(reasons)
         audits_payload = [
             ra.model_dump(mode="json") if hasattr(ra, "model_dump") else (ra if isinstance(ra, dict) else ra.__dict__)
@@ -1454,10 +1454,46 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> AstraStateGraph:
             concerns=concerns,
             rubric_audits=audits_payload,
         )
-        if hasattr(ctrl, "save_semantic_review"):
-            ctrl.save_semantic_review(assessment)
-        elif hasattr(ctrl.repository, "save_semantic_review"):
-            ctrl.repository.save_semantic_review(curr_state.run.id, assessment)
+        try:
+            if hasattr(ctrl, "save_semantic_review"):
+                ctrl.save_semantic_review(assessment)
+            elif hasattr(ctrl.repository, "save_semantic_review"):
+                ctrl.repository.save_semantic_review(curr_state.run.id, assessment)
+        except Exception as save_exc:
+            # P6: never let a semantic-review persistence failure strand the
+            # run in RUNNING with no trace. Mirror the worker's failure policy
+            # (api/worker.py ~246-265): log with full traceback, emit one clear
+            # terminal transition event (reason carried in stop_reason, so the
+            # UI logs/rendering can show it), keep the original error visible
+            # to the driver by re-raising. transition_phase is idempotent when
+            # the run already ended in the same phase/status.
+            logger.exception(
+                "Semantic review could not be persisted for run %s",
+                curr_state.run.id,
+            )
+            final_state = ctrl.get_state()
+            if final_state.run.status not in (
+                RunStatus.FINAL,
+                RunStatus.PARTIAL,
+                RunStatus.CANCELLED,
+            ):
+                try:
+                    ctrl.transition_phase(
+                        new_phase=final_state.run.phase,
+                        new_status=RunStatus.FAILED,
+                        reason=(
+                            f"Semantic review could not be persisted: "
+                            f"{type(save_exc).__name__}: {save_exc}"
+                        ),
+                    )
+                except Exception as mark_exc:
+                    logger.warning(
+                        "Failed to mark run %s FAILED after semantic review "
+                        "persistence error: %s",
+                        curr_state.run.id,
+                        mark_exc,
+                    )
+            raise
 
         return {
             "semantic_review": review_out.model_dump(mode="json"),
