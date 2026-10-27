@@ -8,7 +8,7 @@ interface AuthModalProps {
   onAuthenticated: () => void;
 }
 
-export const AuthModal: React.FC<AuthModalProps> = ({ mode, onAuthenticated }) => {
+export const AuthModal: React.FC<AuthModalProps> = React.memo(({ mode, onAuthenticated }) => {
   const { t } = useI18n();
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -105,7 +105,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ mode, onAuthenticated }) =
               <button
                 type="button"
                 onClick={() => setShowPassword(!showPassword)}
-                className="absolute right-2.5 top-2.5 text-slate-400 hover:text-slate-200 focus:outline-none focus:text-sky-400 p-0.5 rounded"
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 focus:outline-none focus:text-sky-400 p-1 rounded transition-colors"
                 aria-label={showPassword ? t('auth_hide_password') : t('auth_show_password')}
               >
                 {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
@@ -130,7 +130,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ mode, onAuthenticated }) =
                 <button
                   type="button"
                   onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                  className="absolute right-2.5 top-2.5 text-slate-400 hover:text-slate-200 focus:outline-none focus:text-sky-400 p-0.5 rounded"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 focus:outline-none focus:text-sky-400 p-1 rounded transition-colors"
                   aria-label={showConfirmPassword ? t('auth_hide_password') : t('auth_show_password')}
                 >
                   {showConfirmPassword ? <EyeOff size={16} /> : <Eye size={16} />}
@@ -156,4 +156,4 @@ export const AuthModal: React.FC<AuthModalProps> = ({ mode, onAuthenticated }) =
       </div>
     </div>
   );
-};
+});

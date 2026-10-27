@@ -11,7 +11,7 @@ interface QualityGateModalProps {
   mode: 'validation' | 'finalize';
 }
 
-export const QualityGateModal: React.FC<QualityGateModalProps> = ({
+export const QualityGateModal: React.FC<QualityGateModalProps> = React.memo(({
   isOpen,
   onClose,
   report,
@@ -148,4 +148,4 @@ export const QualityGateModal: React.FC<QualityGateModalProps> = ({
       </div>
     </div>
   );
-};
+});

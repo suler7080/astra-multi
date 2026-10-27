@@ -218,19 +218,16 @@ def apply_all_providers_to_environment(store: SQLiteStore) -> None:
         api_key_enc = prov.get("api_key_enc")
 
         api_key = decrypt_secret(api_key_enc, master_key) if api_key_enc else None
-        api_key_env = (
-            "XKIRO_API_KEY"
-            if "xkiro" in name.lower()
-            else (
-                "OPENAI_API_KEY"
-                if kind == "openai"
-                else (
-                    "GOOGLE_API_KEY"
-                    if kind == "google"
-                    else f"{name.upper().replace('-', '_')}_API_KEY"
-                )
-            )
-        )
+        if "xkiro" in name.lower():
+            api_key_env = "XKIRO_API_KEY"
+        elif "tokenharbor" in name.lower():
+            api_key_env = "TOKENHARBOR_API_KEY"
+        elif kind == "openai":
+            api_key_env = "OPENAI_API_KEY"
+        elif kind == "google":
+            api_key_env = "GOOGLE_API_KEY"
+        else:
+            api_key_env = f"{name.upper().replace('-', '_')}_API_KEY" 
         if api_key:
             os.environ[api_key_env] = api_key
 
@@ -260,49 +257,58 @@ def apply_active_provider_to_environment(store: SQLiteStore) -> None:
 
 
 def seed_initial_providers_if_empty(store: SQLiteStore) -> None:
-    """Seeds default providers (Xkiro, OpenAI, Google) if database is empty."""
-    providers = store.settings.list_providers()
-    if providers:
-        return
-
+    """Seeds default providers (Xkiro, OpenAI, Google, TokenHarbor) if missing."""
     master_key = ensure_master_encryption_key(store.settings)
-    xkiro_key = os.environ.get("XKIRO_API_KEY")
-    xkiro_enc = encrypt_secret(xkiro_key, master_key) if xkiro_key else None
+    providers = store.settings.list_providers()
+    existing_names = {p["name"].lower() for p in providers}
 
-    # Default Xkiro
-    store.settings.save_provider(
-        name="xkiro",
-        kind="openai-compatible",
-        model="qwen/qwen3.7-flash:free",
-        base_url="https://api.xkiro.com/v1",
-        api_key_enc=xkiro_enc,
-        is_active=True,
-    )
+    if not existing_names:
+        xkiro_key = os.environ.get("XKIRO_API_KEY")
+        xkiro_enc = encrypt_secret(xkiro_key, master_key) if xkiro_key else None
+        store.settings.save_provider(
+            name="xkiro",
+            kind="openai-compatible",
+            model="qwen/qwen3.7-flash:free",
+            base_url="https://api.xkiro.com/v1",
+            api_key_enc=xkiro_enc,
+            is_active=True,
+        )
 
-    # Standard OpenAI preset
-    openai_key = os.environ.get("OPENAI_API_KEY")
-    openai_enc = encrypt_secret(openai_key, master_key) if openai_key else None
-    store.settings.save_provider(
-        name="openai",
-        kind="openai",
-        model="gpt-4o-mini",
-        base_url="https://api.openai.com/v1",
-        api_key_enc=openai_enc,
-        is_active=False,
-    )
+        openai_key = os.environ.get("OPENAI_API_KEY")
+        openai_enc = encrypt_secret(openai_key, master_key) if openai_key else None
+        store.settings.save_provider(
+            name="openai",
+            kind="openai",
+            model="gpt-4o-mini",
+            base_url="https://api.openai.com/v1",
+            api_key_enc=openai_enc,
+            is_active=False,
+        )
 
-    # Standard Google preset
-    google_key = os.environ.get("GOOGLE_API_KEY")
-    google_enc = encrypt_secret(google_key, master_key) if google_key else None
-    store.settings.save_provider(
-        name="google",
-        kind="google",
-        model="gemini-2.0-flash",
-        api_key_enc=google_enc,
-        is_active=False,
-    )
+        google_key = os.environ.get("GOOGLE_API_KEY")
+        google_enc = encrypt_secret(google_key, master_key) if google_key else None
+        store.settings.save_provider(
+            name="google",
+            kind="google",
+            model="gemini-2.0-flash",
+            api_key_enc=google_enc,
+            is_active=False,
+        )
+
+    if "tokenharbor" not in existing_names:
+        tokenharbor_key = os.environ.get("TOKENHARBOR_API_KEY")
+        tokenharbor_enc = encrypt_secret(tokenharbor_key, master_key) if tokenharbor_key else None
+        store.settings.save_provider(
+            name="tokenharbor",
+            kind="openai-compatible",
+            model="gpt-4o-mini",
+            base_url="https://tokenharbor.ai/v1",
+            api_key_enc=tokenharbor_enc,
+            is_active=False,
+        )
 
     apply_active_provider_to_environment(store)
+    return
 
 
 def create_auth_settings_router(store: SQLiteStore) -> APIRouter:
@@ -714,6 +720,8 @@ def create_auth_settings_router(store: SQLiteStore) -> APIRouter:
             has_env_key = False
             if "xkiro" in provider_name.lower():
                 has_env_key = bool(os.environ.get("XKIRO_API_KEY"))
+            elif "tokenharbor" in provider_name.lower():
+                has_env_key = bool(os.environ.get("TOKENHARBOR_API_KEY"))
             elif prov_config.get("kind") == "openai":
                 has_env_key = bool(os.environ.get("OPENAI_API_KEY"))
             elif prov_config.get("kind") == "google":

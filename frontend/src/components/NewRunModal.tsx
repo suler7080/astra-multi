@@ -38,7 +38,7 @@ const FieldTooltip: React.FC<{ id: string; content: string }> = ({ id, content }
   </span>
 );
 
-export const NewRunModal: React.FC<NewRunModalProps> = ({
+export const NewRunModal: React.FC<NewRunModalProps> = React.memo(({
   isOpen,
   onClose,
   onSubmit,
@@ -592,4 +592,4 @@ export const NewRunModal: React.FC<NewRunModalProps> = ({
       </div>
     </div>
   );
-};
+});

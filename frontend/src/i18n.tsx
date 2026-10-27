@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { ChevronDown } from 'lucide-react';
 import {
   type Language,
   translations,
@@ -37,25 +38,14 @@ export const LanguageSwitcher: React.FC<{ className?: string }> = ({ className =
   const { lang, setLang } = useI18n();
 
   return (
-    <div className={`lang-switcher-container ${className}`}>
-      <button
-        type="button"
-        onClick={() => setLang('EN')}
-        className={`lang-btn ${lang === 'EN' ? 'lang-btn-active' : ''}`}
-        title="Switch to English"
-      >
-        <span className="lang-flag">🇬🇧</span>
-        <span>ENG</span>
-      </button>
-      <button
-        type="button"
-        onClick={() => setLang('VN')}
-        className={`lang-btn ${lang === 'VN' ? 'lang-btn-active' : ''}`}
-        title="Chuyển sang Tiếng Việt"
-      >
-        <span className="lang-flag">🇻🇳</span>
-        <span>VN</span>
-      </button>
-    </div>
+    <button
+      type="button"
+      onClick={() => setLang(lang === 'VN' ? 'EN' : 'VN')}
+      className={`inline-flex items-center gap-1.5 px-4 h-10 rounded-full border border-[var(--border-strong)] text-[14px] font-medium text-[var(--text)] bg-[var(--bg)] hover:bg-[var(--surface-tonal)] transition-colors cursor-pointer select-none ${className}`}
+      title={lang === 'VN' ? 'Switch to English' : 'Chuyển sang Tiếng Việt'}
+    >
+      <span>{lang === 'VN' ? 'Tiếng Việt' : 'English'}</span>
+      <ChevronDown size={14} className="text-[var(--text-2)]" />
+    </button>
   );
 };

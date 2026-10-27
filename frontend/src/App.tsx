@@ -26,6 +26,7 @@ import { QualityGateModal } from './components/QualityGateModal';
 import { ExecutionLogs } from './components/ExecutionLogs';
 import { AuthModal } from './components/AuthModal';
 import { SettingsModal } from './components/SettingsModal';
+import { ConfirmModal } from './components/ConfirmModal';
 import { DashboardHome } from './components/DashboardHome';
 import { ErrorBanner, type GenericErrorInfo } from './components/ErrorBanner';
 import { useI18n } from './i18nContext';
@@ -38,6 +39,7 @@ import {
   GitBranch,
   Terminal,
   CheckCircle2,
+  ArrowLeft,
 } from 'lucide-react';
 
 export const App: React.FC = () => {
@@ -65,6 +67,7 @@ export const App: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isDeletingId, setIsDeletingId] = useState<string | null>(null);
+  const [deletingRunId, setDeletingRunId] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [isSseConnected, setIsSseConnected] = useState(false);
 
@@ -79,9 +82,12 @@ export const App: React.FC = () => {
   const checkProviders = useCallback(async () => {
     try {
       const list = await api.listProviders();
-      setHasConfiguredProvider(list.length > 0);
+      setHasConfiguredProvider((prev) => {
+        const next = list.length > 0;
+        return prev === next ? prev : next;
+      });
     } catch {
-      setHasConfiguredProvider(false);
+      setHasConfiguredProvider((prev) => (prev ? false : prev));
     }
   }, []);
 
@@ -193,7 +199,22 @@ export const App: React.FC = () => {
         if (!silent) setIsLoading(true);
         void checkProviders();
         const list = await api.listRuns();
-        setRuns(list);
+        setRuns((prev) => {
+          if (
+            prev.length === list.length &&
+            prev.every(
+              (r, idx) =>
+                r.run_id === list[idx].run_id &&
+                r.status === list[idx].status &&
+                r.phase === list[idx].phase &&
+                r.revision === list[idx].revision &&
+                r.stop_reason === list[idx].stop_reason
+            )
+          ) {
+            return prev;
+          }
+          return list;
+        });
 
         if (initialRunId && list.some((r) => r.run_id === initialRunId)) {
           setSelectedRunId(initialRunId);
@@ -520,11 +541,16 @@ export const App: React.FC = () => {
 
   // Periodic background auto-refresh for runs list (dashboard / header)
   useEffect(() => {
+    // Suspend polling when any modal is open to prevent DOM disruptions and closing select menus
+    if (isSettingsOpen || isNewRunOpen || isQualityModalOpen || isAuthModalOpen || Boolean(deletingRunId)) {
+      return;
+    }
+
     const hasActiveRuns = runs.some(
       (r) => r.status === 'RUNNING' || r.status === 'WAITING_FOR_INPUT'
     );
-    // Poll runs list: 2.5s if active runs exist, otherwise 6s on dashboard or 15s inside a run
-    const intervalTime = hasActiveRuns ? 2500 : selectedRunId ? 15000 : 6000;
+    // Poll active runs every 2.5s; inside a selected run every 15s; idle dashboard every 30s
+    const intervalTime = hasActiveRuns ? 2500 : selectedRunId ? 15000 : 30000;
 
     const timer = setInterval(() => {
       if (document.visibilityState === 'visible') {
@@ -533,12 +559,15 @@ export const App: React.FC = () => {
     }, intervalTime);
 
     return () => clearInterval(timer);
-  }, [selectedRunId, runs, loadRuns]);
+  }, [selectedRunId, runs, loadRuns, isSettingsOpen, isNewRunOpen, isQualityModalOpen, isAuthModalOpen, deletingRunId]);
 
   // Immediately refresh on tab visibility / focus change
   useEffect(() => {
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
+        if (isSettingsOpen || isNewRunOpen || isQualityModalOpen || isAuthModalOpen || Boolean(deletingRunId)) {
+          return;
+        }
         if (selectedRunId) {
           void loadRunDetails(selectedRunId, true);
         } else {
@@ -548,7 +577,7 @@ export const App: React.FC = () => {
     };
     document.addEventListener('visibilitychange', handleVisibilityChange);
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
-  }, [selectedRunId, loadRuns, loadRunDetails]);
+  }, [selectedRunId, loadRuns, loadRunDetails, isSettingsOpen, isNewRunOpen, isQualityModalOpen, isAuthModalOpen, deletingRunId]);
 
   const handleSelectRun = (runId: string) => {
     setEvents([]);
@@ -577,7 +606,17 @@ export const App: React.FC = () => {
     setIsNewRunOpen(true);
   };
 
-  const handleCreateRun = async (payload: CreateRunPayload, idempotencyKey: string) => {
+  const showFeedback = useCallback((msg: string) => {
+    setActionMessage(msg);
+    setTimeout(() => setActionMessage(null), 4000);
+  }, []);
+
+  const handleCloseNewRun = useCallback(() => {
+    setIsNewRunOpen(false);
+    setCloneData(null);
+  }, []);
+
+  const handleCreateRun = useCallback(async (payload: CreateRunPayload, idempotencyKey: string) => {
     try {
       setIsSubmitting(true);
       setGenericError(null);
@@ -591,7 +630,7 @@ export const App: React.FC = () => {
     } finally {
       setIsSubmitting(false);
     }
-  };
+  }, [t, loadRuns, handleError, showFeedback]);
 
   const handleAnswerQuestion = async (questionId: string, answer: string, expectedRevision: number) => {
     if (!selectedRunId) return;
@@ -635,16 +674,15 @@ export const App: React.FC = () => {
     }
   };
 
-  const handleDeleteRun = async (runId: string) => {
-    if (!runId) return;
-    const target = runs.find((r) => r.run_id === runId);
-    const isActive = target
-      ? target.status === 'RUNNING' || target.status === 'WAITING_FOR_INPUT'
-      : currentRun
-        ? currentRun.status === 'RUNNING' || currentRun.status === 'WAITING_FOR_INPUT'
-        : false;
-    const confirmMsg = isActive ? t('dash_confirm_delete_active') : t('dash_confirm_delete');
-    if (!window.confirm(`${confirmMsg}\n${runId}`)) return;
+  const handleDeleteRun = (runId: string): Promise<void> => {
+    if (!runId) return Promise.resolve();
+    setDeletingRunId(runId);
+    return Promise.resolve();
+  };
+
+  const handleConfirmDeleteRun = async () => {
+    if (!deletingRunId) return;
+    const runId = deletingRunId;
     try {
       setIsDeletingId(runId);
       if (eventSourceRef.current && selectedRunId === runId) {
@@ -659,6 +697,7 @@ export const App: React.FC = () => {
         updateUrlParam('');
       }
       await loadRuns();
+      setDeletingRunId(null);
     } catch (err: unknown) {
       handleError(err, t('err_delete_run'));
     } finally {
@@ -740,10 +779,11 @@ export const App: React.FC = () => {
     URL.revokeObjectURL(url);
   };
 
-  const showFeedback = (msg: string) => {
-    setActionMessage(msg);
-    setTimeout(() => setActionMessage(null), 4000);
-  };
+  const handleProviderChanged = useCallback(() => {
+    showFeedback(t('feedback_provider_updated'));
+    if (selectedRunId) loadRunDetails(selectedRunId);
+    void checkProviders();
+  }, [t, selectedRunId, loadRunDetails, checkProviders, showFeedback]);
 
 
   return (
@@ -761,6 +801,7 @@ export const App: React.FC = () => {
           setAuthMode('login');
         }}
         isLoading={isLoading}
+        isOffline={connectionStatus === 'offline'}
       />
 
       <ErrorBanner
@@ -780,29 +821,109 @@ export const App: React.FC = () => {
       )}
 
       {currentRun ? (
-        <main className="main-content">
+        <main className="max-w-[1280px] mx-auto px-6 sm:px-10 lg:px-16 py-8 w-full bg-[var(--bg-alt)] min-h-screen overflow-x-hidden">
+          {/* Top Bar matching Image 2 */}
+          <div className="flex items-center justify-between gap-4 mb-6 rise">
+            <button
+              type="button"
+              onClick={() => handleSelectRun('')}
+              className="h-10 px-4 rounded-full border border-[var(--border-strong)] bg-[var(--bg)] hover:bg-[var(--surface-tonal)] text-[var(--text)] text-[14px] font-medium inline-flex items-center gap-2 transition-colors cursor-pointer"
+            >
+              <ArrowLeft size={16} />
+              <span>{t('run_back_all_runs')}</span>
+            </button>
+
+            <div className="flex items-center gap-3">
+              {(currentRun.status === 'RUNNING' || currentRun.status === 'WAITING_FOR_INPUT') && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const reason = window.prompt(t('overview_cancel_placeholder'), t('overview_default_stop_reason'));
+                    if (reason !== null) {
+                      void handleCancelRun(reason || t('overview_default_stop_reason'));
+                    }
+                  }}
+                  className="h-10 px-5 rounded-full border border-[var(--error)]/30 text-[var(--error)] hover:bg-[var(--error-tonal)] text-[14px] font-medium transition-colors cursor-pointer"
+                >
+                  {t('run_cancel_btn')}
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Goal H1 & Badges row matching Image 2 */}
+          <div className="mb-6 rise">
+            <h1 className="text-[clamp(30px,4vw,48px)] font-medium text-[var(--text)] tracking-tight leading-tight mb-3">
+              {currentRun.goal}
+            </h1>
+            <div className="flex items-center flex-wrap gap-2.5">
+              {currentRun.status === 'RUNNING' && (
+                <span className="chip chip-accent text-[12px] py-1 px-3">
+                  <span className="w-2 h-2 rounded-full bg-[var(--accent)] pulse" />
+                  {t('status_running')}
+                </span>
+              )}
+              {currentRun.status === 'WAITING_FOR_INPUT' && (
+                <span className="chip chip-warn text-[12px] py-1 px-3">
+                  {t('status_waiting')}
+                </span>
+              )}
+              {currentRun.status === 'FINAL' && (
+                <span className="chip chip-success text-[12px] py-1 px-3">
+                  {t('status_final')}
+                </span>
+              )}
+              {currentRun.status === 'FAILED' && (
+                <span className="chip chip-error text-[12px] py-1 px-3">
+                  {t('status_failed')}
+                </span>
+              )}
+              {currentRun.status === 'CANCELLED' && (
+                <span className="chip chip-neutral text-[12px] py-1 px-3">
+                  {t('status_cancelled')}
+                </span>
+              )}
+
+              <span className="chip chip-neutral font-medium text-[12px] py-1 px-3">
+                Vòng {currentRun.revision} / {currentRun.max_rounds || 2}
+              </span>
+
+              <span className="font-mono text-[12px] px-3 py-1 rounded-full border border-[var(--border-strong)] text-[var(--text-2)] font-medium">
+                {currentRun.run_id}
+              </span>
+            </div>
+          </div>
+
           <PhaseTracker
             currentPhase={currentRun.phase}
             status={currentRun.status}
             stopReason={currentRun.stop_reason}
           />
 
-          {/* Navigation Tabs */}
-          <nav className="tab-navigation" aria-label={t('nav_run_views_label')}>
+          {/* Navigation Tabs (Google pill style) */}
+          <nav className="flex items-center gap-1.5 overflow-x-auto pb-2 mb-6" aria-label={t('nav_run_views_label')}>
             <button
               onClick={() => setActiveTab('overview')}
-              className={`nav-tab ${activeTab === 'overview' ? 'tab-active' : ''}`}
+              className={`h-9 px-4 rounded-full text-[13px] font-medium transition-colors cursor-pointer flex items-center gap-1.5 shrink-0 ${
+                activeTab === 'overview'
+                  ? 'bg-[var(--accent-tonal)] text-[var(--accent-on-tonal)]'
+                  : 'text-[var(--text-2)] hover:bg-[var(--surface-tonal)]'
+              }`}
             >
               <LayoutDashboard size={15} />
               <span>{t('tab_overview')}</span>
               {currentRun.pending_questions.length > 0 && (
-                <span className="tab-badge-amber">{currentRun.pending_questions.length}</span>
+                <span className="chip chip-warn text-[10px] py-0 px-1.5">{currentRun.pending_questions.length}</span>
               )}
             </button>
 
             <button
               onClick={() => setActiveTab('discussion')}
-              className={`nav-tab ${activeTab === 'discussion' ? 'tab-active' : ''}`}
+              className={`h-9 px-4 rounded-full text-[13px] font-medium transition-colors cursor-pointer flex items-center gap-1.5 shrink-0 ${
+                activeTab === 'discussion'
+                  ? 'bg-[var(--accent-tonal)] text-[var(--accent-on-tonal)]'
+                  : 'text-[var(--text-2)] hover:bg-[var(--surface-tonal)]'
+              }`}
             >
               <MessageSquare size={15} />
               <span>{t('tab_discussion')} ({events.length})</span>
@@ -810,7 +931,11 @@ export const App: React.FC = () => {
 
             <button
               onClick={() => setActiveTab('issues')}
-              className={`nav-tab ${activeTab === 'issues' ? 'tab-active' : ''}`}
+              className={`h-9 px-4 rounded-full text-[13px] font-medium transition-colors cursor-pointer flex items-center gap-1.5 shrink-0 ${
+                activeTab === 'issues'
+                  ? 'bg-[var(--accent-tonal)] text-[var(--accent-on-tonal)]'
+                  : 'text-[var(--text-2)] hover:bg-[var(--surface-tonal)]'
+              }`}
             >
               <AlertOctagon size={15} />
               <span>{t('tab_issues')} ({issues.length})</span>
@@ -818,7 +943,11 @@ export const App: React.FC = () => {
 
             <button
               onClick={() => setActiveTab('decisions')}
-              className={`nav-tab ${activeTab === 'decisions' ? 'tab-active' : ''}`}
+              className={`h-9 px-4 rounded-full text-[13px] font-medium transition-colors cursor-pointer flex items-center gap-1.5 shrink-0 ${
+                activeTab === 'decisions'
+                  ? 'bg-[var(--accent-tonal)] text-[var(--accent-on-tonal)]'
+                  : 'text-[var(--text-2)] hover:bg-[var(--surface-tonal)]'
+              }`}
             >
               <Compass size={15} />
               <span>{t('tab_decisions')} ({decisions.length})</span>
@@ -826,7 +955,11 @@ export const App: React.FC = () => {
 
             <button
               onClick={() => setActiveTab('evidence')}
-              className={`nav-tab ${activeTab === 'evidence' ? 'tab-active' : ''}`}
+              className={`h-9 px-4 rounded-full text-[13px] font-medium transition-colors cursor-pointer flex items-center gap-1.5 shrink-0 ${
+                activeTab === 'evidence'
+                  ? 'bg-[var(--accent-tonal)] text-[var(--accent-on-tonal)]'
+                  : 'text-[var(--text-2)] hover:bg-[var(--surface-tonal)]'
+              }`}
             >
               <FileSearch size={15} />
               <span>{t('tab_evidence')} ({evidence.length})</span>
@@ -834,7 +967,11 @@ export const App: React.FC = () => {
 
             <button
               onClick={() => setActiveTab('plan')}
-              className={`nav-tab ${activeTab === 'plan' ? 'tab-active' : ''}`}
+              className={`h-9 px-4 rounded-full text-[13px] font-medium transition-colors cursor-pointer flex items-center gap-1.5 shrink-0 ${
+                activeTab === 'plan'
+                  ? 'bg-[var(--accent-tonal)] text-[var(--accent-on-tonal)]'
+                  : 'text-[var(--text-2)] hover:bg-[var(--surface-tonal)]'
+              }`}
             >
               <GitBranch size={15} />
               <span>{t('tab_plan')}</span>
@@ -842,12 +979,16 @@ export const App: React.FC = () => {
 
             <button
               onClick={() => setActiveTab('logs')}
-              className={`nav-tab ${activeTab === 'logs' ? 'tab-active' : ''}`}
+              className={`h-9 px-4 rounded-full text-[13px] font-medium transition-colors cursor-pointer flex items-center gap-1.5 shrink-0 ${
+                activeTab === 'logs'
+                  ? 'bg-[var(--accent-tonal)] text-[var(--accent-on-tonal)]'
+                  : 'text-[var(--text-2)] hover:bg-[var(--surface-tonal)]'
+              }`}
             >
               <Terminal size={15} />
               <span>{t('tab_logs')}</span>
               {currentRun.status === 'FAILED' && (
-                <span className="tab-badge-rose">{t('tab_error_badge')}</span>
+                <span className="chip chip-error text-[10px] py-0 px-1.5">{t('tab_error_badge')}</span>
               )}
             </button>
           </nav>
@@ -857,6 +998,11 @@ export const App: React.FC = () => {
             {activeTab === 'overview' && (
               <RunOverview
                 run={currentRun}
+                currentPlan={currentPlan}
+                issues={issues}
+                decisions={decisions}
+                evidence={evidence}
+                onSelectPlanRevision={handleSelectPlanRevision}
                 onAnswerQuestion={handleAnswerQuestion}
                 onResumeRun={handleResumeRun}
                 onCancelRun={handleCancelRun}
@@ -899,6 +1045,9 @@ export const App: React.FC = () => {
                 onSelectRevision={handleSelectPlanRevision}
                 onExportMarkdown={handleExportMarkdown}
                 onExportJson={handleExportJson}
+                issues={issues}
+                decisions={decisions}
+                evidence={evidence}
               />
             )}
 
@@ -925,15 +1074,15 @@ export const App: React.FC = () => {
           isDeletingId={isDeletingId}
           isBackendOffline={connectionStatus === 'offline'}
           hasConfiguredProvider={hasConfiguredProvider}
+          retryCountdown={retryCountdown}
+          onRetry={() => void performRetry()}
+          isRetrying={isRetrying}
         />
       )}
 
       <NewRunModal
         isOpen={isNewRunOpen}
-        onClose={() => {
-          setIsNewRunOpen(false);
-          setCloneData(null);
-        }}
+        onClose={handleCloseNewRun}
         onSubmit={handleCreateRun}
         isSubmitting={isSubmitting}
         error={genericError?.message || null}
@@ -951,11 +1100,36 @@ export const App: React.FC = () => {
       <SettingsModal
         isOpen={isSettingsOpen}
         onClose={() => setIsSettingsOpen(false)}
-        onProviderChanged={() => {
-          showFeedback(t('feedback_provider_updated'));
-          if (selectedRunId) loadRunDetails(selectedRunId);
-          void checkProviders();
-        }}
+        onProviderChanged={handleProviderChanged}
+      />
+
+      <ConfirmModal
+        isOpen={Boolean(deletingRunId)}
+        title={t('dash_confirm_delete_title')}
+        message={
+          <div>
+            <p>
+              {(() => {
+                const target = runs.find((r) => r.run_id === deletingRunId);
+                const isActive = target
+                  ? target.status === 'RUNNING' || target.status === 'WAITING_FOR_INPUT'
+                  : currentRun
+                    ? currentRun.status === 'RUNNING' || currentRun.status === 'WAITING_FOR_INPUT'
+                    : false;
+                return isActive ? t('dash_confirm_delete_active') : t('dash_confirm_delete');
+              })()}
+            </p>
+            <p className="mt-2.5 font-mono text-[12px] px-2.5 py-1 rounded-full bg-[var(--surface-tonal)] text-[var(--text-2)] border border-[var(--border)] inline-block">
+              {deletingRunId}
+            </p>
+          </div>
+        }
+        confirmText={t('dash_btn_delete_run')}
+        cancelText={t('modal_btn_cancel')}
+        variant="danger"
+        isLoading={Boolean(isDeletingId)}
+        onClose={() => setDeletingRunId(null)}
+        onConfirm={handleConfirmDeleteRun}
       />
 
       {isAuthModalOpen && (

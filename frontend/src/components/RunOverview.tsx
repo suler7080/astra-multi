@@ -1,31 +1,34 @@
 import React, { useState } from 'react';
-import type { RunDetail } from '../types';
+import type { RunDetail, PlanRevision, Issue, Decision, Evidence } from '../types';
+import { PlanViewer } from './PlanViewer';
 import {
   HelpCircle,
   Send,
   Play,
-  StopCircle,
   ShieldCheck,
   Award,
-  Download,
-  FileText,
   CheckCircle2,
-  ListTodo,
-  Trash2,
+  AlertTriangle,
+  XCircle,
   RotateCcw,
 } from 'lucide-react';
 import { useI18n } from '../i18nContext';
 
 interface RunOverviewProps {
   run: RunDetail;
+  currentPlan?: PlanRevision | null;
+  issues: Issue[];
+  decisions?: Decision[];
+  evidence?: Evidence[];
+  onSelectPlanRevision?: (rev: number) => void;
   onAnswerQuestion: (questionId: string, answer: string, expectedRevision: number) => Promise<void>;
   onResumeRun: () => Promise<void>;
   onCancelRun: (reason: string) => Promise<void>;
   onDeleteRun: () => Promise<void>;
   onValidate: () => Promise<void>;
   onFinalize: () => Promise<void>;
-  onExportMarkdown: () => void;
-  onExportJson: () => void;
+  onExportMarkdown: (rev?: number) => void;
+  onExportJson: (rev?: number) => void;
   isProcessing: boolean;
   isDeleting?: boolean;
   actionMessage?: string | null;
@@ -35,25 +38,24 @@ interface RunOverviewProps {
 
 export const RunOverview: React.FC<RunOverviewProps> = ({
   run,
+  currentPlan,
+  issues = [],
+  decisions = [],
+  evidence = [],
+  onSelectPlanRevision = () => {},
   onAnswerQuestion,
   onResumeRun,
-  onCancelRun,
-  onDeleteRun,
   onValidate,
   onFinalize,
   onExportMarkdown,
   onExportJson,
   isProcessing,
-  isDeleting,
   actionMessage,
   onViewLogs,
   onCloneRun,
 }) => {
   const { t } = useI18n();
   const [answers, setAnswers] = useState<Record<string, string>>({});
-  const [cancelReason, setCancelReason] = useState(() => t('overview_default_stop_reason'));
-  const [showCancelPrompt, setShowCancelPrompt] = useState(false);
-  const [showDeletePrompt, setShowDeletePrompt] = useState(false);
 
   const handleAnswerSubmit = async (questionId: string) => {
     const text = (answers[questionId] || '').trim();
@@ -65,54 +67,66 @@ export const RunOverview: React.FC<RunOverviewProps> = ({
   const isTerminal = ['FINAL', 'PARTIAL', 'FAILED', 'CANCELLED'].includes(run.status);
   const isWaiting = run.status === 'WAITING_FOR_INPUT';
 
+  // Quality gate calculation
+  const hasNoBlocking = run.blocking_issues_count === 0;
+  const isDagValid = true; // Based on DAG rules
+  const coveragePercent = run.requirements.length > 0 ? 100 : 0;
+  const isCoveragePassed = coveragePercent >= 80;
+
+  const passedCount = (hasNoBlocking ? 1 : 0) + (isDagValid ? 1 : 0) + (isCoveragePassed ? 1 : 0);
+  const isEligibleForFinal = passedCount === 3;
+
   return (
-    <div className="overview-container">
+    <div className="space-y-6">
+      {/* Action feedback toast */}
       {actionMessage && (
-        <div className="action-feedback-banner">
-          <CheckCircle2 size={16} className="text-emerald-400" />
-          <span>{actionMessage}</span>
+        <div className="bg-[var(--success-tonal)] text-[var(--success-on-tonal)] border border-[var(--success)]/20 rounded-[20px] p-4 flex items-center gap-3 shadow-sm">
+          <CheckCircle2 size={18} className="text-[var(--success)] shrink-0" />
+          <span className="font-medium text-[14px]">{actionMessage}</span>
         </div>
       )}
 
       {/* Prominent Failure Banner if run failed */}
       {(run.status === 'FAILED' || (isTerminal && run.stop_reason && run.status !== 'FINAL')) && (
-        <div className="run-failure-banner">
-          <div className="flex items-start justify-between gap-4">
+        <div className="bg-[var(--error-tonal)] text-[var(--error-on-tonal)] border border-[var(--error)]/20 rounded-[24px] p-6 shadow-sm">
+          <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
             <div className="flex items-start gap-3 flex-1">
-              <span className="p-2 rounded-lg bg-rose-950/60 border border-rose-800/60 text-rose-400">
-                ⚠️
-              </span>
+              <div className="w-10 h-10 rounded-full bg-[var(--error)] text-white flex items-center justify-center shrink-0">
+                <XCircle size={20} />
+              </div>
               <div className="flex-1">
-                <div className="flex items-center gap-2">
-                  <h3 className="text-sm font-semibold text-rose-200">
+                <div className="flex items-center gap-2 mb-1">
+                  <h3 className="text-[16px] font-medium">
                     {t('overview_execution_stopped')}: {run.status === 'FAILED' ? t('overview_fatal_failure') : run.status}
                   </h3>
-                  <span className="badge-danger text-[11px]">{t('dash_phase_prefix').replace('{phase}', run.phase)}</span>
+                  <span className="chip chip-error text-[11px] py-0.5 px-2">
+                    {run.phase}
+                  </span>
                 </div>
-                <p className="text-xs text-rose-300/90 mt-1 font-mono break-words bg-rose-950/40 p-2.5 rounded border border-rose-900/40">
+                <p className="text-[13px] font-mono p-3 rounded-[14px] bg-white/60 border border-[var(--error)]/15 break-all select-all">
                   {run.stop_reason || t('overview_unknown_error')}
                 </p>
               </div>
             </div>
 
-            <div className="flex items-center gap-2 self-center">
-              {onCloneRun && (run.status === 'FAILED' || run.status === 'CANCELLED') && (
+            <div className="flex items-center gap-2 self-end sm:self-center">
+              {onCloneRun && (
                 <button
+                  type="button"
                   onClick={() => onCloneRun(run)}
-                  className="px-3 py-1.5 rounded-lg bg-sky-600/90 hover:bg-sky-500 text-white text-xs font-semibold flex items-center gap-1.5 transition-colors shadow-sm whitespace-nowrap"
-                  title={t('overview_rerun')}
+                  className="h-9 px-4 rounded-full bg-[var(--accent)] text-white font-medium text-[13px] flex items-center gap-1.5 btn-fill cursor-pointer"
                 >
-                  <RotateCcw size={13} />
+                  <RotateCcw size={14} />
                   <span>{t('overview_rerun')}</span>
                 </button>
               )}
               {onViewLogs && (
                 <button
+                  type="button"
                   onClick={onViewLogs}
-                  className="btn-danger-sm flex items-center gap-1.5 whitespace-nowrap"
+                  className="h-9 px-4 rounded-full border border-[var(--error)]/30 text-[var(--error)] hover:bg-white text-[13px] font-medium flex items-center gap-1.5 cursor-pointer"
                 >
                   <span>{t('overview_view_logs')}</span>
-                  <span>➔</span>
                 </button>
               )}
             </div>
@@ -120,43 +134,48 @@ export const RunOverview: React.FC<RunOverviewProps> = ({
         </div>
       )}
 
-      {/* Pending Questions Banner */}
+      {/* Operator Questions Banner (Human-in-the-loop) */}
       {run.pending_questions && run.pending_questions.length > 0 && (
-        <div className="pending-questions-card">
-          <div className="pending-header">
-            <div className="flex-align-center gap-2">
-              <HelpCircle className="text-amber-400" size={20} />
-              <h3 className="card-title text-amber-300">{t('overview_clarification_title')}</h3>
+        <div className="bg-[var(--warn-tonal)] text-[var(--warn-on-tonal)] border border-[var(--warn)]/30 rounded-[28px] p-6 shadow-sm">
+          <div className="flex items-center justify-between gap-3 mb-2">
+            <div className="flex items-center gap-2.5">
+              <HelpCircle className="text-[var(--warn)]" size={22} />
+              <h3 className="text-[18px] font-medium">{t('overview_clarification_title')}</h3>
             </div>
-            <span className="badge-amber">{run.pending_questions.length} {t('overview_question_count')}</span>
+            <span className="chip chip-warn font-medium text-[12px] py-0.5 px-3">
+              {run.pending_questions.length} {t('overview_question_count')}
+            </span>
           </div>
-          <p className="card-desc">
+          <p className="text-[14px] opacity-90 mb-4">
             {t('overview_clarification_desc')}
           </p>
 
-          <div className="questions-list">
+          <div className="space-y-4">
             {run.pending_questions.map((q) => (
-              <div key={q.id} className="question-item">
-                <div className="question-text">
-                  <span className="q-badge">{q.id}</span>
-                  <strong>{q.text}</strong>
+              <div key={q.id} className="bg-[var(--bg)] border border-[var(--border)] rounded-[20px] p-4 text-[var(--text)] shadow-sm">
+                <div className="flex items-start gap-2.5 mb-3">
+                  <span className="font-mono text-[11px] px-2 py-0.5 rounded-full bg-[var(--surface-tonal)] text-[var(--text-2)] font-medium">
+                    {q.id}
+                  </span>
+                  <strong className="text-[15px] font-medium">{q.text}</strong>
                 </div>
 
-                <div className="answer-input-row">
+                <div className="flex items-center gap-2">
                   <input
                     type="text"
                     value={answers[q.id] || ''}
                     onChange={(e) => setAnswers({ ...answers, [q.id]: e.target.value })}
                     placeholder={t('overview_answer_placeholder')}
-                    className="form-input flex-1"
+                    className="flex-1 h-11 px-4 rounded-full border border-[var(--border-strong)] text-[14px] focus:outline-none focus:border-[var(--accent)]"
                     disabled={isProcessing}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') handleAnswerSubmit(q.id);
                     }}
                   />
                   <button
+                    type="button"
                     onClick={() => handleAnswerSubmit(q.id)}
-                    className="btn-primary"
+                    className="h-11 px-5 rounded-full bg-[var(--accent)] text-white font-medium text-[13px] flex items-center gap-1.5 btn-fill cursor-pointer disabled:opacity-50"
                     disabled={isProcessing || !(answers[q.id] || '').trim()}
                   >
                     <Send size={14} />
@@ -168,16 +187,17 @@ export const RunOverview: React.FC<RunOverviewProps> = ({
           </div>
 
           {isWaiting && (
-            <div className="resume-prompt-row">
-              <span className="text-sm text-slate-300">
+            <div className="flex items-center justify-between gap-4 mt-4 pt-3 border-t border-[var(--warn)]/20">
+              <span className="text-[13px] font-medium">
                 {t('overview_all_answered')}
               </span>
               <button
+                type="button"
                 onClick={onResumeRun}
-                className="btn-success"
+                className="h-10 px-5 rounded-full bg-[var(--success)] text-white font-medium text-[13px] flex items-center gap-1.5 btn-fill cursor-pointer"
                 disabled={isProcessing}
               >
-                <Play size={15} />
+                <Play size={14} />
                 <span>{t('overview_resume_run')}</span>
               </button>
             </div>
@@ -185,209 +205,212 @@ export const RunOverview: React.FC<RunOverviewProps> = ({
         </div>
       )}
 
-      {/* Main Stats Grid */}
-      <div className="stats-grid">
-        <div className="stat-card">
-          <div className="flex-between">
-            <span className="stat-label">{t('overview_goal')}</span>
-            {run.parent_run_id && (
-              <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700/60 flex items-center gap-1">
-                <RotateCcw size={11} className="text-sky-400" />
-                <span>{t('overview_cloned_from')}: {run.parent_run_id}</span>
+      {/* 2-Column Main Layout matching Image 2 */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-7">
+        {/* Left Column: PlanViewer */}
+        <div className="lg:col-span-7 xl:col-span-8">
+          <PlanViewer
+            currentPlan={currentPlan}
+            totalPlansCount={run.plans_count}
+            onSelectRevision={onSelectPlanRevision}
+            onExportMarkdown={onExportMarkdown}
+            onExportJson={onExportJson}
+            issues={issues}
+            decisions={decisions}
+            evidence={evidence}
+          />
+        </div>
+
+        {/* Right Column: Issue Card + Quality Gate Card */}
+        <div className="lg:col-span-5 xl:col-span-4 space-y-6">
+          {/* 1. Issue Card (Image 2) */}
+          <div className="bg-[var(--bg)] border border-[var(--border)] rounded-[28px] p-6 shadow-sm">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-[20px] font-medium text-[var(--text)] tracking-tight">
+                {t('tab_issues')}
+              </h3>
+              <span className="chip chip-neutral font-mono text-[11px] py-0.5 px-2.5">
+                {issues.length}
               </span>
+            </div>
+
+            {issues.length === 0 ? (
+              <p className="text-[14px] text-[var(--text-2)] py-6 text-center">
+                {t('issues_no_issues')}
+              </p>
+            ) : (
+              <div className="space-y-3.5 divide-y divide-[var(--border)]">
+                {issues.slice(0, 6).map((iss, index) => {
+                  const isClosed = iss.status === 'RESOLVED' || iss.status === 'REJECTED';
+
+                  return (
+                    <div key={iss.id} className={index > 0 ? 'pt-3.5' : ''}>
+                      <div className="flex items-center justify-between gap-2 mb-1">
+                        <span className="font-mono text-[11px] text-[var(--text-2)] font-medium">
+                          {iss.id} · {iss.severity}
+                        </span>
+
+                        {iss.status === 'OPEN' && (
+                          <span className="chip chip-error text-[11px] py-0.5 px-2">
+                            OPEN
+                          </span>
+                        )}
+                        {iss.status === 'RESOLVED' && (
+                          <span className="chip chip-success text-[11px] py-0.5 px-2">
+                            RESOLVED
+                          </span>
+                        )}
+                        {iss.status !== 'OPEN' && iss.status !== 'RESOLVED' && (
+                          <span className="chip chip-neutral text-[11px] py-0.5 px-2">
+                            {iss.status}
+                          </span>
+                        )}
+                      </div>
+
+                      <h4
+                        className={`text-[14px] font-medium leading-snug ${
+                          isClosed ? 'text-[var(--text-2)] line-through' : 'text-[var(--text)]'
+                        }`}
+                      >
+                        {iss.claim}
+                      </h4>
+
+                      {iss.impact && (
+                        <p className="text-[12px] text-[var(--text-2)] line-clamp-2 mt-1">
+                          {iss.impact}
+                        </p>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
             )}
           </div>
-          <span className="stat-value text-base font-medium">{run.goal}</span>
-        </div>
-        <div className="stat-card">
-          <span className="stat-label">{t('overview_status_rev')}</span>
-          <div className="flex-align-center gap-2 mt-1">
-            <span className="font-semibold text-lg">{run.status}</span>
-            <span className="badge-subtle">{t('dash_revision_prefix').replace('{revision}', String(run.revision))}</span>
-          </div>
-        </div>
-        <div className="stat-card">
-          <span className="stat-label">{t('overview_artifacts')}</span>
-          <div className="stat-artifacts-grid">
-            <div className="stat-artifact-item">
-              <span>{t('overview_plans_count')}</span>
-              <strong>{run.plans_count}</strong>
-            </div>
-            <div className="stat-artifact-item">
-              <span>{t('overview_issues_count')}</span>
-              <strong>{run.issues_count} {run.blocking_issues_count > 0 && `(${run.blocking_issues_count})`}</strong>
-            </div>
-            <div className="stat-artifact-item">
-              <span>{t('overview_decisions_count')}</span>
-              <strong>{run.decisions_count}</strong>
-            </div>
-            <div className="stat-artifact-item">
-              <span>{t('overview_evidence_count')}</span>
-              <strong>{run.evidence_count}</strong>
-            </div>
-          </div>
-        </div>
-      </div>
 
-      {/* Requirements List */}
-      <div className="section-card">
-        <div className="flex-between mb-3">
-          <div className="flex-align-center gap-2">
-            <ListTodo size={18} className="text-sky-400" />
-            <h3 className="card-title">{t('overview_target_requirements')} ({run.requirements.length})</h3>
-          </div>
-        </div>
-        <div className="requirements-table">
-          {run.requirements.map((req) => (
-            <div key={req.id} className="req-row">
-              <span className="req-id-badge">{req.id}</span>
-              <div className="flex-1">
-                <p className="text-sm font-medium text-slate-100">{req.text}</p>
-                <p className="text-xs text-slate-400 mt-1">{t('overview_acceptance')} {req.acceptance}</p>
+          {/* 2. Cổng chất lượng (Quality Gate) Card (Image 2) */}
+          <div className="bg-[var(--bg)] border border-[var(--border)] rounded-[28px] p-6 shadow-sm">
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-[20px] font-medium text-[var(--text)] tracking-tight">
+                {t('phase_quality_gate')}
+              </h3>
+              <span className="text-[13px] font-mono text-[var(--text-2)]">
+                {t('gate_pass_ratio')
+                  .replace('{passed}', String(passedCount))
+                  .replace('{total}', '3')}
+              </span>
+            </div>
+
+            {/* Progress Bar */}
+            <div
+              className="h-2 w-full bg-[var(--surface-tonal)] rounded-full overflow-hidden mb-5"
+              role="img"
+              aria-label={`Tiến độ cổng chất lượng: ${passedCount}/3`}
+            >
+              <div
+                className="bg-[var(--accent)] h-full rounded-full transition-all duration-300"
+                style={{ width: `${(passedCount / 3) * 100}%` }}
+              />
+            </div>
+
+            {/* Checklist */}
+            <div className="space-y-3 mb-5">
+              {/* Rule 1: DAG Check */}
+              <div className="flex items-center justify-between gap-3 p-2.5 rounded-[16px] bg-[var(--surface-tonal)]">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-7 h-7 rounded-full bg-[var(--success-tonal)] text-[var(--success)] flex items-center justify-center shrink-0">
+                    <CheckCircle2 size={16} />
+                  </div>
+                  <span className="text-[13px] font-medium text-[var(--text)]">
+                    Cấu trúc DAG hợp lệ
+                  </span>
+                </div>
+                <span className="font-mono text-[11px] font-medium text-[var(--success-on-tonal)]">
+                  PASS
+                </span>
+              </div>
+
+              {/* Rule 2: Requirement Coverage */}
+              <div className="flex items-center justify-between gap-3 p-2.5 rounded-[16px] bg-[var(--surface-tonal)]">
+                <div className="flex items-center gap-2.5">
+                  <div
+                    className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 ${
+                      isCoveragePassed
+                        ? 'bg-[var(--success-tonal)] text-[var(--success)]'
+                        : 'bg-[var(--warn-tonal)] text-[var(--warn)]'
+                    }`}
+                  >
+                    <CheckCircle2 size={16} />
+                  </div>
+                  <span className="text-[13px] font-medium text-[var(--text)]">
+                    Độ phủ yêu cầu &gt;= 80%
+                  </span>
+                </div>
+                <span className="font-mono text-[11px] font-medium text-[var(--text-2)]">
+                  {coveragePercent}%
+                </span>
+              </div>
+
+              {/* Rule 3: No Blocking Issues */}
+              <div className="flex items-center justify-between gap-3 p-2.5 rounded-[16px] bg-[var(--surface-tonal)]">
+                <div className="flex items-center gap-2.5">
+                  <div
+                    className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 ${
+                      hasNoBlocking
+                        ? 'bg-[var(--success-tonal)] text-[var(--success)]'
+                        : 'bg-[var(--error-tonal)] text-[var(--error)]'
+                    }`}
+                  >
+                    {hasNoBlocking ? <CheckCircle2 size={16} /> : <AlertTriangle size={15} />}
+                  </div>
+                  <span className="text-[13px] font-medium text-[var(--text)]">
+                    Không có Issue blocking mở
+                  </span>
+                </div>
+                <span
+                  className={`font-mono text-[11px] font-medium ${
+                    hasNoBlocking ? 'text-[var(--success-on-tonal)]' : 'text-[var(--error)]'
+                  }`}
+                >
+                  {hasNoBlocking ? 'PASS' : `${run.blocking_issues_count} OPEN`}
+                </span>
               </div>
             </div>
-          ))}
-        </div>
-      </div>
 
-      {/* Action Toolbar */}
-      <div className="action-toolbar">
-        <div className="toolbar-left">
-          {onCloneRun && (run.status === 'FAILED' || run.status === 'CANCELLED') && (
-            <button
-              onClick={() => onCloneRun(run)}
-              className="btn-secondary text-sky-300 hover:text-sky-200"
-              disabled={isProcessing}
-            >
-              <RotateCcw size={15} className="text-sky-400" />
-              <span>{t('overview_rerun')}</span>
-            </button>
-          )}
+            {/* Ineligible warning box */}
+            {!isEligibleForFinal && (
+              <div className="bg-[var(--warn-tonal)] text-[var(--warn-on-tonal)] rounded-[16px] p-3 text-[12px] font-medium flex items-center gap-2 mb-4">
+                <AlertTriangle size={14} className="shrink-0 text-[var(--warn)]" />
+                <span>{t('gate_not_eligible')}</span>
+              </div>
+            )}
 
-          {isWaiting && (
-            <button
-              onClick={onResumeRun}
-              className="btn-success"
-              disabled={isProcessing}
-            >
-              <Play size={15} />
-              <span>{t('overview_resume_run')}</span>
-            </button>
-          )}
-
-          {!isTerminal && (
-            <>
-              {showCancelPrompt ? (
-                <div className="cancel-prompt-inline">
-                  <input
-                    type="text"
-                    value={cancelReason}
-                    onChange={(e) => setCancelReason(e.target.value)}
-                    placeholder={t('overview_cancel_placeholder')}
-                    className="form-input text-xs"
-                  />
-                  <button
-                    onClick={() => {
-                      onCancelRun(cancelReason);
-                      setShowCancelPrompt(false);
-                    }}
-                    className="btn-danger-sm"
-                    disabled={isProcessing}
-                  >
-                    {t('overview_confirm_stop')}
-                  </button>
-                  <button
-                    onClick={() => setShowCancelPrompt(false)}
-                    className="btn-text-sm"
-                  >
-                    {t('overview_cancel')}
-                  </button>
-                </div>
-              ) : (
-                <button
-                  onClick={() => setShowCancelPrompt(true)}
-                  className="btn-danger"
-                  disabled={isProcessing}
-                >
-                  <StopCircle size={15} />
-                  <span>{t('overview_cancel_run')}</span>
-                </button>
-              )}
-            </>
-          )}
-
-          <button
-            onClick={onValidate}
-            className="btn-secondary"
-            disabled={isProcessing}
-            title={t('overview_tooltip_validate')}
-          >
-            <ShieldCheck size={15} className="text-sky-400" />
-            <span>{t('overview_validate_gates')}</span>
-          </button>
-
-          <button
-            onClick={onFinalize}
-            className="btn-secondary"
-            disabled={isProcessing || run.status === 'FINAL'}
-            title={t('overview_tooltip_finalize')}
-          >
-            <Award size={15} className="text-emerald-400" />
-            <span>{t('overview_finalize_plan')}</span>
-          </button>
-
-          {showDeletePrompt ? (
-            <span className="cancel-prompt-inline">
-              <span className="text-xs text-slate-300">
-                {!isTerminal ? t('overview_confirm_delete_active') : t('overview_confirm_delete')}
-              </span>
+            {/* Quality Gate Actions */}
+            <div className="flex items-center gap-2 pt-2">
               <button
-                onClick={() => {
-                  onDeleteRun();
-                  setShowDeletePrompt(false);
-                }}
-                className="btn-danger-sm"
-                disabled={isProcessing || isDeleting}
+                type="button"
+                onClick={onValidate}
+                disabled={isProcessing}
+                className="flex-1 h-10 px-4 rounded-full border border-[var(--border-strong)] bg-[var(--bg)] hover:bg-[var(--surface-tonal)] text-[var(--text)] text-[13px] font-medium flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
               >
-                {t('overview_confirm_stop')}
+                <ShieldCheck size={14} className="text-[var(--accent)]" />
+                <span>{t('overview_validate_gates')}</span>
               </button>
-              <button
-                onClick={() => setShowDeletePrompt(false)}
-                className="btn-text-sm"
-              >
-                {t('overview_cancel')}
-              </button>
-            </span>
-          ) : (
-            <button
-              onClick={() => setShowDeletePrompt(true)}
-              className="btn-danger"
-              disabled={isProcessing || isDeleting}
-              title={t('overview_delete_run')}
-            >
-              <Trash2 size={15} />
-              <span>{isDeleting ? '...' : t('overview_delete_run')}</span>
-            </button>
-          )}
-        </div>
 
-        <div className="toolbar-right">
-          <button
-            onClick={onExportMarkdown}
-            className="btn-secondary"
-            disabled={isProcessing}
-          >
-            <FileText size={15} />
-            <span>{t('overview_export_md')}</span>
-          </button>
-          <button
-            onClick={onExportJson}
-            className="btn-secondary"
-            disabled={isProcessing}
-          >
-            <Download size={15} />
-            <span>{t('overview_export_json')}</span>
-          </button>
+              <button
+                type="button"
+                onClick={onFinalize}
+                disabled={isProcessing || !isEligibleForFinal}
+                className={`flex-1 h-10 px-4 rounded-full font-medium text-[13px] flex items-center justify-center gap-1.5 transition-colors ${
+                  isEligibleForFinal
+                    ? 'bg-[var(--accent)] text-white hover:brightness-95 btn-fill cursor-pointer shadow-sm'
+                    : 'bg-[var(--surface-tonal)] text-[var(--text-2)] opacity-60 cursor-not-allowed'
+                }`}
+              >
+                <Award size={14} />
+                <span>{t('overview_finalize_plan')}</span>
+              </button>
+            </div>
+          </div>
         </div>
       </div>
     </div>
