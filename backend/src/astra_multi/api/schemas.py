@@ -83,6 +83,17 @@ class CancelRunRequest(BaseModel):
     reason: str = "User cancelled run via API"
 
 
+class HumanReviewDecisionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    reviewer: str = Field(min_length=1, description="Human reviewer identity")
+    reason: str = Field(min_length=1, description="Why the risk was accepted")
+    approve: bool = Field(
+        default=True,
+        description="True records an approval for the current plan revision",
+    )
+
+
 class ErrorDetail(BaseModel):
     code: str
     message: str

@@ -4,6 +4,11 @@ from datetime import datetime
 
 from pydantic import JsonValue
 
+from .assignment import (
+    ASSIGNMENT_COMMIT_RULES,
+    task_requires_assignment,
+    validate_assignment_contract,
+)
 from .commands import (
     AddRecord,
     AnswerQuestion,
@@ -19,6 +24,7 @@ from .models import (
     Claim,
     Decision,
     Evidence,
+    HumanReviewApproval,
     Issue,
     IssueHistory,
     IssueSeverity,
@@ -32,6 +38,7 @@ from .models import (
     RunStatus,
     ToolCall,
     ValidationResult,
+    WorkerExecutionRecord,
 )
 
 
@@ -101,6 +108,15 @@ def is_open_issue_status(status: IssueStatus) -> bool:
     used uniformly here, not rewriting the status condition themselves.
     """
     return status not in CLOSED_ISSUE_STATUSES
+
+
+def has_human_review_approval(state: RunState) -> bool:
+    """True when the current plan revision has an explicit human approval."""
+    current = state.plan.revision if state.plan else 0
+    return any(
+        approval.plan_revision == current
+        for approval in state.human_review_approvals
+    )
 
 
 def change_issue(state: RunState, command: ChangeIssue, now: datetime) -> Issue:
@@ -195,7 +211,10 @@ def apply_mutation(
         if not (
             state.run.status == RunStatus.PARTIAL
             and isinstance(command, TransitionRun)
-            and command.status == RunStatus.FINAL
+            and command.status in (
+                RunStatus.FINAL,
+                RunStatus.WAITING_FOR_HUMAN_REVIEW,
+            )
             and command.actor in ("P4-quality-service", "quality-service")
         ):
             raise InvalidState("terminal runs are immutable; create a new run")
@@ -208,6 +227,21 @@ def apply_mutation(
             or command.plan.requirements_revision != state.task.revision
         ):
             raise RevisionConflict("plan or requirements base revision is stale")
+        assignment_violations = (
+            [
+                violation
+                for violation in validate_assignment_contract(state.task, command.plan)
+                if violation.rule_id in ASSIGNMENT_COMMIT_RULES
+            ]
+            if task_requires_assignment(state.task)
+            else []
+        )
+        if assignment_violations:
+            summary = "; ".join(
+                f"{violation.rule_id} {violation.entity_ref}: {violation.message}"
+                for violation in assignment_violations
+            )
+            raise InvalidState(f"assignment contract failed: {summary}")
         updated.plans.append(command.plan)
         result = {"plan_id": command.plan.id, "plan_revision": command.plan.revision}
     elif isinstance(command, AddRecord):
@@ -258,6 +292,24 @@ def apply_mutation(
             updated.validations.append(record)
         elif isinstance(record, BudgetReservation):
             updated.reservations.append(record)
+        elif isinstance(record, WorkerExecutionRecord):
+            known_steps = {
+                (plan.revision, step.id)
+                for plan in state.plans
+                for step in plan.steps
+            }
+            if (record.plan_revision, record.step_id) not in known_steps:
+                raise InvalidState(
+                    "execution record references an unknown plan revision/step"
+                )
+            updated.execution_records.append(record)
+        elif isinstance(record, HumanReviewApproval):
+            current_plan = state.plan.revision if state.plan else 0
+            if record.plan_revision != current_plan:
+                raise RevisionConflict(
+                    "human review approval must reference the current plan revision"
+                )
+            updated.human_review_approvals.append(record)
         result = {"record_id": record.id}
     elif isinstance(command, ChangeIssue):
         issue = change_issue(state, command, now)
@@ -327,6 +379,29 @@ def apply_mutation(
                 raise InvalidState(
                     "terminal transition retains phase and requires a reason"
                 )
+            if (
+                command.status == RunStatus.FINAL
+                and state.run.status == RunStatus.WAITING_FOR_HUMAN_REVIEW
+                and not has_human_review_approval(state)
+            ):
+                raise InvalidState(
+                    "FINAL requires a human review approval for the current plan revision"
+                )
+        elif command.status == RunStatus.WAITING_FOR_HUMAN_REVIEW:
+            if (
+                command.phase != state.run.phase
+                or not command.reason
+                or state.run.status
+                not in (
+                    RunStatus.RUNNING,
+                    RunStatus.WAITING_FOR_INPUT,
+                    RunStatus.WAITING_FOR_HUMAN_REVIEW,
+                    RunStatus.PARTIAL,
+                )
+            ):
+                raise InvalidState(
+                    "waiting for human review retains phase and requires a reason"
+                )
         elif command.status == RunStatus.WAITING_FOR_INPUT:
             if (
                 state.run.status != RunStatus.RUNNING
@@ -335,6 +410,18 @@ def apply_mutation(
             ):
                 raise InvalidState(
                     "waiting requires a pending question and retains phase"
+                )
+        elif state.run.status == RunStatus.WAITING_FOR_HUMAN_REVIEW:
+            if command.phase != state.run.phase:
+                raise InvalidState("transition from human review retains phase")
+            if command.status == RunStatus.RUNNING:
+                if not has_human_review_approval(state):
+                    raise InvalidState(
+                        "resume from human review requires an approval for the current plan revision"
+                    )
+            elif command.status != RunStatus.PARTIAL:
+                raise InvalidState(
+                    "human review can only resume RUNNING or reject as PARTIAL"
                 )
         elif state.run.status == RunStatus.WAITING_FOR_INPUT:
             if command.phase != state.run.phase or any(

@@ -431,6 +431,12 @@ class SQLiteStore:
                     feedback=str(data.get("feedback", "")),
                     concerns=list(data.get("concerns", [])),
                     rubric_audits=list(data.get("rubric_audits", [])),
+                    requirement_verdicts=list(data.get("requirement_verdicts", [])),
+                    validator_llm_conflicts=list(
+                        data.get("validator_llm_conflicts", [])
+                    ),
+                    missing_evidence=list(data.get("missing_evidence", [])),
+                    plan_uncertainty=list(data.get("plan_uncertainty", [])),
                 )
         except Exception:
             pass
@@ -446,6 +452,12 @@ class SQLiteStore:
                     feedback=str(data.get("feedback", "")),
                     concerns=list(data.get("concerns", [])),
                     rubric_audits=list(data.get("rubric_audits", [])),
+                    requirement_verdicts=list(data.get("requirement_verdicts", [])),
+                    validator_llm_conflicts=list(
+                        data.get("validator_llm_conflicts", [])
+                    ),
+                    missing_evidence=list(data.get("missing_evidence", [])),
+                    plan_uncertainty=list(data.get("plan_uncertainty", [])),
                 )
         except Exception:
             pass

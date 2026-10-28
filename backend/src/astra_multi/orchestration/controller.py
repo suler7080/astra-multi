@@ -26,6 +26,7 @@ from astra_multi.domain.models import (
     Claim,
     Decision,
     Evidence,
+    HumanReviewApproval,
     Issue,
     IssueResolution,
     IssueStatus,
@@ -40,8 +41,9 @@ from astra_multi.domain.models import (
     TaskSpec,
     ToolCall,
     ValidationResult,
+    WorkerExecutionRecord,
 )
-from astra_multi.domain.policies import RevisionConflict
+from astra_multi.domain.policies import InvalidState, RevisionConflict
 from astra_multi.domain.repositories import RunRepository
 
 logger = logging.getLogger(__name__)
@@ -133,6 +135,78 @@ class WorkflowController:
                 except RevisionConflict:
                     time.sleep(0.005 * (attempt + 1))
             raise RuntimeError(f"Failed to record validation {validation.id} due to revision conflicts")
+
+    def record_execution_record(self, record: WorkerExecutionRecord) -> RunState:
+        with self._lock:
+            for attempt in range(15):
+                state = self.get_state()
+                if any(item.id == record.id for item in state.execution_records):
+                    return state
+                cmd = AddRecord(
+                    expected_revision=state.run.revision,
+                    node="execute",
+                    logical_operation_id=f"execution-{record.id}",
+                    actor=self.actor,
+                    record=record,
+                )
+                try:
+                    self.repository.commit(self.lease.run_id, cmd, self.lease)
+                    return self.get_state()
+                except RevisionConflict:
+                    time.sleep(0.005 * (attempt + 1))
+            raise RuntimeError(
+                f"Failed to record execution {record.id} due to revision conflicts"
+            )
+
+    def record_human_review_approval(self, approval: HumanReviewApproval) -> RunState:
+        with self._lock:
+            for attempt in range(15):
+                state = self.get_state()
+                if any(item.id == approval.id for item in state.human_review_approvals):
+                    return state
+                cmd = AddRecord(
+                    expected_revision=state.run.revision,
+                    node="human-review",
+                    logical_operation_id=f"human-approval-{approval.id}",
+                    actor=self.actor,
+                    record=approval,
+                )
+                try:
+                    self.repository.commit(self.lease.run_id, cmd, self.lease)
+                    return self.get_state()
+                except RevisionConflict:
+                    time.sleep(0.005 * (attempt + 1))
+            raise RuntimeError(
+                f"Failed to record human approval {approval.id} due to revision conflicts"
+            )
+
+    def approve_human_review(self, reviewer: str, reason: str) -> RunState:
+        """Record an approval for the current plan revision and resume the run."""
+        with self._lock:
+            state = self.get_state()
+            if state.run.status != RunStatus.WAITING_FOR_HUMAN_REVIEW:
+                raise InvalidState("run is not waiting for human review")
+            plan_revision = state.plan.revision if state.plan else 0
+            approval = HumanReviewApproval(
+                id=f"APPROVAL-{state.run.id}-{plan_revision}",
+                run_id=state.run.id,
+                plan_revision=plan_revision,
+                reviewer=reviewer,
+                reason=reason,
+            )
+            self.record_human_review_approval(approval)
+            state = self.get_state()
+            cmd = TransitionRun(
+                expected_revision=state.run.revision,
+                node="human-review",
+                logical_operation_id=f"resume-{plan_revision}-{state.run.revision}",
+                actor=self.actor,
+                phase=state.run.phase,
+                status=RunStatus.RUNNING,
+                reason=reason,
+            )
+            self.repository.commit(self.lease.run_id, cmd, self.lease)
+            return self.get_state()
 
     def record_tool_call(self, tool_call: ToolCall) -> RunState:
         with self._lock:

@@ -28,6 +28,7 @@ from astra_multi.domain.models import (
     IssueSeverity,
     StepPhaseType,
     Text,
+    VerdictEvidence,
 )
 
 
@@ -103,10 +104,12 @@ class IssueResolutionReport(AgentContract):
 
 class RubricAuditItem(AgentContract):
     """Part 1: Mandatory audit of an individual rubric item."""
+
     rubric_id: ID
     req_id: ID
     status: Literal["MET", "PARTIAL", "MISSING"]
     evidence_quote: str = ""
+    evidence: list[VerdictEvidence] = Field(default_factory=list)
     notes: str = ""
 
 
@@ -125,6 +128,7 @@ class RequirementVerdict(AgentContract):
     mechanism: Text
     verdict: Literal["PASS", "PARTIAL", "FAIL"]
     gap: Text | None = None
+    evidence: list[VerdictEvidence] = Field(default_factory=list)
 
 
 class ReviewOutput(AgentContract):
@@ -170,7 +174,31 @@ class RequirementFulfillmentDraft(AgentContract):
     verification_method: Text
 
 
+class SharedFilePolicyDraft(AgentContract):
+    path: Text
+    owner_worker: Text
+    access: Literal["owner_only", "read_only"] = "owner_only"
+    reason: Text | None = None
+
+
+class WorkerAssignmentDraft(AgentContract):
+    worker_role: ID
+    display_name: Text
+    responsibilities: list[Text] = Field(min_length=1)
+    owned_files: list[Text] = Field(min_length=1)
+    requirement_ids: list[ID] = Field(default_factory=list)
+    step_ids: list[ID] = Field(default_factory=list)
+
+
+class AssignmentMatrixDraft(AgentContract):
+    workers: list[WorkerAssignmentDraft] = Field(min_length=1)
+    shared_files: list[SharedFilePolicyDraft] = Field(default_factory=list)
+    expected_worker_count: int | None = Field(default=None, ge=1)
+
+
 class StepDraft(AgentContract):
+    worker_role: Text = "unassigned"
+    owned_files: list[Text] = Field(default_factory=list)
     objective: Text
     phase_type: StepPhaseType = StepPhaseType.CORE_MODULE
     requirement_fulfillments: list[RequirementFulfillmentDraft] = Field(default_factory=list)
@@ -307,6 +335,7 @@ class SynthesizerOutput(AgentContract):
     """Output schema for Synthesizer in REVISE phase."""
 
     steps: list[StepDraft] = Field(min_length=1)
+    assignment_matrix: AssignmentMatrixDraft | None = None
     decisions: list[DecisionDraft] = Field(default_factory=list)
     risks: list[Text] = Field(default_factory=list)
     issues_addressed: list[ID] = Field(default_factory=list)
@@ -475,10 +504,11 @@ def format_synthesize_prompt(
         "Phase: REVISE\n"
         "Rules:\n"
         f"{rule1}\n"
-        "2. Connected DAG: edges >= N-1, max 2 roots, depth >= 2. Assign phase_type: 'setup' -> 'core_module' -> 'integration' -> 'verification'. Integration depends on setup.\n"
-        "3. Requirement Fulfillment: Each step must provide requirement_fulfillments with substantive concrete_deliverable (no placeholders) and verification_method.\n"
-        "4. In issues_addressed, list exact issue IDs this revision resolves (e.g. ['ISSUE-3a8c1f0d'] or []). No descriptions.\n"
-        "5. Output strictly according to SynthesizerOutput schema."
+        "2. Connected DAG: edges>=N-1, <=2 roots, depth>=2; phase_type setup->core_module->integration->verification; integration depends on setup.\n"
+        "3. Every step needs substantive requirement_fulfillments.concrete_deliverable (no placeholders) + verification_method.\n"
+        "4. assignment_matrix: unique roles with responsibilities/owned_files/requirement_ids; owned files must not overlap; every step sets worker_role+owned_files from it.\n"
+        "5. issues_addressed: exact resolved issue IDs only.\n"
+        "6. Output SynthesizerOutput schema."
     )
     user_message = (
         f"Context:\n{bundle.content}\n\n"

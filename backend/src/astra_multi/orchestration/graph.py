@@ -26,7 +26,6 @@ from astra_multi.agents.roles import (
     IssueReport,
     IssueResolutionReport,
     ProposalOutput,
-    RequirementVerdict,
     ReviewOutput,
     SynthesizerOutput,
     format_independent_analysis_prompt,
@@ -38,6 +37,7 @@ from astra_multi.agents.roles import (
 from astra_multi.context.bundle import ContextBuilder, orchestration_limits
 from astra_multi.domain.models import (
     ArtifactType,
+    AssignmentMatrix,
     Claim,
     Decision,
     DesignArtifact,
@@ -51,11 +51,16 @@ from astra_multi.domain.models import (
     RequirementType,
     RunPhase,
     RunStatus,
+    SharedFilePolicy,
     StepPhaseType,
     TechStackTruthTable,
+    WorkerAssignment,
 )
 from astra_multi.domain.policies import is_open_issue_status
-from astra_multi.exports.finalization import SemanticReviewAssessment
+from astra_multi.exports.finalization import (
+    FinalizationService,
+    SemanticReviewAssessment,
+)
 from astra_multi.exports.quality_validator import (
     StructuralQualityValidator,
     ViolationSeverity,
@@ -72,6 +77,10 @@ from astra_multi.orchestration.contract_extractor import (
 from astra_multi.orchestration.controller import WorkflowController
 from astra_multi.orchestration.roles import ROLE_GROUP
 from astra_multi.orchestration.rubric_checker import evaluate_semantic_rubrics
+from astra_multi.orchestration.semantic_merge import (
+    attach_deterministic_evidence,
+    merge_requirement_verdicts,
+)
 from astra_multi.orchestration.technical_grounding import (
     build_tech_stack_truth_table,
     verify_technical_grounding,
@@ -89,6 +98,45 @@ def _merge_analyses(
     for a in new:
         merged[a["role"]] = a
     return sorted(merged.values(), key=lambda x: x["role"])
+
+
+def _build_assignment_matrix(
+    synth_out: SynthesizerOutput,
+    plan_steps: list[PlanStep],
+    valid_requirement_ids: set[str],
+) -> AssignmentMatrix | None:
+    """Convert the synthesizer draft into the canonical ownership contract."""
+    draft = synth_out.assignment_matrix
+    if draft is None:
+        return None
+    step_ids = {step.id for step in plan_steps}
+    workers = [
+        WorkerAssignment(
+            worker_role=worker.worker_role,
+            display_name=worker.display_name,
+            responsibilities=list(worker.responsibilities),
+            owned_files=list(worker.owned_files),
+            requirement_ids=[
+                rid for rid in worker.requirement_ids if rid in valid_requirement_ids
+            ],
+            step_ids=[sid for sid in worker.step_ids if sid in step_ids],
+        )
+        for worker in draft.workers
+    ]
+    shared_files = [
+        SharedFilePolicy(
+            path=item.path,
+            owner_worker=item.owner_worker,
+            access=item.access,
+            reason=item.reason,
+        )
+        for item in draft.shared_files
+    ]
+    return AssignmentMatrix(
+        workers=workers,
+        shared_files=shared_files,
+        expected_worker_count=draft.expected_worker_count,
+    )
 
 
 class OrchestrationState(TypedDict, total=False):
@@ -1052,6 +1100,8 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> AstraStateGraph:
                 PlanStep(
                     id=step_id,
                     objective=s.objective,
+                    worker_role=s.worker_role,
+                    owned_files=s.owned_files,
                     phase_type=phase_type,
                     requirement_fulfillments=fulfillments,
                     requirement_ids=filtered_reqs,
@@ -1170,6 +1220,9 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> AstraStateGraph:
             risks=synth_out.risks,
             issues_addressed=filtered_issues_addressed,
             design_artifacts=plan_design_artifacts,
+            assignment_matrix=_build_assignment_matrix(
+                synth_out, plan_steps, valid_reqs
+            ),
         )
         ctrl.commit_plan_revision(new_plan)
 
@@ -1183,6 +1236,16 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> AstraStateGraph:
         curr_state = ctrl.get_state()
         if not curr_state.plan:
             return {"events": ["[SEMANTIC_REVIEW] No plan revision to evaluate"]}
+
+        # Deterministic rubric verdicts are the only source of accepted
+        # evidence.  Compute them before the reviewer audit is processed so a
+        # MET-without-evidence item can be downgraded and escalated as an issue.
+        rubric_verdicts = evaluate_semantic_rubrics(
+            curr_state.task,
+            curr_state.plan,
+            getattr(curr_state.plan, "design_artifacts", []),
+        )
+        rubric_by_req = {v.requirement_id: v for v in rubric_verdicts}
 
         open_issues = [
             i for i in curr_state.issues
@@ -1221,6 +1284,14 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> AstraStateGraph:
             node_name="semantic_review",
         )
         review_out = ReviewOutput.model_validate(res.content)
+        attached_audits, audit_conflicts, audit_missing = (
+            attach_deterministic_evidence(
+                list(review_out.rubric_audits), rubric_by_req
+            )
+        )
+        review_out = review_out.model_copy(
+            update={"rubric_audits": attached_audits}
+        )
         ctrl.record_model_call(
             call_id=call_id,
             role="reviewer",
@@ -1359,38 +1430,24 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> AstraStateGraph:
             )
             ctrl.record_issue(domain_issue)
 
-        # Run rubric checker against plan concrete deliverables and acceptance criteria
-        rubric_verdicts = evaluate_semantic_rubrics(
+        # Merge deterministic validator verdicts with the reviewer.  The
+        # reviewer cannot invent evidence, and any disagreement becomes a
+        # conflict instead of an automatic PASS.
+        merge_result = merge_requirement_verdicts(
             curr_state.task,
             curr_state.plan,
-            getattr(curr_state.plan, "design_artifacts", []) if curr_state.plan else [],
+            rubric_verdicts,
+            review_out.requirement_verdicts,
         )
-        rubric_by_req = {v.requirement_id: v for v in rubric_verdicts}
-        model_verdicts_by_req = {v.requirement_id: v for v in review_out.requirement_verdicts}
-
-        merged_verdicts: list[RequirementVerdict] = []
-        for req in curr_state.task.requirements:
-            rid = req.id
-            rubric_v = rubric_by_req.get(rid)
-            model_v = model_verdicts_by_req.get(rid)
-
-            if rubric_v and rubric_v.verdict == "FAIL":
-                chosen_v = rubric_v
-            elif model_v and model_v.verdict == "PASS":
-                chosen_v = model_v
-            elif rubric_v:
-                chosen_v = rubric_v
-            elif model_v:
-                chosen_v = model_v
-            else:
-                chosen_v = RequirementVerdict(
-                    requirement_id=rid,
-                    restated=req.text,
-                    mechanism="Unverified",
-                    verdict="FAIL",
-                    gap=f"No review verdict provided for {rid}",
-                )
-            merged_verdicts.append(chosen_v)
+        merged_verdicts = merge_result.verdicts
+        validator_llm_conflicts = [
+            *audit_conflicts,
+            *merge_result.conflicts,
+        ]
+        missing_evidence = [
+            *audit_missing,
+            *merge_result.missing_evidence,
+        ]
 
         review_out = review_out.model_copy(
             update={
@@ -1424,15 +1481,21 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> AstraStateGraph:
             (len(open_warning_or_blocker) == 0)
             and (len(failed_verdicts) == 0)
             and (len(rubric_failures) == 0)
+            and (len(validator_llm_conflicts) == 0)
+            and (len(missing_evidence) == 0)
         )
         concerns = [f"[{i.id}] {i.claim}" for i in open_warning_or_blocker]
         for v in failed_verdicts:
             concerns.append(f"[{v.requirement_id}] Verdict {v.verdict}: {v.gap or v.mechanism}")
         for ra in rubric_failures:
             concerns.append(f"[RUBRIC-{getattr(ra, 'rubric_id', 'R')}] Status {getattr(ra, 'status', 'FAIL')} for {getattr(ra, 'req_id', '')}")
+        for conflict in validator_llm_conflicts:
+            concerns.append(f"[VALIDATOR-CONFLICT] {conflict}")
+        for req_id in missing_evidence:
+            concerns.append(f"[MISSING-EVIDENCE] {req_id}")
         if assessment_passed:
             feedback = review_out.summary or (
-                "All warning-or-higher issues are resolved, every rubric item is MET and every requirement is PASS"
+                "All warning-or-higher issues are resolved, every rubric item is MET with deterministic evidence and every requirement is PASS"
             )
         else:
             reasons = []
@@ -1442,10 +1505,18 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> AstraStateGraph:
                 reasons.append(f"{len(failed_verdicts)} requirement(s) are not PASS ({', '.join(v.requirement_id for v in failed_verdicts)})")
             if rubric_failures:
                 reasons.append(f"{len(rubric_failures)} rubric item(s) are not MET ({', '.join(getattr(ra, 'rubric_id', 'R') for ra in rubric_failures)})")
+            if validator_llm_conflicts:
+                reasons.append(f"{len(validator_llm_conflicts)} validator/reviewer conflict(s)")
+            if missing_evidence:
+                reasons.append(f"{len(missing_evidence)} requirement(s) lack deterministic evidence")
             feedback = review_out.summary or "; ".join(reasons)
         audits_payload = [
             ra.model_dump(mode="json") if hasattr(ra, "model_dump") else (ra if isinstance(ra, dict) else ra.__dict__)
             for ra in rubric_audit_items
+        ]
+        verdicts_payload = [
+            v.model_dump(mode="json") if hasattr(v, "model_dump") else v
+            for v in merged_verdicts
         ]
         assessment = SemanticReviewAssessment(
             passed=assessment_passed,
@@ -1453,6 +1524,10 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> AstraStateGraph:
             feedback=feedback,
             concerns=concerns,
             rubric_audits=audits_payload,
+            requirement_verdicts=verdicts_payload,
+            validator_llm_conflicts=validator_llm_conflicts,
+            missing_evidence=missing_evidence,
+            plan_uncertainty=[],
         )
         try:
             if hasattr(ctrl, "save_semantic_review"):
@@ -1597,8 +1672,17 @@ def create_workflow_graph(wf_ctx: WorkflowContext) -> AstraStateGraph:
             status = RunStatus.PARTIAL
             reason = state.get("stop_reason") or StopReason.UNRESOLVED_BLOCKERS.value
         elif ctrl.actor in ("P4-quality-service", "quality-service"):
-            status = RunStatus.FINAL
-            reason = "Certified final plan (passed quality gates)"
+            # Direct FINAL is only allowed through the same 8-pillar gate used
+            # by the API/CLI.  A passing structural gate is not enough.
+            curr_state = ctrl.get_state()
+            sem_assessment = None
+            if hasattr(ctrl, "get_semantic_review"):
+                sem_assessment = ctrl.get_semantic_review(curr_state.run.id)
+            elif hasattr(ctrl.repository, "get_semantic_review"):
+                sem_assessment = ctrl.repository.get_semantic_review(curr_state.run.id)
+            decision = FinalizationService().evaluate(curr_state, sem_assessment)
+            status = decision.target_status
+            reason = decision.reason
         else:
             status = RunStatus.PARTIAL
             reason = "MVP candidate generated (awaiting P4 quality certification)"

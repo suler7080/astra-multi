@@ -2,25 +2,21 @@
 
 from __future__ import annotations
 
-import pytest
-
 from astra_multi.domain.fixtures import sample_state
 from astra_multi.domain.models import (
     ArtifactType,
-    DesignArtifact,
+    AssignmentMatrix,
     PlanRevision,
     PlanStep,
     Requirement,
     RequirementFulfillment,
     RequirementType,
-    RunStatus,
     StepPhaseType,
     TaskSpec,
+    WorkerAssignment,
 )
-from astra_multi.exports.finalization import FinalizationService
 from astra_multi.exports.quality_validator import (
     StructuralQualityValidator,
-    ViolationSeverity,
 )
 from astra_multi.orchestration.rubric_checker import evaluate_semantic_rubrics
 
@@ -339,7 +335,8 @@ def test_rubric_checker_fails_fake_assignment_table():
     verdicts = evaluate_semantic_rubrics(task, plan)
     assert len(verdicts) == 1
     assert verdicts[0].verdict == "FAIL"
-    assert "Thiếu bảng phân công nhiệm vụ cụ thể cho từng thành viên/vai trò" in verdicts[0].gap
+    assert "does not contain one" in verdicts[0].gap
+    assert "RULE-ASSIGN-001" in verdicts[0].gap
 
 
 def test_rubric_checker_passes_concrete_assignment_table():
@@ -357,31 +354,104 @@ def test_rubric_checker_passes_concrete_assignment_table():
             )
         ],
     )
-    assignment_content = (
-        "| Thành viên | Vai trò | Trách nhiệm file |\n"
-        "|---|---|---|\n"
-        "| Dev 1 | Frontend UI | `js/ui.js`, `css/app.css` |\n"
-        "| Dev 2 | API & State | `js/api.js`, `js/state.js` |\n"
-        "| Dev 3 | Layout & Router | `js/layout.js`, `partials/` |\n"
-        "| Dev 4 | QA & Integration | `tests/`, `integration.js` |\n"
+    assignments = [
+        ("frontend-ui", "Frontend UI", ["js/ui.js", "css/app.css"]),
+        ("api-state", "API & State", ["js/api.js", "js/state.js"]),
+        ("layout-router", "Layout & Router", ["js/layout.js", "partials/"]),
+        ("qa-integration", "QA & Integration", ["tests/", "integration.js"]),
+    ]
+    steps = [
+        PlanStep(
+            id=f"STEP-{index}",
+            objective=f"{role} ownership for {', '.join(files)}",
+            phase_type=StepPhaseType.SETUP,
+            requirement_fulfillments=[
+                RequirementFulfillment(
+                    req_id="REQ-ORG-001",
+                    fulfilled_by_section=f"{role} ownership",
+                    concrete_deliverable=(
+                        f"{role} owns {', '.join(files)} and no other worker "
+                        "modifies those files."
+                    ),
+                    verification_method="Audit file ownership across 4 roles",
+                )
+            ],
+            requirement_ids=["REQ-ORG-001"],
+            dependencies=[],
+            validation="Audit file ownership",
+            deliverables=[f"{role} implementation"],
+            completion_criteria=["Matrix verified"],
+            worker_role=role,
+            owned_files=list(files),
+        )
+        for index, (role, _name, files) in enumerate(assignments, start=1)
+    ]
+    matrix = AssignmentMatrix(
+        workers=[
+            WorkerAssignment(
+                worker_role=role,
+                display_name=name,
+                responsibilities=[f"Own {', '.join(files)}"],
+                owned_files=list(files),
+                requirement_ids=["REQ-ORG-001"],
+                step_ids=[f"STEP-{index}"],
+            )
+            for index, (role, name, files) in enumerate(assignments, start=1)
+        ],
+        expected_worker_count=4,
+    )
+    plan = PlanRevision(
+        id="PLAN-1",
+        run_id="RUN-1",
+        revision=1,
+        based_on_revision=0,
+        requirements_revision=1,
+        snapshot_id=None,
+        steps=steps,
+        assignment_matrix=matrix,
+    )
+
+    verdicts = evaluate_semantic_rubrics(task, plan)
+    assert len(verdicts) == 1
+    assert verdicts[0].verdict == "PASS"
+
+
+def test_rubric_checker_fails_org_matrix_with_unowned_step():
+    """An ORG PASS is invalid when any step has no worker or owned files."""
+    task = TaskSpec(
+        id="TASK-1",
+        goal="Build application",
+        requirements=[
+            Requirement(
+                id="REQ-ORG-001",
+                text="Bảng phân công nhiệm vụ cho từng thành viên",
+                acceptance="Mọi bước đều có người phụ trách và file sở hữu",
+                req_type=RequirementType.ORG,
+                expected_artifact_type=ArtifactType.ASSIGNMENT_TABLE,
+            )
+        ],
     )
     step = PlanStep(
         id="STEP-1",
-        objective="Team management and ownership matrix",
-        phase_type=StepPhaseType.SETUP,
-        requirement_fulfillments=[
-            RequirementFulfillment(
-                req_id="REQ-ORG-001",
-                fulfilled_by_section="Ownership matrix",
-                concrete_deliverable=assignment_content,
-                verification_method="Audit file ownership across 4 roles",
-            )
-        ],
+        objective="Unassigned work",
         requirement_ids=["REQ-ORG-001"],
         dependencies=[],
-        validation="Audit file ownership",
-        deliverables=["Ownership matrix document"],
-        completion_criteria=["Matrix verified"],
+        validation="Audit ownership",
+        deliverables=["module"],
+        completion_criteria=["Ownership verified"],
+    )
+    matrix = AssignmentMatrix(
+        workers=[
+            WorkerAssignment(
+                worker_role="api",
+                display_name="API",
+                responsibilities=["Own the API module"],
+                owned_files=["src/api.py"],
+                requirement_ids=["REQ-ORG-001"],
+                step_ids=[],
+            )
+        ],
+        expected_worker_count=1,
     )
     plan = PlanRevision(
         id="PLAN-1",
@@ -391,11 +461,14 @@ def test_rubric_checker_passes_concrete_assignment_table():
         requirements_revision=1,
         snapshot_id=None,
         steps=[step],
+        assignment_matrix=matrix,
     )
 
     verdicts = evaluate_semantic_rubrics(task, plan)
+
     assert len(verdicts) == 1
-    assert verdicts[0].verdict == "PASS"
+    assert verdicts[0].verdict == "FAIL"
+    assert "RULE-ASSIGN-008" in verdicts[0].gap
 
 
 def test_rubric_checker_fails_missing_layout_solution():

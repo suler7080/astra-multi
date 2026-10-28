@@ -11,11 +11,9 @@ Verifies:
 from __future__ import annotations
 
 import json
-from pathlib import Path
 import tempfile
+from pathlib import Path
 from typing import Any
-
-import pytest
 
 from astra_multi.agents.roles import (
     AnalysisOutput,
@@ -24,12 +22,16 @@ from astra_multi.agents.roles import (
     IssueResolutionReport,
     IssueSeverity,
     ProposalOutput,
+    RequirementVerdict,
     ReviewOutput,
     StepDraft,
     SynthesizerOutput,
     format_independent_analysis_prompt,
 )
-from astra_multi.context.bundle import ContextBuilder, ContextLimits, orchestration_limits
+from astra_multi.context.bundle import (
+    ContextBuilder,
+    orchestration_limits,
+)
 from astra_multi.domain.fixtures import sample_state
 from astra_multi.domain.models import (
     Issue,
@@ -39,7 +41,6 @@ from astra_multi.domain.models import (
     Requirement,
     RunPhase,
     RunStatus,
-    utc_now,
 )
 from astra_multi.gateway.model_gateway import GatewayConfig, ModelGateway, ModelResult
 from astra_multi.orchestration.controller import WorkflowController
@@ -235,6 +236,23 @@ def test_p54_minesweeper_5rounds_bloat_reduction_and_final():
             )
         else:
             content = "ok"
+
+        system_content = str(messages[0].get("content", "")) if messages else ""
+        if isinstance(content, ReviewOutput) and "Phase: SEMANTIC_REVIEW" in system_content:
+            current_task = store.load(state.run.id).task
+            content = content.model_copy(
+                update={
+                    "requirement_verdicts": [
+                        RequirementVerdict(
+                            requirement_id=requirement.id,
+                            restated=requirement.text,
+                            mechanism="Deterministic rubric evidence",
+                            verdict="PASS",
+                        )
+                        for requirement in current_task.requirements
+                    ]
+                }
+            )
 
         return ModelResult(
             content=content.model_dump(mode="json") if hasattr(content, "model_dump") else content,

@@ -13,9 +13,16 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from pydantic import ValidationError
+
+from astra_multi.domain.evidence import validate_evidence
 from astra_multi.domain.models import (
     RunState,
     RunStatus,
+    VerdictEvidence,
+)
+from astra_multi.exports.human_review import (
+    evaluate_human_review,
 )
 from astra_multi.exports.quality_validator import (
     QualityReport,
@@ -40,6 +47,10 @@ class SemanticReviewAssessment:
     feedback: str
     concerns: list[str]
     rubric_audits: list[dict[str, Any]] = field(default_factory=list)
+    requirement_verdicts: list[dict[str, Any]] = field(default_factory=list)
+    validator_llm_conflicts: list[str] = field(default_factory=list)
+    missing_evidence: list[str] = field(default_factory=list)
+    plan_uncertainty: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -52,7 +63,7 @@ class FinalizationDecision:
 
 
 class FinalizationService:
-    """Evaluates whether a candidate plan revision meets the threshold for FINAL certification via the 5-Pillar Gate."""
+    """Evaluates a candidate plan revision against the 8-Pillar Gate."""
 
     def __init__(self, validator: StructuralQualityValidator | None = None) -> None:
         self.validator = validator or StructuralQualityValidator()
@@ -96,6 +107,25 @@ class FinalizationService:
             "RULE-ISSUE-001",
             "RULE-ISSUE-002",
         }
+        OWNERSHIP_RULES = {
+            "RULE-ASSIGN-001",
+            "RULE-ASSIGN-002",
+            "RULE-ASSIGN-003",
+            "RULE-ASSIGN-004",
+            "RULE-ASSIGN-005",
+            "RULE-ASSIGN-007",
+            "RULE-ASSIGN-008",
+            "RULE-ASSIGN-009",
+            "RULE-ASSIGN-010",
+            "RULE-ASSIGN-012",
+        }
+        RUNTIME_RULES = {
+            "RULE-RUNTIME-001",
+            "RULE-RUNTIME-002",
+            "RULE-RUNTIME-003",
+            "RULE-DIFF-001",
+            "RULE-DIFF-002",
+        }
 
         # 1. Structural Gate
         struct_blockers = [
@@ -108,7 +138,15 @@ class FinalizationService:
         other_blockers = [
             v.message for v in quality_report.violations
             if v.severity == ViolationSeverity.BLOCKER
-            and v.rule_id not in (STRUCTURAL_RULES | CONTRACT_RULES | GROUNDING_RULES | ISSUE_RULES)
+            and v.rule_id
+            not in (
+                STRUCTURAL_RULES
+                | CONTRACT_RULES
+                | GROUNDING_RULES
+                | ISSUE_RULES
+                | OWNERSHIP_RULES
+                | RUNTIME_RULES
+            )
         ]
         if other_blockers:
             struct_blockers.extend(other_blockers)
@@ -161,12 +199,53 @@ class FinalizationService:
         else:
             rubrics = getattr(semantic_review, "rubric_audits", []) or []
             missing_or_partial: list[str] = []
+            plan = state.plan
             for r in rubrics:
                 stat = r.get("status") if isinstance(r, dict) else getattr(r, "status", None)
                 rid = r.get("rubric_id") if isinstance(r, dict) else getattr(r, "rubric_id", "R")
-                req_id = r.get("req_id") if isinstance(r, dict) else getattr(r, "req_id", "")
+                raw_req_id = (
+                    r.get("req_id")
+                    if isinstance(r, dict)
+                    else getattr(r, "req_id", "")
+                )
+                req_id = str(raw_req_id) if raw_req_id is not None else ""
+                evidence = r.get("evidence") if isinstance(r, dict) else getattr(r, "evidence", None)
                 if stat in ("MISSING", "PARTIAL") or (stat is not None and str(stat).upper() != "MET"):
                     missing_or_partial.append(f"Rubric {rid} for '{req_id}' is {stat}")
+                elif not evidence:
+                    missing_or_partial.append(
+                        f"Rubric {rid} for '{req_id}' is MET without evidence"
+                    )
+                elif plan is None:
+                    missing_or_partial.append(
+                        f"Rubric {rid} for '{req_id}' has evidence but no plan revision"
+                    )
+                else:
+                    problems: list[str] = []
+                    valid_evidence = 0
+                    for item in evidence:
+                        try:
+                            parsed = (
+                                item
+                                if isinstance(item, VerdictEvidence)
+                                else VerdictEvidence.model_validate(item)
+                            )
+                        except ValidationError:
+                            problems.append("evidence payload is invalid")
+                            continue
+                        problem = validate_evidence(
+                            parsed, requirement_id=req_id, plan=plan
+                        )
+                        if problem is None:
+                            valid_evidence += 1
+                        else:
+                            problems.append(problem)
+                    if valid_evidence == 0:
+                        detail = "; ".join(problems) or "no evidence attached"
+                        missing_or_partial.append(
+                            f"Rubric {rid} for '{req_id}' is MET without valid "
+                            f"deterministic evidence: {detail}"
+                        )
             if missing_or_partial:
                 rubric_passed = False
                 rubric_details = f"Rubric audit failed: {'; '.join(missing_or_partial)}"
@@ -215,12 +294,74 @@ class FinalizationService:
             diagnostics=issue_blockers,
         )
 
+        # 6. Ownership Contract Gate (structured assignment matrix)
+        ownership_blockers = [
+            v.message for v in quality_report.violations
+            if v.rule_id in OWNERSHIP_RULES and v.severity == ViolationSeverity.BLOCKER
+        ]
+        ownership_passed = len(ownership_blockers) == 0
+        pillar_ownership = PillarResult(
+            pillar_id="ownership_contract",
+            name="Ownership Contract Gate",
+            passed=ownership_passed,
+            details=(
+                "Every requirement, step and target file has exactly one owner."
+                if ownership_passed
+                else f"Ownership contract validation failed: {'; '.join(ownership_blockers)}"
+            ),
+            diagnostics=ownership_blockers,
+        )
+
+        # 7. Runtime Scope & Diff Gate
+        runtime_blockers = [
+            v.message for v in quality_report.violations
+            if v.rule_id in RUNTIME_RULES and v.severity == ViolationSeverity.BLOCKER
+        ]
+        runtime_passed = len(runtime_blockers) == 0
+        pillar_runtime = PillarResult(
+            pillar_id="runtime_scope",
+            name="Runtime Scope & Diff Gate",
+            passed=runtime_passed,
+            details=(
+                "All recorded worker executions stayed inside their leased scope."
+                if runtime_passed
+                else f"Runtime scope/diff validation failed: {'; '.join(runtime_blockers)}"
+            ),
+            diagnostics=runtime_blockers,
+        )
+
+        # 8. Risk-Based Human Review Gate
+        human_review = evaluate_human_review(state, quality_report, semantic_review)
+        human_passed = not human_review.required
+        if human_review.required:
+            human_details = (
+                "Human review required before FINAL: "
+                + "; ".join(trigger.message for trigger in human_review.triggers)
+            )
+        elif human_review.triggers and human_review.approved:
+            human_details = (
+                "Human review triggers acknowledged by an approval for plan "
+                f"revision {human_review.plan_revision}."
+            )
+        else:
+            human_details = "No risk-based human review trigger detected."
+        pillar_human = PillarResult(
+            pillar_id="human_review",
+            name="Human Review Gate",
+            passed=human_passed,
+            details=human_details,
+            diagnostics=[t.message for t in human_review.triggers],
+        )
+
         pillar_results = {
             "structural": pillar_structural,
             "contract_deliverable": pillar_contract,
+            "ownership_contract": pillar_ownership,
             "rubric_audit": pillar_rubric,
             "grounding_anti_pattern": pillar_grounding,
             "issue_resolution": pillar_issues,
+            "runtime_scope": pillar_runtime,
+            "human_review": pillar_human,
         }
 
         # If already cancelled or terminated early
@@ -244,25 +385,71 @@ class FinalizationService:
                 pillar_results=pillar_results,
             )
 
-        can_finalize = all(p.passed for p in pillar_results.values())
-        if can_finalize:
+        # A risk trigger pauses the run for an explicit human decision, even when
+        # some gates also failed: the human needs to see the whole picture.
+        if human_review.required:
+            failed = [p.name for p in pillar_results.values() if not p.passed]
             return FinalizationDecision(
-                target_status=RunStatus.FINAL,
-                reason="Candidate plan satisfied all 5-pillar finalization gates (Structural, Contract & Deliverable, Rubric Audit, Grounding, Issue Resolution).",
-                quality_report=quality_report,
-                can_finalize=True,
-                pillar_results=pillar_results,
-            )
-        else:
-            failed_pillars = [p.name for p in pillar_results.values() if not p.passed]
-            failed_reasons = [p.details for p in pillar_results.values() if not p.passed]
-            return FinalizationDecision(
-                target_status=RunStatus.PARTIAL,
-                reason=f"5-Pillar finalization check failed [{', '.join(failed_pillars)}]: {'; '.join(failed_reasons)}",
+                target_status=RunStatus.WAITING_FOR_HUMAN_REVIEW,
+                reason=(
+                    "8-Pillar finalization requires human review "
+                    f"[{', '.join(failed)}]: {human_details}"
+                ),
                 quality_report=quality_report,
                 can_finalize=False,
                 pillar_results=pillar_results,
             )
+
+        hard_pillars = (
+            "structural",
+            "contract_deliverable",
+            "ownership_contract",
+            "rubric_audit",
+            "grounding_anti_pattern",
+            "issue_resolution",
+        )
+        hard_failures = [
+            pillar_results[key]
+            for key in hard_pillars
+            if not pillar_results[key].passed
+        ]
+        if hard_failures:
+            failed_pillars = [p.name for p in hard_failures]
+            failed_reasons = [p.details for p in hard_failures]
+            return FinalizationDecision(
+                target_status=RunStatus.PARTIAL,
+                reason=(
+                    f"8-Pillar finalization check failed "
+                    f"[{', '.join(failed_pillars)}]: {'; '.join(failed_reasons)}"
+                ),
+                quality_report=quality_report,
+                can_finalize=False,
+                pillar_results=pillar_results,
+            )
+
+        if not pillar_runtime.passed:
+            return FinalizationDecision(
+                target_status=RunStatus.PARTIAL,
+                reason=(
+                    "8-Pillar finalization check failed "
+                    f"[{pillar_runtime.name}]: {pillar_runtime.details}"
+                ),
+                quality_report=quality_report,
+                can_finalize=False,
+                pillar_results=pillar_results,
+            )
+
+        return FinalizationDecision(
+            target_status=RunStatus.FINAL,
+            reason=(
+                "Candidate plan satisfied all 8 finalization gates (Structural, "
+                "Contract & Deliverable, Ownership, Rubric Audit, Grounding, "
+                "Issue Resolution, Runtime Scope, Human Review)."
+            ),
+            quality_report=quality_report,
+            can_finalize=True,
+            pillar_results=pillar_results,
+        )
 
 
 FinalizationEvaluator = FinalizationService

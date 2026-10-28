@@ -23,6 +23,7 @@ from astra_multi.api.schemas import (
     AnswerQuestionRequest,
     CancelRunRequest,
     CreateRunRequest,
+    HumanReviewDecisionRequest,
     RunDetailResponse,
     RunLogEntry,
     RunSummaryResponse,
@@ -709,6 +710,57 @@ def create_app(
         finally:
             store.release(lease)
 
+    @app.post(
+        "/api/runs/{run_id}/human-review",
+        summary="Record a human decision for a run waiting on risk review",
+    )
+    async def decide_human_review(
+        run_id: str, body: HumanReviewDecisionRequest
+    ) -> dict[str, Any]:
+        try:
+            state = store.load(run_id)
+        except KeyError:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Run {run_id} not found.",
+            )
+        if state.run.status != RunStatus.WAITING_FOR_HUMAN_REVIEW:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    f"Run is not waiting for human review "
+                    f"(status={state.run.status.value})."
+                ),
+            )
+        lease = store.acquire(run_id, owner="api-user", ttl=30)
+        try:
+            ctrl = WorkflowController(store, lease, actor="api-user")
+            if body.approve:
+                updated = ctrl.approve_human_review(
+                    reviewer=body.reviewer, reason=body.reason
+                )
+                if app.state.auto_start_worker:
+                    worker.start_run(run_id)
+                return {
+                    "run_id": run_id,
+                    "status": updated.run.status.value,
+                    "approved": True,
+                    "message": "Human review approved; run resumed.",
+                }
+            updated = ctrl.transition_phase(
+                state.run.phase,
+                RunStatus.PARTIAL,
+                reason=f"Human review rejected: {body.reason}",
+            )
+            return {
+                "run_id": run_id,
+                "status": updated.run.status.value,
+                "approved": False,
+                "message": "Human review rejected; run marked PARTIAL.",
+            }
+        finally:
+            store.release(lease)
+
     @app.post("/api/runs/{run_id}/cancel", summary="Cancel an active run")
     async def cancel_run(run_id: str, body: CancelRunRequest) -> dict[str, Any]:
         # Stop background worker task if active
@@ -765,7 +817,11 @@ def create_app(
                 detail=f"Run {run_id} not found.",
             )
         is_active_task = worker.is_running(run_id)
-        is_active_status = state.run.status in (RunStatus.RUNNING, RunStatus.WAITING_FOR_INPUT)
+        is_active_status = state.run.status in (
+            RunStatus.RUNNING,
+            RunStatus.WAITING_FOR_INPUT,
+            RunStatus.WAITING_FOR_HUMAN_REVIEW,
+        )
         if (is_active_task or is_active_status) and not force:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
@@ -890,6 +946,20 @@ def create_app(
             finally:
                 store.release(lease)
         else:
+            if (
+                decision.target_status == RunStatus.WAITING_FOR_HUMAN_REVIEW
+                and state.run.status != RunStatus.WAITING_FOR_HUMAN_REVIEW
+            ):
+                lease = store.acquire(run_id, owner="quality-service", ttl=30)
+                try:
+                    ctrl = WorkflowController(store, lease, actor="P4-quality-service")
+                    ctrl.transition_phase(
+                        state.run.phase,
+                        RunStatus.WAITING_FOR_HUMAN_REVIEW,
+                        reason=decision.reason,
+                    )
+                finally:
+                    store.release(lease)
             blocker_msgs = [
                 v.message
                 for v in decision.quality_report.violations

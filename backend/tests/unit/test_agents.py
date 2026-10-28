@@ -2,6 +2,7 @@
 
 import tempfile
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 from pydantic import ValidationError
@@ -10,6 +11,7 @@ from astra_multi.agents.roles import (
     AnalysisOutput,
     ProposalOutput,
     ReviewOutput,
+    StepDraft,
     SynthesizerOutput,
     format_independent_analysis_prompt,
 )
@@ -110,6 +112,36 @@ def test_synthesizer_output_schema():
     synth = SynthesizerOutput.model_validate(synth_data)
     assert len(synth.steps) == 1
     assert synth.steps[0].objective == "Setup schema migration tool"
+
+
+def test_plan_steps_require_worker_file_ownership_contract():
+    """Synthesizer output carries explicit worker ownership and file boundaries."""
+    draft = StepDraft(
+        objective="Implement backend API",
+        worker_role="backend",
+        owned_files=["backend/src/api.py"],
+        requirement_ids=["REQ-001"],
+        validation="pytest passes",
+        deliverables=["API implementation"],
+        completion_criteria=["Endpoint responds"],
+    )
+    assert draft.worker_role == "backend"
+    assert draft.owned_files == ["backend/src/api.py"]
+
+
+def test_synthesizer_prompt_requires_non_overlapping_worker_assignments():
+    """The backend contract tells the worker to emit ownership and overlap rules."""
+    from astra_multi.agents.roles import format_synthesize_prompt
+
+    messages = format_synthesize_prompt(
+        bundle=MagicMock(content="context"),
+        proposal=MagicMock(model_dump=lambda **_: {}),
+        review=MagicMock(model_dump=lambda **_: {}),
+    )
+    prompt = "\n".join(message["content"] for message in messages)
+    assert "worker_role" in prompt
+    assert "owned_files" in prompt
+    assert "must not overlap" in prompt.lower()
 
 
 def test_independent_analysis_context_isolation():
