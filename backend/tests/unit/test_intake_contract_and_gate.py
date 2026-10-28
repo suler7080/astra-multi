@@ -7,23 +7,21 @@ from __future__ import annotations
 import tempfile
 from pathlib import Path
 
+from astra_multi.context.bundle import ContextBuilder
 from astra_multi.domain.fixtures import sample_state
 from astra_multi.domain.models import (
     ArtifactType,
     Requirement,
     RequirementType,
-    RunPhase,
     TaskSpec,
 )
 from astra_multi.gateway.model_gateway import GatewayConfig, ModelGateway
-from astra_multi.context.bundle import ContextBuilder
-from astra_multi.orchestration.controller import WorkflowController
 from astra_multi.orchestration.contract_extractor import (
     classify_all,
     classify_requirement,
     detect_deliverable_gaps,
-    reconcile_intake_contracts,
 )
+from astra_multi.orchestration.controller import WorkflowController
 from astra_multi.orchestration.graph import (
     WorkflowContext,
     create_workflow_graph,
@@ -138,14 +136,16 @@ def test_intake_gate_reruns_and_synthesizes_missing_contracts_in_graph():
             )
             store.create(task_with_gaps, state.run, state.snapshot)
 
-            from astra_multi.gateway.model_gateway import ModelResult
             from astra_multi.agents.roles import (
                 AnalysisOutput,
+                AssignmentMatrixDraft,
                 ProposalOutput,
                 ReviewOutput,
-                SynthesizerOutput,
                 StepDraft,
+                SynthesizerOutput,
+                WorkerAssignmentDraft,
             )
+            from astra_multi.gateway.model_gateway import ModelResult
 
             def mock_adapter(provider, role, messages, output_schema=None, **kwargs):
                 if output_schema == AnalysisOutput:
@@ -158,7 +158,31 @@ def test_intake_gate_reruns_and_synthesizes_missing_contracts_in_graph():
                     curr_task = store.load(state.run.id).task
                     all_ids = [r.id for r in curr_task.requirements]
                     content = SynthesizerOutput(
-                        steps=[StepDraft(objective="step", requirement_ids=all_ids, targets=[], validation="ok", deliverables=["a"], completion_criteria=["b"])],
+                        steps=[
+                            StepDraft(
+                                objective="step",
+                                worker_role="dev1",
+                                owned_files=["src/main.js"],
+                                requirement_ids=all_ids,
+                                targets=[],
+                                validation="ok",
+                                deliverables=["a"],
+                                completion_criteria=["b"],
+                            )
+                        ],
+                        assignment_matrix=AssignmentMatrixDraft(
+                            workers=[
+                                WorkerAssignmentDraft(
+                                    worker_role="dev1",
+                                    display_name="Developer 1",
+                                    responsibilities=["Implement the plan"],
+                                    owned_files=["src/main.js"],
+                                    requirement_ids=all_ids,
+                                    step_ids=["STEP-1"],
+                                )
+                            ],
+                            shared_files=[],
+                        ),
                         decisions=[], risks=[], issues_addressed=[], rationale="ok"
                     )
                 else:

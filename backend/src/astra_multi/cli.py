@@ -285,7 +285,11 @@ def cmd_delete(store: SQLiteStore, args: argparse.Namespace) -> int:
     except Exception:
         print(f"Error: Run {args.run_id} not found.", file=sys.stderr)
         return 1
-    if state.run.status.value in ("RUNNING", "WAITING_FOR_INPUT") and not args.force:
+    if state.run.status.value in (
+        "RUNNING",
+        "WAITING_FOR_INPUT",
+        "WAITING_FOR_HUMAN_REVIEW",
+    ) and not args.force:
         print(
             f"Error: Run {args.run_id} is active ({state.run.status.value}). "
             "Cancel it first or retry with --force.",
@@ -381,6 +385,22 @@ def cmd_finalize(store: SQLiteStore, args: argparse.Namespace) -> int:
         print(f"Run {args.run_id} finalized as FINAL.")
         return 0
     else:
+        if (
+            decision.target_status == RunStatus.WAITING_FOR_HUMAN_REVIEW
+            and state.run.status != RunStatus.WAITING_FOR_HUMAN_REVIEW
+        ):
+            lease = store.acquire(args.run_id, owner="quality-service", ttl=30)
+            try:
+                controller = WorkflowController(
+                    store, lease, actor="P4-quality-service"
+                )
+                controller.transition_phase(
+                    state.run.phase,
+                    RunStatus.WAITING_FOR_HUMAN_REVIEW,
+                    reason=decision.reason,
+                )
+            finally:
+                store.release(lease)
         print(f"Run {args.run_id} cannot be finalized as FINAL. Status: {decision.target_status.value}. Reason: {decision.reason}")
         return 1
 

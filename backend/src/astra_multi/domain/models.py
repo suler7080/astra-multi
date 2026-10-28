@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Annotated, Any, Literal, Self
 
@@ -13,8 +13,11 @@ from pydantic import (
     ConfigDict,
     Field,
     JsonValue,
+    field_validator,
     model_validator,
 )
+
+from .paths import normalize_repo_path, path_key
 
 ID = Annotated[str, Field(min_length=1, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]*$")]
 Text = Annotated[
@@ -74,6 +77,7 @@ class RunPhase(str, Enum):
 class RunStatus(str, Enum):
     RUNNING = "RUNNING"
     WAITING_FOR_INPUT = "WAITING_FOR_INPUT"
+    WAITING_FOR_HUMAN_REVIEW = "WAITING_FOR_HUMAN_REVIEW"
     FINAL = "FINAL"
     PARTIAL = "PARTIAL"
     FAILED = "FAILED"
@@ -83,6 +87,31 @@ class RunStatus(str, Enum):
 TERMINAL = frozenset(
     {RunStatus.FINAL, RunStatus.PARTIAL, RunStatus.FAILED, RunStatus.CANCELLED}
 )
+
+
+class FileOperation(str, Enum):
+    READ = "read"
+    WRITE = "write"
+    CREATE = "create"
+    DELETE = "delete"
+
+
+class ExecutionStatus(str, Enum):
+    PASSED = "PASSED"
+    DENIED = "DENIED"
+    FAILED = "FAILED"
+
+
+class VerdictEvidence(Contract):
+    """Machine-checkable proof attached to a semantic PASS/MET verdict."""
+
+    req_id: ID
+    step_id: ID | None = None
+    checked_field: Text
+    checked_path: Text | None = None
+    expected: Text
+    actual: Text
+    validator_rule: Text
 
 
 class IssueSeverity(str, Enum):
@@ -363,6 +392,8 @@ class Decision(RunEntity):
 
 class PlanStep(Entity):
     objective: Text
+    worker_role: Text = "unassigned"
+    owned_files: list[Text] = Field(default_factory=list)
     phase_type: StepPhaseType = StepPhaseType.CORE_MODULE
     requirement_fulfillments: list[RequirementFulfillment] = Field(default_factory=list)
     requirement_ids: list[ID] = Field(default_factory=list)
@@ -419,6 +450,201 @@ class PlanStep(Entity):
         return self
 
 
+class WorkerExecutionScope(Entity):
+    """Execution policy derived exclusively from a committed ``PlanStep``.
+
+    Workers never supply this file list themselves; callers construct the scope
+    from the canonical plan step so the plan remains the single source of
+    truth.
+    """
+
+    run_id: ID
+    plan_revision: Revision
+    step_id: ID
+    worker_role: Text
+    owned_files: list[Text] = Field(default_factory=list)
+    allowed_operations: list[FileOperation] = Field(
+        default_factory=lambda: list(FileOperation), min_length=1
+    )
+    expires_at: UTC
+
+    @field_validator("owned_files", mode="before")
+    @classmethod
+    def normalize_owned_files(cls, value: Any) -> list[str]:
+        if value is None:
+            return []
+        if not isinstance(value, (list, tuple, set)):
+            raise ValueError("owned_files must be a list")
+        normalized = [normalize_repo_path(str(item)) for item in value]
+        if len({path_key(item) for item in normalized}) != len(normalized):
+            raise ValueError("owned_files contains duplicate paths")
+        return normalized
+
+    @model_validator(mode="after")
+    def scope_contract(self) -> Self:
+        if self.expires_at <= self.created_at:
+            raise ValueError("scope must expire after it is created")
+        return self
+
+    @classmethod
+    def from_plan_step(
+        cls,
+        *,
+        run_id: str,
+        plan_revision: int,
+        step: PlanStep,
+        allowed_operations: Sequence[FileOperation] | None = None,
+        ttl_seconds: int = 900,
+        now: datetime | None = None,
+    ) -> Self:
+        if not step.worker_role or step.worker_role == "unassigned":
+            raise ValueError("cannot create a worker scope for an unassigned step")
+        if ttl_seconds <= 0:
+            raise ValueError("scope ttl must be positive")
+        created = now or utc_now()
+        return cls(
+            id=f"SCOPE-{step.id}-{plan_revision}",
+            run_id=run_id,
+            plan_revision=plan_revision,
+            step_id=step.id,
+            worker_role=step.worker_role,
+            owned_files=list(step.owned_files),
+            allowed_operations=(
+                list(allowed_operations)
+                if allowed_operations is not None
+                else list(FileOperation)
+            ),
+            created_at=created,
+            expires_at=created + timedelta(seconds=ttl_seconds),
+        )
+
+
+class FileLease(Entity):
+    """Lease for one canonical file path held by one execution step."""
+
+    run_id: ID
+    scope_id: ID
+    step_id: ID
+    worker_role: Text
+    path: Text
+    expires_at: UTC
+
+    @field_validator("path", mode="before")
+    @classmethod
+    def normalize_path(cls, value: Any) -> str:
+        return normalize_repo_path(str(value))
+
+    @model_validator(mode="after")
+    def lease_contract(self) -> Self:
+        if self.expires_at <= self.created_at:
+            raise ValueError("file lease must expire after it is created")
+        return self
+
+    @property
+    def key(self) -> str:
+        return path_key(self.path)
+
+    def is_expired(self, now: datetime) -> bool:
+        return self.expires_at <= now
+
+
+class WorkerExecutionRecord(RunEntity):
+    """Audit record for one worker step execution and its post-run diff."""
+
+    plan_revision: Revision
+    step_id: ID
+    scope_id: ID
+    worker_role: Text
+    status: ExecutionStatus
+    started_at: UTC
+    finished_at: UTC
+    diff_passed: bool = True
+    changed_files: list[Text] = Field(default_factory=list)
+    created_files: list[Text] = Field(default_factory=list)
+    deleted_files: list[Text] = Field(default_factory=list)
+    violations: list[Text] = Field(default_factory=list)
+
+    @field_validator(
+        "changed_files", "created_files", "deleted_files", mode="before"
+    )
+    @classmethod
+    def normalize_changed_files(cls, value: Any) -> list[str]:
+        if value is None:
+            return []
+        if not isinstance(value, (list, tuple, set)):
+            raise ValueError("file lists must be sequences")
+        normalized = [normalize_repo_path(str(item)) for item in value]
+        return list(dict.fromkeys(normalized))
+
+    @model_validator(mode="after")
+    def execution_contract(self) -> Self:
+        if self.finished_at < self.started_at:
+            raise ValueError("execution cannot finish before it starts")
+        if self.status == ExecutionStatus.PASSED:
+            if not self.diff_passed:
+                raise ValueError("passed execution requires a passing diff")
+            if self.violations:
+                raise ValueError("passed execution cannot contain violations")
+        if self.status in {ExecutionStatus.DENIED, ExecutionStatus.FAILED}:
+            if not self.violations:
+                raise ValueError("denied/failed execution requires a violation reason")
+        return self
+
+
+class SharedFilePolicy(Contract):
+    path: Text
+    owner_worker: Text
+    access: Literal["owner_only", "read_only"] = "owner_only"
+    reason: Text | None = None
+
+    @field_validator("path", mode="before")
+    @classmethod
+    def normalize_path(cls, value: Any) -> str:
+        return normalize_repo_path(str(value))
+
+
+class WorkerAssignment(Contract):
+    worker_role: ID
+    display_name: Text
+    responsibilities: list[Text] = Field(min_length=1)
+    owned_files: list[Text] = Field(min_length=1)
+    requirement_ids: list[ID] = Field(default_factory=list)
+    step_ids: list[ID] = Field(default_factory=list)
+
+    @field_validator("owned_files", mode="before")
+    @classmethod
+    def normalize_owned_files(cls, value: Any) -> list[str]:
+        if not isinstance(value, (list, tuple, set)):
+            raise ValueError("owned_files must be a list")
+        normalized = [normalize_repo_path(str(item)) for item in value]
+        if len({path_key(item) for item in normalized}) != len(normalized):
+            raise ValueError("worker owns a duplicate path")
+        return normalized
+
+
+class AssignmentMatrix(Contract):
+    """Structured ownership contract; replaces keyword/table heuristics."""
+
+    workers: list[WorkerAssignment] = Field(min_length=1)
+    shared_files: list[SharedFilePolicy] = Field(default_factory=list)
+    expected_worker_count: int | None = Field(default=None, ge=1)
+
+    @model_validator(mode="after")
+    def matrix_contract(self) -> Self:
+        roles = [worker.worker_role for worker in self.workers]
+        if len(set(roles)) != len(roles):
+            raise ValueError("duplicate worker_role in assignment matrix")
+        shared_keys = [path_key(item.path) for item in self.shared_files]
+        if len(set(shared_keys)) != len(shared_keys):
+            raise ValueError("duplicate shared file policy")
+        for item in self.shared_files:
+            if item.owner_worker not in roles:
+                raise ValueError(
+                    f"shared file owner {item.owner_worker!r} is not in the matrix"
+                )
+        return self
+
+
 class DesignArtifact(Entity):
     kind: Literal[
         "state_machine",
@@ -443,12 +669,21 @@ class PlanRevision(RunEntity):
     risks: list[Text] = Field(default_factory=list)
     issues_addressed: list[ID] = Field(default_factory=list)
     design_artifacts: list[DesignArtifact] = Field(default_factory=list)
+    assignment_matrix: AssignmentMatrix | None = None
 
     @model_validator(mode="after")
     def step_graph(self) -> Self:
         unique(self.steps)
         unique(self.decisions)
         unique(self.design_artifacts)
+        if self.assignment_matrix is not None:
+            matrix_roles = {w.worker_role for w in self.assignment_matrix.workers}
+            for step in self.steps:
+                if step.worker_role != "unassigned" and step.worker_role not in matrix_roles:
+                    raise ValueError(
+                        f"step {step.id} references worker_role "
+                        f"{step.worker_role!r} missing from assignment matrix"
+                    )
         if self.revision != self.based_on_revision + 1:
             raise ValueError("plan revisions must be consecutive")
         remaining = {step.id: set(step.dependencies) for step in self.steps}
@@ -462,6 +697,16 @@ class PlanRevision(RunEntity):
                 key: deps - ready for key, deps in remaining.items() if key not in ready
             }
         return self
+
+
+class HumanReviewApproval(RunEntity):
+    """Explicit human acknowledgement for a specific plan revision."""
+
+    plan_revision: Revision
+    reviewer: Text
+    reason: Text
+    scope: Literal["finalization"] = "finalization"
+    approved_at: UTC = Field(default_factory=utc_now)
 
 
 class ToolCall(RunEntity):
@@ -578,6 +823,8 @@ class RunState(Contract):
     questions: list[Question] = Field(default_factory=list)
     validations: list[ValidationResult] = Field(default_factory=list)
     reservations: list[BudgetReservation] = Field(default_factory=list)
+    execution_records: list[WorkerExecutionRecord] = Field(default_factory=list)
+    human_review_approvals: list[HumanReviewApproval] = Field(default_factory=list)
 
     @property
     def task(self) -> TaskSpec:
@@ -618,6 +865,8 @@ class RunState(Contract):
             self.questions,
             self.validations,
             self.reservations,
+            self.execution_records,
+            self.human_review_approvals,
         ]
         entities: list[RunEntity] = [
             entity for group in collections for entity in group
@@ -633,6 +882,9 @@ class RunState(Contract):
         claims = {c.id for c in self.claims}
         issues = {i.id for i in self.issues}
         steps = {s.id for p in self.plans for s in p.steps}
+        step_by_key = {
+            (p.revision, s.id): s for p in self.plans for s in p.steps
+        }
 
         def refs(values: list[str], allowed: set[str]) -> None:
             if not set(values) <= allowed:
@@ -712,4 +964,33 @@ class RunState(Contract):
                 tool = tool_by_id[validation.tool_call_id]
                 if tool.finished_at is None or validation.exit_code != tool.exit_code:
                     raise ValueError("validation must match a completed tool call")
+        for record in self.execution_records:
+            executed_step = step_by_key.get(
+                (record.plan_revision, record.step_id)
+            )
+            if executed_step is None:
+                raise ValueError(
+                    "execution record references an unknown plan revision/step"
+                )
+            if record.worker_role != executed_step.worker_role:
+                raise ValueError("execution record worker_role does not match plan step")
+            allowed = {path_key(item) for item in executed_step.owned_files}
+            changed = {
+                path_key(item)
+                for item in (
+                    record.changed_files
+                    + record.created_files
+                    + record.deleted_files
+                )
+            }
+            if record.status == ExecutionStatus.PASSED:
+                if not record.diff_passed:
+                    raise ValueError("passed execution requires a passing diff")
+                if not changed <= allowed:
+                    raise ValueError(
+                        "passed execution changed files outside step scope"
+                    )
+        for approval in self.human_review_approvals:
+            if approval.plan_revision > len(self.plans):
+                raise ValueError("human review approval references unknown plan revision")
         return self

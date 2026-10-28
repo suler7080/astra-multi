@@ -248,7 +248,12 @@ class RunWorker:
                 # one first, fall back to the last known lease only if takeover
                 # is rejected (i.e. current lease is still valid).
                 state = self.store.load(run_id)
-                if state.run.status not in (RunStatus.FINAL, RunStatus.PARTIAL, RunStatus.CANCELLED):
+                if state.run.status not in (
+                    RunStatus.FINAL,
+                    RunStatus.PARTIAL,
+                    RunStatus.CANCELLED,
+                    RunStatus.WAITING_FOR_HUMAN_REVIEW,
+                ):
                     try:
                         failure_lease = self.store.acquire(
                             run_id, owner=owner, ttl=FAILURE_LEASE_TTL
@@ -358,6 +363,7 @@ class RunWorker:
                     RunStatus.PARTIAL.value,
                     RunStatus.FAILED.value,
                     RunStatus.CANCELLED.value,
+                    RunStatus.WAITING_FOR_HUMAN_REVIEW.value,
                 ):
                     # Check one last time for any remaining events
                     final_events = self.store.events(run_id, after=current_seq)

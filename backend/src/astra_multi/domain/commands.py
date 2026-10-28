@@ -11,6 +11,7 @@ from .models import (
     Contract,
     Decision,
     Evidence,
+    HumanReviewApproval,
     Issue,
     IssueResolution,
     IssueStatus,
@@ -24,6 +25,7 @@ from .models import (
     Text,
     ToolCall,
     ValidationResult,
+    WorkerExecutionRecord,
 )
 
 
@@ -50,6 +52,8 @@ Record = (
     | Question
     | ValidationResult
     | BudgetReservation
+    | WorkerExecutionRecord
+    | HumanReviewApproval
 )
 
 

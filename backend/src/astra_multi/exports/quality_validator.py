@@ -14,14 +14,21 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum
 
+from astra_multi.domain.assignment import (
+    ASSIGNMENT_HUMAN_REVIEW_RULES,
+    task_requires_assignment,
+    validate_assignment_contract,
+)
 from astra_multi.domain.models import (
     ArtifactType,
+    ExecutionStatus,
     IssueSeverity,
     IssueStatus,
     RunState,
     StepPhaseType,
     ValidationStatus,
 )
+from astra_multi.domain.paths import path_key
 from astra_multi.domain.policies import is_open_issue_status
 
 
@@ -367,7 +374,25 @@ class StructuralQualityValidator:
                     )
                 )
 
+        if task_requires_assignment(task):
+            for violation in validate_assignment_contract(task, plan):
+                severity = (
+                    ViolationSeverity.WARNING
+                    if violation.rule_id in ASSIGNMENT_HUMAN_REVIEW_RULES
+                    else ViolationSeverity.BLOCKER
+                )
+                violations.append(
+                    QualityViolation(
+                        rule_id=violation.rule_id,
+                        severity=severity,
+                        entity_ref=violation.entity_ref,
+                        message=violation.message,
+                        remediation=violation.remediation,
+                    )
+                )
+
         # 4. Check step deliverables & completion criteria
+
         for step in plan.steps:
             if not step.deliverables:
                 violations.append(
@@ -532,6 +557,91 @@ class StructuralQualityValidator:
                                 remediation="Provide concrete code snippet demonstrating implementation.",
                             )
                         )
+
+        # 4b. Runtime execution records and post-run diff (second defense layer)
+        step_by_key = {
+            (revision.revision, step.id): step
+            for revision in state.plans
+            for step in revision.steps
+        }
+        for record in state.execution_records:
+            step = step_by_key.get((record.plan_revision, record.step_id))
+            if step is None:
+                violations.append(
+                    QualityViolation(
+                        rule_id="RULE-RUNTIME-001",
+                        severity=ViolationSeverity.BLOCKER,
+                        entity_ref=f"execution:{record.id}",
+                        message=(
+                            "Execution record references unknown plan "
+                            f"revision/step: {record.plan_revision}/{record.step_id}"
+                        ),
+                        remediation="Record executions only for committed plan steps.",
+                    )
+                )
+                continue
+            if record.worker_role != step.worker_role:
+                violations.append(
+                    QualityViolation(
+                        rule_id="RULE-RUNTIME-002",
+                        severity=ViolationSeverity.BLOCKER,
+                        entity_ref=f"execution:{record.id}",
+                        message=(
+                            f"Execution worker_role {record.worker_role!r} does not match "
+                            f"step role {step.worker_role!r}."
+                        ),
+                        remediation="Rebuild the execution scope from the committed plan step.",
+                    )
+                )
+            if record.status != ExecutionStatus.PASSED:
+                violations.append(
+                    QualityViolation(
+                        rule_id="RULE-RUNTIME-003",
+                        severity=ViolationSeverity.BLOCKER,
+                        entity_ref=f"execution:{record.id}",
+                        message=(
+                            f"Execution for step {record.step_id} ended with status "
+                            f"{record.status.value}: {'; '.join(record.violations)}"
+                        ),
+                        remediation="Resolve the denial/failure and rerun the step under a valid scope.",
+                    )
+                )
+            if not record.diff_passed:
+                violations.append(
+                    QualityViolation(
+                        rule_id="RULE-DIFF-001",
+                        severity=ViolationSeverity.BLOCKER,
+                        entity_ref=f"execution:{record.id}",
+                        message=(
+                            f"Post-run diff for step {record.step_id} failed scope verification: "
+                            f"{'; '.join(record.violations)}"
+                        ),
+                        remediation="Revert out-of-scope changes and rerun the step through the broker.",
+                    )
+                )
+            allowed = {path_key(item) for item in step.owned_files}
+            changed = {
+                path_key(item)
+                for item in (
+                    record.changed_files
+                    + record.created_files
+                    + record.deleted_files
+                )
+            }
+            outside = sorted(changed - allowed)
+            if outside:
+                violations.append(
+                    QualityViolation(
+                        rule_id="RULE-DIFF-002",
+                        severity=ViolationSeverity.BLOCKER,
+                        entity_ref=f"execution:{record.id}",
+                        message=(
+                            f"Execution for step {record.step_id} changed files outside "
+                            f"owned_files: {outside}"
+                        ),
+                        remediation="Changes must stay inside the step's declared owned files.",
+                    )
+                )
 
         # 5. Check validation execution invariants
         for val in state.validations:
